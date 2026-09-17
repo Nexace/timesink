@@ -16,6 +16,7 @@ export const games = [
     motif: "dome",
     version: "1.2",
     status: "live",
+    featured: true,
     added: "2026-09-16",
   },
   {

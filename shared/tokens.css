@@ -24,10 +24,10 @@
 
 :root {
   --bg: #030308;
-  --surface: #0b0e14;
-  --surface-2: #10141d;
-  --surface-3: #151b28;
-  --panel-bg: rgba(11, 14, 20, 0.85);
+  --surface: #070a11;
+  --surface-2: #0b0e14;
+  --surface-3: #10141d;
+  --panel-bg: rgba(7, 10, 17, 0.88);
   --border: #1e2638;
   --border-bright: #2e3a55;
   --border-cyan: rgba(0, 240, 255, 0.3);
@@ -94,6 +94,16 @@
   --dur-slow: 320ms;
   --ease-snap: cubic-bezier(0.2, 0, 0, 1);
 
+  --chrome: linear-gradient(
+    180deg,
+    #fff6e8 4%,
+    #ffd9a8 30%,
+    #ff5500 52%,
+    #7a1e50 60%,
+    #ffb8ec 78%,
+    #fff6e8 96%
+  );
+  --horizon-line: rgba(255, 85, 0, 0.65);
   --horizon-magenta: rgba(255, 0, 127, 0.18);
   --horizon-flare: rgba(255, 85, 0, 0.15);
   --horizon-purple: rgba(123, 47, 247, 0.12);
@@ -253,6 +263,7 @@
   background-image:
     repeating-linear-gradient(to right, rgba(0, 240, 255, 0.03) 0 1px, transparent 1px 32px),
     repeating-linear-gradient(to bottom, rgba(0, 240, 255, 0.03) 0 1px, transparent 1px 32px);
+  mask-image: linear-gradient(to bottom, black 0%, black 28%, transparent 72%);
 }
 
 .cosmos__planet {

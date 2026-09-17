@@ -132,7 +132,7 @@ function renderCard(game) {
   const color = ACCENTS[game.accent] ?? ACCENTS.cyan;
   const tags = Array.isArray(game.tags) ? game.tags : [];
   const status = live
-    ? `v${escapeHtml(game.version ?? "1.0")} // ACTIVE`
+    ? `v${escapeHtml(game.version ?? "1.0")} // ACTIVE${game.featured ? " // FLAGSHIP" : ""}`
     : `v${escapeHtml(game.version ?? "0.1")} // STANDBY`;
   const fresh = live && isNew(game) ? `<span class="badge card__new">NEW</span>` : "";
   const tagChips = tags.map((t) => `<span class="chip">${escapeHtml(t)}</span>`).join("");
@@ -149,12 +149,13 @@ function renderCard(game) {
       <span class="card__title">${escapeHtml(game.title)}</span>
       <p class="card__tagline">${escapeHtml(game.tagline ?? "")}</p>
       <div class="card__tags">${tagChips}</div>
-      <span class="card__cta"><span>${live ? "LAUNCH" : "STANDBY"}</span><span aria-hidden="true">&gt;&gt;</span></span>
+      <span class="card__cta"><span>${live ? "LAUNCH" : "IN PRODUCTION"}</span><span aria-hidden="true">&gt;&gt;</span></span>
     </div>
   `;
 
   if (live) {
-    return `<a class="card" href="${gameHref(game.slug)}" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}">${inner}</a>`;
+    const featured = game.featured ? " card--featured" : "";
+    return `<a class="card${featured}" href="${gameHref(game.slug)}" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}">${inner}</a>`;
   }
   return `<div class="card card--soon" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}" data-title="${escapeHtml(game.title)}" tabindex="0" role="button" aria-disabled="true" aria-label="${escapeHtml(game.title)} — coming soon">${inner}</div>`;
 }

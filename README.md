@@ -1,8 +1,9 @@
 # SYS://ARCADE.NET
 
 A cabinet of small, original browser experiments, styled as an 80s deep-space
-terminal. No frameworks, no build step, no trackers — plain HTML, CSS, and
-JavaScript served as static files.
+terminal. No frameworks, no build step, no first-party trackers — plain HTML,
+CSS, and JavaScript served as static files. Display type (Allotropic) loads
+from the Adobe Fonts CDN; everything else is self-hosted.
 
 Live experiment: **Mars Base**, a turn-based colony sim. Grow a Mars settlement
 to 50 colonists and keep it self-sustaining, one sol at a time.

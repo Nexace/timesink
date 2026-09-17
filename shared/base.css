@@ -402,6 +402,7 @@ h4 {
   background: var(--action);
   border-color: var(--action);
   color: #050508;
+  font-weight: 700;
   box-shadow: var(--glow-action), var(--shadow-1);
 }
 

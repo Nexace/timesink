@@ -1,11 +1,18 @@
-import { SITE } from "./registry.js";
+import { SITE, games, liveGames } from "./registry.js";
 import { icon } from "./icons.js";
 import { createPrefStore } from "./storage.js";
 import { setSoundEnabled, isSoundEnabled, onSoundStateChange } from "./sound.js";
 
 const prefs = createPrefStore("prefs");
 
-const LOGO_MARK = `<svg class="shell__mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h18l-6.5 8v7.6L9.5 22v-10L3 4Z"/></svg>`;
+const PHOSPHORS = [
+  { id: "full", label: "FULL" },
+  { id: "green", label: "GRN" },
+  { id: "amber", label: "AMB" },
+  { id: "cyan", label: "CYN" },
+];
+
+let clockStarted = false;
 
 export function escapeHtml(value) {
   return String(value ?? "")
@@ -25,35 +32,39 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   const accent = body.dataset.accent;
   if (accent) document.documentElement.dataset.accent = accent;
 
-  body.classList.add("shell-mounted");
-
-  const starfield = document.createElement("div");
-  starfield.className = "starfield";
-  starfield.setAttribute("aria-hidden", "true");
-
-  const scanlines = document.createElement("div");
-  scanlines.className = "scanlines";
-  scanlines.setAttribute("aria-hidden", "true");
+  applyCrt(prefs.get("crt", true));
+  applyPhosphor(prefs.get("phosphor", "full"));
 
   const skip = document.createElement("a");
   skip.className = "skip-link";
   skip.href = "#main";
   skip.textContent = "Skip to content";
 
-  body.prepend(skip, starfield, scanlines);
+  const crt = document.createElement("div");
+  crt.className = "crt-overlay";
+  crt.setAttribute("aria-hidden", "true");
+
+  body.prepend(skip, crt);
+
+  const online = String(liveGames().length).padStart(2, "0");
+  const total = String(games.length).padStart(2, "0");
 
   const header = document.createElement("header");
   header.className = "shell";
   header.innerHTML = `
-    <a class="shell__logo" href="/" aria-label="${escapeHtml(SITE.name)} home">
-      ${LOGO_MARK}
-      <span>${escapeHtml(SITE.name)}</span>
-    </a>
-    ${crumb ? renderCrumb(crumb) : ""}
+    <a class="shell__logo" href="/" aria-label="${escapeHtml(SITE.name)} home">SYS://ARCADE.NET<span class="cursor" aria-hidden="true"></span></a>
+    <div class="shell__telemetry" aria-label="System telemetry">
+      <span class="tele">GAMES ONLINE: [<b data-tele-games>${online}</b>/${total}]</span>
+      <span class="tele tele--ok">SYS STATUS: NOMINAL</span>
+      <span class="tele">STREAK: [<b data-tele-streak>${pad2(prefs.get("streak", 0))}</b>]</span>
+      <span class="tele" data-tele-clock>--:--:--</span>
+    </div>
     <nav class="shell__nav" aria-label="Site">
-      ${showGameLinks ? `<a class="btn btn--ghost btn--icon" href="/" title="All games" aria-label="All games">${icon("gamepad")}</a>` : ""}
-      <button class="btn btn--ghost btn--icon" type="button" data-sound-toggle title="Toggle sound" aria-label="Toggle sound" aria-pressed="false"></button>
-      <a class="btn btn--ghost btn--icon" href="${SITE.repo}" target="_blank" rel="noopener noreferrer" title="Source code" aria-label="Source code">${icon("github")}</a>
+      ${showGameLinks ? `<a class="hbtn" href="/" title="All games" aria-label="All games">${icon("gamepad", { size: 14 })}</a>` : ""}
+      <button class="hbtn" type="button" data-crt-toggle aria-pressed="false">CRT</button>
+      <button class="hbtn" type="button" data-phosphor-toggle>PHOS:FULL</button>
+      <button class="hbtn" type="button" data-sound-toggle aria-pressed="false">SFX:OFF</button>
+      <a class="hbtn" href="${SITE.repo}" target="_blank" rel="noopener noreferrer" title="Source code" aria-label="Source code">${icon("github", { size: 14 })}</a>
     </nav>
   `;
 
@@ -64,13 +75,16 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   footer.className = "footer";
   footer.innerHTML = `
     <div class="footer__inner">
-      <div class="footer__links">
-        <a href="/">All games</a>
-        <a href="#about">About</a>
-        <a href="${SITE.repo}" target="_blank" rel="noopener noreferrer">Source</a>
+      <div class="footer__sys">
+        <span>MEM 640K OK</span>
+        <span>VID TERMINAL-80</span>
+        <span class="footer__links">
+          <a href="/">DIRECTORY</a>
+          <a href="#about">ABOUT</a>
+          <a href="${SITE.repo}" target="_blank" rel="noopener noreferrer">SOURCE</a>
+        </span>
       </div>
-      <p>${escapeHtml(SITE.tagline)}</p>
-      <p>Hand-built with plain HTML, CSS, and JavaScript. No frameworks, no trackers.</p>
+      <p class="footer__prompt">&gt; guest@terminal:~$ <span class="cursor" aria-hidden="true"></span></p>
     </div>
   `;
   body.appendChild(footer);
@@ -81,49 +95,98 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   toastStack.setAttribute("aria-live", "polite");
   body.appendChild(toastStack);
 
-  setSoundEnabled(prefs.get("sound", false));
-  const soundBtn = header.querySelector("[data-sound-toggle]");
-
-  function syncSoundButton() {
-    const on = isSoundEnabled();
-    soundBtn.innerHTML = on ? icon("volume-on") : icon("volume-off");
-    soundBtn.setAttribute("aria-pressed", String(on));
-    soundBtn.title = on ? "Sound on" : "Sound off";
-  }
-  syncSoundButton();
-  onSoundStateChange(syncSoundButton);
-
-  soundBtn.addEventListener("click", () => {
-    const next = setSoundEnabled(!isSoundEnabled());
-    prefs.set("sound", next);
-    syncSoundButton();
-  });
-
+  wireToggles(header);
+  startClock();
   document.documentElement.classList.add("js");
   return { header, footer, toastStack };
 }
 
-function renderCrumb(crumb) {
-  if (typeof crumb === "string") {
-    return `<span class="shell__crumb"><span class="shell__crumb-sep">/</span><span class="shell__crumb-current">${escapeHtml(crumb)}</span></span>`;
-  }
-  const parts = crumb
-    .map((part) =>
-      part.href
-        ? `<a href="${escapeHtml(part.href)}">${escapeHtml(part.label)}</a>`
-        : `<span class="shell__crumb-current">${escapeHtml(part.label)}</span>`
-    )
-    .join('<span class="shell__crumb-sep">/</span>');
-  return `<span class="shell__crumb">${parts}</span>`;
+function pad2(n) {
+  return String(Math.max(0, Math.min(99, n))).padStart(2, "0");
 }
 
-export function toast({ title, body = "", icon: iconName = "sparkle", duration = 3400, tone = null } = {}) {
+export function setStreak(n) {
+  prefs.set("streak", n);
+  document.querySelectorAll("[data-tele-streak]").forEach((el) => {
+    el.textContent = pad2(n);
+  });
+}
+
+export function getStreak() {
+  return prefs.get("streak", 0);
+}
+
+function applyCrt(on) {
+  document.documentElement.classList.toggle("crt-on", Boolean(on));
+  document.querySelectorAll("[data-crt-toggle]").forEach((btn) => {
+    btn.setAttribute("aria-pressed", String(Boolean(on)));
+  });
+}
+
+function applyPhosphor(id) {
+  const mode = PHOSPHORS.some((p) => p.id === id) ? id : "full";
+  if (mode === "full") document.documentElement.removeAttribute("data-phosphor");
+  else document.documentElement.dataset.phosphor = mode;
+  document.querySelectorAll("[data-phosphor-toggle]").forEach((btn) => {
+    btn.textContent = `PHOS:${PHOSPHORS.find((p) => p.id === mode).label}`;
+  });
+}
+
+function wireToggles(header) {
+  setSoundEnabled(prefs.get("sound", false));
+  const soundBtn = header.querySelector("[data-sound-toggle]");
+  const crtBtn = header.querySelector("[data-crt-toggle]");
+  const phosBtn = header.querySelector("[data-phosphor-toggle]");
+
+  function syncSound() {
+    const on = isSoundEnabled();
+    soundBtn.textContent = on ? "SFX:ON" : "SFX:OFF";
+    soundBtn.setAttribute("aria-pressed", String(on));
+  }
+  syncSound();
+  onSoundStateChange(syncSound);
+  soundBtn.addEventListener("click", () => {
+    prefs.set("sound", setSoundEnabled(!isSoundEnabled()));
+    syncSound();
+  });
+
+  crtBtn.setAttribute("aria-pressed", String(prefs.get("crt", true)));
+  crtBtn.addEventListener("click", () => {
+    const next = !document.documentElement.classList.contains("crt-on");
+    prefs.set("crt", next);
+    applyCrt(next);
+  });
+
+  phosBtn.addEventListener("click", () => {
+    const current = prefs.get("phosphor", "full");
+    const next = PHOSPHORS[(PHOSPHORS.findIndex((p) => p.id === current) + 1) % PHOSPHORS.length].id;
+    prefs.set("phosphor", next);
+    applyPhosphor(next);
+  });
+}
+
+function startClock() {
+  const tick = () => {
+    const now = new Date();
+    const text = [now.getHours(), now.getMinutes(), now.getSeconds()]
+      .map((v) => String(v).padStart(2, "0"))
+      .join(":");
+    document.querySelectorAll("[data-tele-clock]").forEach((el) => {
+      el.textContent = text;
+    });
+  };
+  tick();
+  if (clockStarted) return;
+  clockStarted = true;
+  setInterval(tick, 1000);
+}
+
+export function toast({ title, body = "", icon: iconName = "sparkle", duration = 3400 } = {}) {
   const stack = document.querySelector(".toast-stack");
   if (!stack) return null;
 
   const el = document.createElement("div");
   el.className = "toast";
-  if (tone) el.dataset.tone = tone;
   el.innerHTML = `
     <span class="toast__icon">${icon(iconName)}</span>
     <span>
@@ -136,10 +199,7 @@ export function toast({ title, body = "", icon: iconName = "sparkle", duration =
   const timer = setTimeout(dismiss, duration);
   function dismiss() {
     clearTimeout(timer);
-    if (!el.isConnected) return;
-    el.classList.add("toast--out");
-    el.addEventListener("animationend", () => el.remove(), { once: true });
-    setTimeout(() => el.remove(), 600);
+    if (el.isConnected) el.remove();
   }
 
   return dismiss;
@@ -171,7 +231,7 @@ export function openModal({
     <div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
       <div class="modal__head">
         <h2 class="modal__title">${escapeHtml(title)}</h2>
-        ${dismissible ? `<button type="button" class="btn btn--ghost btn--icon modal__close" data-close aria-label="Close">${icon("close")}</button>` : ""}
+        ${dismissible ? `<button type="button" class="btn btn--ghost btn--sm modal__close" data-close aria-label="Close">${icon("close", { size: 14 })}</button>` : ""}
       </div>
       <div class="modal__body">${body}</div>
       ${buttons ? `<div class="modal__foot">${buttons}</div>` : ""}
@@ -235,10 +295,9 @@ export function openModal({
   }
 
   document.addEventListener("keydown", onKeydown);
-  const originalClose = close;
   const wrapped = (result) => {
     document.removeEventListener("keydown", onKeydown);
-    originalClose(result);
+    close(result);
   };
 
   activeModal = { close: wrapped, el: backdrop };

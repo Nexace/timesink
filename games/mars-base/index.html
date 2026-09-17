@@ -1,19 +1,19 @@
 <!doctype html>
-<html lang="en" data-accent="rust">
+<html lang="en" data-accent="flare" class="crt-on">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Mars Base — Time Sink</title>
+    <title>MARS BASE — SYS://ARCADE.NET</title>
     <meta
       name="description"
-      content="A turn-based Mars colony tycoon. Manage power, water, oxygen, ore and credits across sols, survive dust storms and meteors, and grow a self-sustaining colony of fifty."
+      content="A turn-based Mars colony experiment. Manage power, water, oxygen, ore and credits across sols, survive dust storms and meteors, and grow a self-sustaining colony of fifty."
     />
-    <meta name="theme-color" content="#0b0e1a" />
+    <meta name="theme-color" content="#050508" />
     <link rel="canonical" href="https://timesink.vercel.app/games/mars-base" />
 
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Time Sink" />
-    <meta property="og:title" content="Mars Base — a turn-based colony tycoon" />
+    <meta property="og:site_name" content="SYS://ARCADE.NET" />
+    <meta property="og:title" content="MARS BASE — turn-based colony experiment" />
     <meta
       property="og:description"
       content="Build a colony one sol at a time. Oxygen is a suggestion until it isn't."
@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500;700&family=Silkscreen:wght@400;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Share+Tech+Mono&display=swap"
       rel="stylesheet"
     />
 
@@ -33,29 +33,38 @@
     <link rel="stylesheet" href="/games/mars-base/game.css" />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230b0e1a'/%3E%3Cpath d='M12 4c3 2.4 4.7 5.8 4.7 9.2L12 17l-4.7-3.8C7.3 9.8 9 6.4 12 4Z' fill='none' stroke='%23ff6b35' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23050508'/%3E%3Cpath d='M4 13V9a4 4 0 0 1 8 0v4' fill='none' stroke='%23FF4900' stroke-width='2'/%3E%3Crect x='7' y='5' width='2' height='2' fill='%23FF4900'/%3E%3C/svg%3E"
     />
   </head>
-  <body data-page="game" data-accent="rust">
+  <body data-page="game" data-accent="flare">
     <main id="main" class="game wrap">
-      <section class="hud">
-        <div class="hud__sol"><small>Sol</small><span id="sol">1</span></div>
-        <div class="hud__stat" title="Population / capacity">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.4a3.2 3.2 0 0 1 0 5.2"/><path d="M18.5 20a6 6 0 0 0-2.6-4.9"/></svg>
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <span class="stage-bar__title">MARS BASE</span>
+        <span class="stage-bar__meta">
+          <span>SOL <b id="sol">1</b></span>
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+          <button class="hbtn" type="button" data-fullscreen-toggle>FULLSCREEN</button>
+        </span>
+      </div>
+
+      <div class="gamerow">
+        <span class="gamerow__pop" title="Population / capacity">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.4a3.2 3.2 0 0 1 0 5.2"/><path d="M18.5 20a6 6 0 0 0-2.6-4.9"/></svg>
           <span id="pop">2/4</span>
-        </div>
-        <div class="hud__badges">
+        </span>
+        <span class="gamerow__badges">
           <span id="doctrine-badge"></span>
           <span id="mode-badge"></span>
-        </div>
-        <div class="hud__status" id="status-banner"></div>
-      </section>
+        </span>
+        <span class="gamerow__status" id="status-banner"></span>
+      </div>
 
       <section class="resources" id="resources" aria-label="Resources" aria-live="polite"></section>
 
       <div class="layout">
         <section class="panel" aria-label="Structures">
-          <div class="panel__head"><span class="panel__title">Structures</span></div>
+          <div class="panel__head"><span class="panel__title">STRUCTURES</span></div>
           <div class="buildings__list" id="buildings"></div>
         </section>
 
@@ -63,23 +72,23 @@
           <section class="panel" aria-label="Controls">
             <div class="panel__body controls">
               <button id="btn-advance" type="button" class="btn btn--primary controls__primary">
-                Advance Sol <span class="kbd">Space</span>
+                ADVANCE SOL <span class="kbd">SPACE</span>
               </button>
               <div class="controls__row">
-                <button id="btn-undo" type="button" class="btn">Undo <span class="kbd">U</span></button>
-                <button id="btn-help" type="button" class="btn btn--ghost">Help <span class="kbd">?</span></button>
+                <button id="btn-undo" type="button" class="btn">UNDO <span class="kbd">U</span></button>
+                <button id="btn-help" type="button" class="btn btn--ghost">HELP <span class="kbd">?</span></button>
               </div>
               <div class="controls__row controls__row--tight">
-                <button id="btn-export" type="button" class="btn btn--ghost btn--sm">Export</button>
-                <button id="btn-import" type="button" class="btn btn--ghost btn--sm">Import</button>
-                <button id="btn-daily" type="button" class="btn btn--ghost btn--sm">Daily</button>
+                <button id="btn-export" type="button" class="btn btn--ghost btn--sm">EXPORT</button>
+                <button id="btn-import" type="button" class="btn btn--ghost btn--sm">IMPORT</button>
+                <button id="btn-daily" type="button" class="btn btn--ghost btn--sm">DAILY</button>
               </div>
-              <button id="btn-reset" type="button" class="btn btn--danger btn--sm">Abandon colony</button>
+              <button id="btn-reset" type="button" class="btn btn--danger btn--sm">ABANDON COLONY</button>
             </div>
           </section>
 
           <section class="panel" aria-label="Next sol preview">
-            <div class="panel__head"><span class="panel__title">Next sol preview</span></div>
+            <div class="panel__head"><span class="panel__title">PROJ // NEXT SOL</span></div>
             <div class="panel__body">
               <div id="preview-rows"></div>
               <div id="preview-notes"></div>
@@ -88,10 +97,20 @@
           </section>
 
           <section class="panel" aria-label="Colony log">
-            <div class="panel__head"><span class="panel__title">Colony log</span></div>
+            <div class="panel__head"><span class="panel__title">COLONY LOG</span></div>
             <ul class="log__list" id="log"></ul>
           </section>
+
+          <section class="panel" aria-label="Top operators">
+            <div class="panel__head"><span class="panel__title">TOP OPERATORS</span></div>
+            <div class="hs-wrap" id="hall-of-fame"></div>
+          </section>
         </aside>
+      </div>
+
+      <div class="console">
+        <span class="console__group"><span class="console__label">OBJECTIVE</span><span>50 COLONISTS + 10 SUSTAINED SOLS</span></span>
+        <span class="console__group"><span class="console__label">KEYS</span><span class="kbd">SPACE</span><span>ADV</span><span class="kbd">1</span><span>–</span><span class="kbd">0</span><span>BUILD</span><span class="kbd">U</span><span>UNDO</span></span>
       </div>
     </main>
 

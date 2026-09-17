@@ -12,7 +12,9 @@ export const games = [
     tagline: "Build a colony one sol at a time. Oxygen is a suggestion until it isn't.",
     kind: "tycoon",
     tags: ["sim", "strategy", "turn-based"],
-    accent: "rust",
+    accent: "flare",
+    motif: "dome",
+    version: "1.2",
     status: "live",
     added: "2026-09-16",
   },
@@ -23,6 +25,8 @@ export const games = [
     kind: "arcade",
     tags: ["arcade", "one-more-run"],
     accent: "lime",
+    motif: "snake",
+    version: "0.1",
     status: "soon",
   },
   {
@@ -32,6 +36,8 @@ export const games = [
     kind: "toy",
     tags: ["absurd", "clicker"],
     accent: "magenta",
+    motif: "cards",
+    version: "0.1",
     status: "soon",
   },
   {
@@ -41,6 +47,8 @@ export const games = [
     kind: "quiz",
     tags: ["quiz", "data"],
     accent: "violet",
+    motif: "target",
+    version: "0.1",
     status: "soon",
   },
 ];

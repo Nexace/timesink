@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" data-accent="cyan" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>GAME_TITLE — SYS://ARCADE.NET</title>
+    <meta name="description" content="GAME_TAGLINE" />
+    <meta name="theme-color" content="#050508" />
+    <link rel="canonical" href="https://timesink.vercel.app/games/GAME_SLUG" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SYS://ARCADE.NET" />
+    <meta property="og:title" content="GAME_TITLE — SYS://ARCADE.NET" />
+    <meta property="og:description" content="GAME_TAGLINE" />
+    <meta property="og:url" content="https://timesink.vercel.app/games/GAME_SLUG" />
+    <meta name="twitter:card" content="summary" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Share+Tech+Mono&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/games/GAME_SLUG/game.css" />
+  </head>
+  <body data-page="game" data-accent="cyan">
+    <main id="main" class="wrap stage-page">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <span class="stage-bar__title">GAME_TITLE</span>
+        <span class="stage-bar__meta">
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+          <button class="hbtn" type="button" data-fullscreen-toggle>FULLSCREEN</button>
+        </span>
+      </div>
+
+      <div class="stage" id="stage">
+        <i class="xh tl" aria-hidden="true">+</i>
+        <i class="xh tr" aria-hidden="true">+</i>
+        <i class="xh bl" aria-hidden="true">+</i>
+        <i class="xh br" aria-hidden="true">+</i>
+      </div>
+
+      <div class="console">
+        <span class="console__group"><span class="console__label">HOW TO PLAY</span><span>GAME_INSTRUCTIONS</span></span>
+        <span class="console__group"><span class="console__label">KEYS</span><span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span><span>MOVE</span></span>
+        <span class="console__group"><button class="btn btn--sm" type="button" data-game-pause>PAUSE</button><button class="btn btn--sm" type="button" data-game-reset>RESET</button></span>
+      </div>
+    </main>
+
+    <script type="module">
+      import { initShell } from "/shared/shell.js";
+      initShell();
+
+      const clockEl = document.querySelector("[data-session-clock]");
+      const started = Date.now();
+      setInterval(() => {
+        const s = Math.floor((Date.now() - started) / 1000);
+        clockEl.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+      }, 1000);
+
+      document.querySelector("[data-fullscreen-toggle]").addEventListener("click", () => {
+        const stage = document.getElementById("stage");
+        if (document.fullscreenElement) document.exitFullscreen();
+        else stage.requestFullscreen?.();
+      });
+    </script>
+  </body>
+</html>

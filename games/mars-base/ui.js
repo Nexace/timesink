@@ -1,7 +1,7 @@
-import { initShell, toast, openModal, confirmDialog, escapeHtml } from "../../shared/shell.js";
+import { initShell, toast, openModal, confirmDialog, escapeHtml, setStreak, getStreak } from "../../shared/shell.js";
 import { icon } from "../../shared/icons.js";
 import { sfx } from "../../shared/sound.js";
-import { createStore, exportCode, importCode } from "../../shared/storage.js";
+import { createStore, exportCode, importCode, createPrefStore } from "../../shared/storage.js";
 import { dailySeedKey } from "../../shared/rng.js";
 import { fmt, fmtDelta } from "../../shared/format.js";
 import { RESOURCES, BUILDINGS, DOCTRINES, ACHIEVEMENTS } from "./data.js";
@@ -28,6 +28,8 @@ import {
 } from "./engine.js";
 
 const store = createStore("mars-base", { version: SAVE_VERSION });
+const prefs = createPrefStore("prefs");
+const fame = createStore("mars-base-fame", { version: 1 });
 
 let state = null;
 let lastStocks = null;
@@ -36,10 +38,12 @@ const refs = { res: {}, bld: {}, prow: {} };
 
 const el = (id) => document.getElementById(id);
 
-initShell({ crumb: [{ href: "/", label: "Games" }, { label: "Mars Base" }] });
+initShell();
 
 buildStatic();
 boot();
+startSessionClock();
+wireFullscreen();
 
 function buildStatic() {
   const resHost = el("resources");
@@ -291,20 +295,44 @@ function endModal() {
   if (won) sfx.win();
   else sfx.bad();
 
+  let streakLine = "";
+  if (state.mode === "daily") {
+    const streak = recordDailyStreak();
+    streakLine = `<p>DAILY LOGGED. STREAK: <strong>${streak}</strong> DAY${streak === 1 ? "" : "S"}.</p>`;
+  }
+
+  const sols = state.sol - 1;
+  const fameOpen = qualifiesForFame(sols);
+  const fameForm = fameOpen
+    ? `<div class="hs-entry"><input id="fame-name" maxlength="3" placeholder="AAA" aria-label="Your initials" /><button type="button" class="btn btn--sm" id="fame-save">LOG SCORE</button></div>`
+    : "";
+
   openModal({
-    title: won ? "Colony established" : "Colony lost",
+    title: won ? "COLONY ESTABLISHED" : "COLONY LOST",
     body: `
       <p>${won
-        ? `After ${state.sol - 1} sols and ${state.population} colonists, Mars is officially someone's home.`
-        : `The colony lasted ${state.sol - 1} sols and peaked at ${state.population} colonists. Mars keeps its silence.`}</p>
-      <p>Achievements unlocked: <strong>${state.achievements.length}/${ACHIEVEMENTS.length}</strong></p>
+        ? `After ${sols} sols and ${state.population} colonists, Mars is officially someone's home.`
+        : `The colony lasted ${sols} sols and peaked at ${state.population} colonists. Mars keeps its silence.`}</p>
+      <p>BADGES: <strong>${state.achievements.length}/${ACHIEVEMENTS.length}</strong></p>
+      ${streakLine}
+      ${fameForm}
     `,
     dismissible: true,
     actions: [
+      { id: "copy", label: "Copy result", variant: "ghost", onClick: () => copyResult() },
       { id: "new", label: "New colony", variant: "primary", onClick: () => resetTo(state.mode) },
       { id: "stay", label: "Look around", variant: "ghost" },
     ],
   });
+
+  if (fameOpen) {
+    el("fame-save")?.addEventListener("click", () => {
+      const name = el("fame-name")?.value?.trim() || "ACE";
+      addFameEntry(name, sols);
+      sfx.good();
+      toast({ title: "LOGGED", body: `${name.toUpperCase().slice(0, 3)} — ${sols} SOLS`, icon: "trophy" });
+    });
+  }
 }
 
 function helpModal() {
@@ -313,7 +341,7 @@ function helpModal() {
     body: `
       <p><strong>Goal:</strong> reach 50 colonists and stay self-sustaining for 10 consecutive sols.</p>
       <p>Each <strong>sol</strong> (Mars day) you press Advance. Buildings produce and consume resources, colonists breathe and drink, and Mars occasionally throws something at you.</p>
-      <p><strong>Power</strong> gates everything: if demand exceeds supply you brown out and all other production scales down. <strong>Oxygen</strong> at zero for two sols in a row forces a rescue or ends the run.</p>
+      <p><strong>Power</strong> gates everything: if demand exceeds supply you brown out and all other production scales down. <strong>Oxygen</strong> at zero for three sols in a row forces a rescue or ends the run.</p>
       <p><strong>Ore</strong> is both a construction material for advanced structures and an export good at the Trade Hub &mdash; spend it or sell it, not both.</p>
       <p class="modal__hint">Keys: <span class="kbd">Space</span> advance &middot; <span class="kbd">1</span>&ndash;<span class="kbd">0</span> build/upgrade &middot; <span class="kbd">U</span> undo &middot; <span class="kbd">?</span> help</p>
     `,
@@ -394,6 +422,95 @@ function save() {
   if (state.mode === "normal") store.save(toSave(state));
 }
 
+function startSessionClock() {
+  const started = Date.now();
+  setInterval(() => {
+    const s = Math.floor((Date.now() - started) / 1000);
+    document.querySelectorAll("[data-session-clock]").forEach((el) => {
+      el.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+    });
+  }, 1000);
+}
+
+function wireFullscreen() {
+  document.querySelectorAll("[data-fullscreen-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else document.documentElement.requestFullscreen?.().catch(() => {});
+    });
+  });
+}
+
+function yesterdayKey() {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  return dailySeedKey(d);
+}
+
+function recordDailyStreak() {
+  const today = dailySeedKey();
+  if (prefs.get("lastDaily", "") === today) return getStreak();
+  const next = prefs.get("lastDaily", "") === yesterdayKey() ? getStreak() + 1 : 1;
+  prefs.set("lastDaily", today);
+  setStreak(next);
+  return next;
+}
+
+function resultText() {
+  const mode = state.mode === "daily" ? `DAILY ${dailySeedKey()}` : "STANDARD";
+  const outcome = state.status === "won" ? "COLONY ESTABLISHED" : "COLONY LOST";
+  return `[MARS BASE // ${mode}] ${outcome} — sol ${state.sol - 1}, pop ${state.population}, ${state.achievements.length}/13 badges. Think you can do better?`;
+}
+
+function copyResult() {
+  const text = resultText();
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => toast({ title: "RESULT COPIED", body: "Paste it anywhere to talk trash.", icon: "check" }),
+      () => toast({ title: "COPY FAILED", body: text, icon: "alert", duration: 6000 })
+    );
+  } else {
+    toast({ title: "COPY THIS", body: text, icon: "info", duration: 8000 });
+  }
+}
+
+function getFame() {
+  const list = fame.load([]);
+  return Array.isArray(list) ? list.filter((e) => e && typeof e.sols === "number").slice(0, 5) : [];
+}
+
+function qualifiesForFame(sols) {
+  if (state.status !== "won") return false;
+  const list = getFame();
+  return list.length < 5 || sols < list[list.length - 1].sols;
+}
+
+function addFameEntry(name, sols) {
+  const list = getFame();
+  list.push({ name: String(name).toUpperCase().slice(0, 3) || "ACE", sols, date: dailySeedKey() });
+  list.sort((a, b) => a.sols - b.sols);
+  fame.save(list.slice(0, 5));
+  renderFame();
+}
+
+function renderFame() {
+  const host = el("hall-of-fame");
+  if (!host) return;
+  const list = getFame();
+  if (!list.length) {
+    host.innerHTML = `<p class="modal__hint">NO OPERATORS ON RECORD. ESTABLISH A COLONY.</p>`;
+    return;
+  }
+  host.innerHTML = `
+    <table class="hs-table">
+      <caption>FEWEST SOLS TO ESTABLISH</caption>
+      <thead><tr><th>#</th><th>OP</th><th>SOLS</th><th>DATE</th></tr></thead>
+      <tbody>
+        ${list.map((e, i) => `<tr><td class="rank">${i + 1}</td><td>${escapeHtml(e.name)}</td><td>${e.sols}</td><td>${escapeHtml(e.date)}</td></tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
 function shake() {
   const main = document.querySelector("main");
   if (!main) return;
@@ -410,6 +527,7 @@ function render() {
   renderBuildings();
   renderPreview();
   renderLog();
+  renderFame();
   renderControls();
 }
 
@@ -504,12 +622,17 @@ function renderPreview() {
         .join("")
     : `<p class="note note--ok">${icon("check", { size: 13 })} All systems nominal.</p>`;
 
-  const popPct = Math.min(100, (state.population / 50) * 100);
-  const susPct = Math.min(100, (state.selfSustainStreak / 10) * 100);
   el("win-progress").innerHTML = `
-    <div class="meter"><span class="meter__label">Population</span><span class="meter__bar"><span style="width:${popPct}%"></span></span><span class="meter__val">${state.population}/50</span></div>
-    <div class="meter"><span class="meter__label">Sustain</span><span class="meter__bar"><span style="width:${susPct}%"></span></span><span class="meter__val">${state.selfSustainStreak}/10</span></div>
+    <div class="meter"><span class="meter__label">POP</span><span class="meter__bar">${segments(state.population, 50, 10)}</span><span class="meter__val">${state.population}/50</span></div>
+    <div class="meter"><span class="meter__label">SUS</span><span class="meter__bar">${segments(state.selfSustainStreak, 10, 10)}</span><span class="meter__val">${state.selfSustainStreak}/10</span></div>
   `;
+}
+
+function segments(value, max, count) {
+  const filled = Math.round(Math.min(1, value / max) * count);
+  let out = "";
+  for (let i = 0; i < count; i += 1) out += `<i class="${i < filled ? "on" : ""}"></i>`;
+  return out;
 }
 
 function renderLog() {

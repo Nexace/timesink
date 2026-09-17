@@ -2,7 +2,7 @@ export const SITE = {
   name: "Time Sink",
   tagline: "Small games that eat your time politely.",
   url: "https://timesink.vercel.app",
-  repo: "https://github.com/amoghkhairate/timesink",
+  repo: "",
 };
 
 export const games = [

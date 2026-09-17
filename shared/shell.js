@@ -110,7 +110,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
       <button class="hbtn" type="button" data-crt-toggle aria-pressed="${crtOn}">CRT</button>
       <button class="hbtn" type="button" data-phosphor-toggle aria-pressed="${prefs.get("phosphor", "full") !== "full"}">${phosLabel}</button>
       <button class="hbtn" type="button" data-sound-toggle aria-pressed="false">SFX:OFF</button>
-      <a class="hbtn" href="${SITE.repo}" target="_blank" rel="noopener noreferrer" title="Source code" aria-label="Source code">${icon("github", { size: 14 })}</a>
+      ${SITE.repo ? `<a class="hbtn" href="${SITE.repo}" target="_blank" rel="noopener noreferrer" title="Source code" aria-label="Source code">${icon("github", { size: 14 })}</a>` : ""}
     </nav>
   `;
 
@@ -130,7 +130,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
         <span class="footer__links">
           <a href="/">DIRECTORY</a>
           <a href="#about">ABOUT</a>
-          <a href="${SITE.repo}" target="_blank" rel="noopener noreferrer">SOURCE</a>
+          ${SITE.repo ? `<a href="${SITE.repo}" target="_blank" rel="noopener noreferrer">SOURCE</a>` : ""}
         </span>
       </div>
       <p class="footer__prompt">&gt; guest@terminal:~$ <span class="cursor" aria-hidden="true"></span></p>

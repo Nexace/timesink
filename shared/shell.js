@@ -45,6 +45,44 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   const cosmos = document.createElement("div");
   cosmos.className = "cosmos";
   cosmos.setAttribute("aria-hidden", "true");
+  cosmos.innerHTML = `
+    <div class="cosmos__beams"></div>
+    <div class="cosmos__stars"></div>
+    <div class="cosmos__sparkles"></div>
+    <div class="cosmos__grain"></div>
+    <div class="cosmos__grid"></div>
+    <svg class="cosmos__planet" viewBox="0 0 300 300" aria-hidden="true" focusable="false">
+      <defs>
+        <radialGradient id="ts-planet" cx="38%" cy="34%" r="72%">
+          <stop offset="0%" stop-color="#ff7a2e"/>
+          <stop offset="34%" stop-color="#c22e6d"/>
+          <stop offset="62%" stop-color="#3b1a5e"/>
+          <stop offset="100%" stop-color="#0b0e14"/>
+        </radialGradient>
+        <linearGradient id="ts-ring1" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#ff007f"/>
+          <stop offset="55%" stop-color="#00f0ff"/>
+          <stop offset="100%" stop-color="#7b2ff7"/>
+        </linearGradient>
+        <linearGradient id="ts-ring2" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#00f0ff"/>
+          <stop offset="100%" stop-color="#ff007f"/>
+        </linearGradient>
+        <radialGradient id="ts-halo" cx="50%" cy="50%" r="50%">
+          <stop offset="70%" stop-color="#ff007f" stop-opacity="0"/>
+          <stop offset="88%" stop-color="#ff007f" stop-opacity="0.14"/>
+          <stop offset="100%" stop-color="#ff007f" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <circle cx="150" cy="150" r="146" fill="url(#ts-halo)"/>
+      <ellipse cx="150" cy="168" rx="128" ry="30" fill="none" stroke="url(#ts-ring2)" stroke-width="3" opacity="0.55" transform="rotate(-14 150 168)"/>
+      <circle cx="150" cy="150" r="72" fill="url(#ts-planet)"/>
+      <ellipse cx="150" cy="150" rx="118" ry="26" fill="none" stroke="url(#ts-ring1)" stroke-width="7" transform="rotate(-14 150 150)"/>
+      <ellipse cx="150" cy="150" rx="104" ry="22" fill="none" stroke="#0b0e14" stroke-width="10" opacity="0.85" transform="rotate(-14 150 150)"/>
+      <ellipse cx="150" cy="150" rx="118" ry="26" fill="none" stroke="url(#ts-ring1)" stroke-width="2" opacity="0.9" transform="rotate(-14 150 150)"/>
+      <circle cx="252" cy="66" r="9" fill="#f0f4fc" opacity="0.9"/>
+      <circle cx="249" cy="63" r="9" fill="#0b0e14" opacity="0.35"/>
+    </svg>`;
 
   const crt = document.createElement("div");
   crt.className = "crt-overlay";

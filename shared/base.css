@@ -17,7 +17,7 @@ html {
 
 body {
   min-height: 100dvh;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   font-family: var(--font-body);
   font-size: var(--fs-md);

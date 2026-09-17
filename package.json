@@ -1,0 +1,13 @@
+{
+  "name": "timesink",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A hub of small, original browser games.",
+  "scripts": {
+    "dev": "npx --yes serve . -l 5173",
+    "start": "npx --yes serve . -l 5173",
+    "preview": "npx --yes serve dist -l 4173",
+    "test": "node games/mars-base/engine.test.mjs"
+  }
+}

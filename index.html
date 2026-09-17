@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en" data-accent="cyan">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Time Sink — small games that eat your time politely</title>
+    <meta
+      name="description"
+      content="A growing collection of small, original browser games. Turn-based Mars colony sims, arcade oddities, and absurd toys. No ads, no accounts, no installs."
+    />
+    <meta name="theme-color" content="#0b0e1a" />
+    <link rel="canonical" href="https://timesink.vercel.app/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Time Sink" />
+    <meta property="og:title" content="Time Sink — small games that eat your time politely" />
+    <meta
+      property="og:description"
+      content="A growing collection of small, original browser games. Playable instantly, no installs."
+    />
+    <meta property="og:url" content="https://timesink.vercel.app/" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500;700&family=Silkscreen:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/home.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230b0e1a'/%3E%3Cpath d='M5 6h14l-5 6.2v5.6L10 20v-7.8L5 6Z' fill='none' stroke='%2300e5ff' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body data-page="home" data-accent="cyan">
+    <main id="main" class="home">
+      <section class="hero wrap">
+        <p class="hero__eyebrow"><span class="hero__dot"></span> Hand-built browser games</p>
+        <h1 class="hero__title" data-text="Time Sink">Time Sink</h1>
+        <p class="hero__tagline">
+          Small games that eat your time politely. No installs, no accounts, no ads &mdash;
+          open a tab and lose twenty minutes.
+        </p>
+        <div class="hero__actions">
+          <a class="btn btn--primary" href="#games">Browse games</a>
+          <a class="btn btn--ghost" id="hero-random" href="#games">Surprise me</a>
+        </div>
+        <dl class="hero__stats" id="hero-stats"></dl>
+      </section>
+
+      <section class="games wrap" id="games">
+        <div class="section-head">
+          <h2 class="section-title">The collection</h2>
+          <p class="section-sub">Every game runs in one tab and saves itself.</p>
+        </div>
+        <div class="game-grid" id="game-grid"></div>
+      </section>
+
+      <section class="about wrap" id="about">
+        <div class="section-head">
+          <h2 class="section-title">What this is</h2>
+        </div>
+        <div class="about__grid">
+          <article class="about__card">
+            <h3>Small on purpose</h3>
+            <p>
+              Each game is a single self-contained page. Plain HTML, CSS, and JavaScript with zero
+              dependencies, so they load instantly and will still work in a decade.
+            </p>
+          </article>
+          <article class="about__card">
+            <h3>Original work</h3>
+            <p>
+              Every game, mechanic, and piece of art here is made from scratch. The format is a
+              hub of tiny experiments &mdash; the content is not borrowed from anyone.
+            </p>
+          </article>
+          <article class="about__card">
+            <h3>Respects your machine</h3>
+            <p>
+              No trackers, no analytics, no autoplaying audio. Progress is stored locally in your
+              browser and animations back off when your system asks them to.
+            </p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/index.js"></script>
+  </body>
+</html>

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" data-accent="magenta">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>404 — Nothing here · Time Sink</title>
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#0b0e1a" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500;700&family=Silkscreen:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/404.css" />
+  </head>
+  <body data-page="404" data-accent="magenta">
+    <main id="main" class="notfound">
+      <p class="notfound__code">404</p>
+      <h1 class="notfound__title">This page sank</h1>
+      <p class="notfound__body">
+        Whatever was here is gone. Possibly it was never here. The games still are, though.
+      </p>
+      <div class="notfound__actions">
+        <a class="btn btn--primary" href="/">Back to all games</a>
+        <a class="btn btn--ghost" href="/games/mars-base">Play Mars Base</a>
+      </div>
+    </main>
+    <script type="module">
+      import { initShell } from "/shared/shell.js";
+      initShell({ crumb: "404", showGameLinks: false });
+    </script>
+  </body>
+</html>

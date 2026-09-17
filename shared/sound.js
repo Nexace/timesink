@@ -102,7 +102,6 @@ export const sfx = {
 
 export function setSoundEnabled(value) {
   enabled = value === true;
-  if (enabled) ac();
   listeners.forEach((fn) => {
     try {
       fn(enabled);

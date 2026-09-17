@@ -32,7 +32,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   const accent = body.dataset.accent;
   if (accent) document.documentElement.dataset.accent = accent;
 
-  applyCrt(prefs.get("crt", true));
+  applyCrt(crtPref());
   applyPhosphor(prefs.get("phosphor", "full"));
 
   const skip = document.querySelector("a.skip-link") ?? document.createElement("a");
@@ -165,10 +165,23 @@ export function getStreak() {
   return prefs.get("streak", 0);
 }
 
-function applyCrt(on) {
-  document.documentElement.classList.toggle("crt-on", Boolean(on));
+const CRT_MODES = ["lite", "full", "off"];
+
+function crtPref() {
+  const raw = prefs.get("crt", "lite");
+  if (raw === true) return "lite";
+  if (raw === false) return "off";
+  return CRT_MODES.includes(raw) ? raw : "lite";
+}
+
+function applyCrt(mode) {
+  const next = CRT_MODES.includes(mode) ? mode : "lite";
+  document.documentElement.classList.remove("crt-on");
+  document.documentElement.classList.toggle("crt-lite", next === "lite");
+  document.documentElement.classList.toggle("crt-full", next === "full");
   document.querySelectorAll("[data-crt-toggle]").forEach((btn) => {
-    btn.setAttribute("aria-pressed", String(Boolean(on)));
+    btn.textContent = `CRT:${next.toUpperCase()}`;
+    btn.setAttribute("aria-pressed", String(next !== "off"));
   });
 }
 
@@ -201,9 +214,11 @@ function wireToggles(header) {
     syncSound();
   });
 
-  crtBtn.setAttribute("aria-pressed", String(prefs.get("crt", true)));
+  crtBtn.textContent = `CRT:${crtPref().toUpperCase()}`;
+  crtBtn.setAttribute("aria-pressed", String(crtPref() !== "off"));
   crtBtn.addEventListener("click", () => {
-    const next = !document.documentElement.classList.contains("crt-on");
+    const current = crtPref();
+    const next = CRT_MODES[(CRT_MODES.indexOf(current) + 1) % CRT_MODES.length];
     prefs.set("crt", next);
     applyCrt(next);
   });

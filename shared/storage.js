@@ -2,6 +2,7 @@ const PREFIX = "timesink";
 
 function safeStorage() {
   try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
     const probe = `${PREFIX}:__probe__`;
     window.localStorage.setItem(probe, "1");
     window.localStorage.removeItem(probe);
@@ -78,7 +79,11 @@ export function createStore(namespace, { version = 1, migrate = null } = {}) {
       }
     },
     save(data) {
-      return rawSet(key, JSON.stringify({ version, data, savedAt: Date.now() }));
+      try {
+        return rawSet(key, JSON.stringify({ version, data, savedAt: Date.now() }));
+      } catch {
+        return false;
+      }
     },
     exists() {
       return rawGet(key) !== null;
@@ -93,23 +98,28 @@ export function createPrefStore(namespace) {
   const memory = new Map();
   const s = store();
 
+  function read(key, fallback) {
+    const full = nsKey(namespace, key);
+    if (!memory.has(full)) {
+      const raw = s ? rawGet(full) : null;
+      memory.set(full, raw === null ? fallback : deserialize(raw, fallback));
+    }
+    const value = memory.get(full);
+    return value && typeof value === "object" ? JSON.parse(JSON.stringify(value)) : value;
+  }
+
+  function write(key, value) {
+    const full = nsKey(namespace, key);
+    memory.set(full, value);
+    if (s && !rawSet(full, serialize(value))) return false;
+    return value;
+  }
+
   return {
-    get(key, fallback) {
-      const full = nsKey(namespace, key);
-      if (!memory.has(full)) {
-        const raw = s ? rawGet(full) : null;
-        memory.set(full, raw === null ? fallback : deserialize(raw, fallback));
-      }
-      return memory.get(full);
-    },
-    set(key, value) {
-      const full = nsKey(namespace, key);
-      memory.set(full, value);
-      if (s) rawSet(full, serialize(value));
-      return value;
-    },
+    get: read,
+    set: write,
     toggle(key, fallback = false) {
-      return this.set(key, !this.get(key, fallback));
+      return write(key, !read(key, fallback));
     },
   };
 }
@@ -132,9 +142,11 @@ export function exportCode(data) {
   try {
     const json = JSON.stringify(data);
     const bytes = new TextEncoder().encode(json);
-    let bin = "";
-    for (const b of bytes) bin += String.fromCharCode(b);
-    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const chunks = [];
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      chunks.push(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
+    }
+    return btoa(chunks.join("")).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   } catch {
     return null;
   }
@@ -142,13 +154,15 @@ export function exportCode(data) {
 
 export function importCode(code) {
   try {
-    const normalized = String(code).trim().replace(/-/g, "+").replace(/_/g, "/");
+    const normalized = String(code).replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+    if (!normalized) return null;
     const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
     const bin = atob(padded);
     const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
     const json = new TextDecoder().decode(bytes);
     const parsed = JSON.parse(json);
-    return parsed && typeof parsed === "object" ? parsed : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed;
   } catch {
     return null;
   }

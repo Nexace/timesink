@@ -1,21 +1,31 @@
 let ctx = null;
 let enabled = false;
-let onStateChange = null;
+const listeners = new Set();
+let sharedNoise = null;
 
 function ac() {
-  if (!ctx) {
-    const Ctor = window.AudioContext ?? window.webkitAudioContext;
-    if (!Ctor) return null;
-    ctx = new Ctor();
+  try {
+    if (typeof window === "undefined") return null;
+    if (!ctx) {
+      const Ctor = window.AudioContext ?? window.webkitAudioContext;
+      if (!Ctor) return null;
+      ctx = new Ctor();
+    }
+    if (ctx.state === "suspended") {
+      const resumed = ctx.resume?.();
+      resumed?.catch?.(() => {});
+    }
+    return ctx;
+  } catch {
+    return null;
   }
-  if (ctx.state === "suspended") ctx.resume().catch(() => {});
-  return ctx;
 }
 
 function blip({ freq = 440, freq2 = null, dur = 0.08, type = "square", gain = 0.05, delay = 0 }) {
   if (!enabled) return;
-  const audio = ac();
-  if (!audio) return;
+  try {
+    const audio = ac();
+    if (!audio) return;
   const t0 = audio.currentTime + delay;
   const osc = audio.createOscillator();
   const amp = audio.createGain();
@@ -26,31 +36,40 @@ function blip({ freq = 440, freq2 = null, dur = 0.08, type = "square", gain = 0.
   amp.gain.exponentialRampToValueAtTime(gain, t0 + 0.008);
   amp.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   osc.connect(amp).connect(audio.destination);
-  osc.start(t0);
-  osc.stop(t0 + dur + 0.02);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  } catch {
+    return;
+  }
 }
 
 function noise({ dur = 0.16, gain = 0.05, delay = 0, hp = 600 }) {
   if (!enabled) return;
-  const audio = ac();
-  if (!audio) return;
-  const t0 = audio.currentTime + delay;
-  const frames = Math.floor(audio.sampleRate * dur);
-  const buffer = audio.createBuffer(1, frames, audio.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < frames; i += 1) {
-    data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+  try {
+    const audio = ac();
+    if (!audio) return;
+    if (!sharedNoise || sharedNoise.sampleRate !== audio.sampleRate) {
+      const frames = Math.min(8192, Math.floor(audio.sampleRate * 0.25));
+      sharedNoise = audio.createBuffer(1, frames, audio.sampleRate);
+      const seed = sharedNoise.getChannelData(0);
+      for (let i = 0; i < frames; i += 1) seed[i] = Math.random() * 2 - 1;
+    }
+    const t0 = audio.currentTime + delay;
+    const src = audio.createBufferSource();
+    const filter = audio.createBiquadFilter();
+    const amp = audio.createGain();
+    src.buffer = sharedNoise;
+    src.loop = true;
+    filter.type = "highpass";
+    filter.frequency.value = hp;
+    amp.gain.setValueAtTime(gain, t0);
+    amp.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(filter).connect(amp).connect(audio.destination);
+    src.start(t0);
+    src.stop(t0 + dur + 0.02);
+  } catch {
+    return;
   }
-  const src = audio.createBufferSource();
-  const filter = audio.createBiquadFilter();
-  const amp = audio.createGain();
-  src.buffer = buffer;
-  filter.type = "highpass";
-  filter.frequency.value = hp;
-  amp.gain.setValueAtTime(gain, t0);
-  amp.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  src.connect(filter).connect(amp).connect(audio.destination);
-  src.start(t0);
 }
 
 export const sfx = {
@@ -82,9 +101,15 @@ export const sfx = {
 };
 
 export function setSoundEnabled(value) {
-  enabled = Boolean(value);
+  enabled = value === true;
   if (enabled) ac();
-  onStateChange?.(enabled);
+  listeners.forEach((fn) => {
+    try {
+      fn(enabled);
+    } catch {
+      return;
+    }
+  });
   return enabled;
 }
 
@@ -93,5 +118,6 @@ export function isSoundEnabled() {
 }
 
 export function onSoundStateChange(fn) {
-  onStateChange = fn;
+  if (typeof fn === "function") listeners.add(fn);
+  return () => listeners.delete(fn);
 }

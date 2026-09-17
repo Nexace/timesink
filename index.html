@@ -9,6 +9,7 @@
       content="A cabinet of small, original browser experiments. Simulations, retro arcade, chaos toys. No accounts, no installs — select an experiment and play."
     />
     <meta name="theme-color" content="#050508" />
+    <meta name="color-scheme" content="dark" />
     <link rel="canonical" href="https://timesink.vercel.app/" />
 
     <meta property="og:type" content="website" />
@@ -19,14 +20,12 @@
       content="A cabinet of small, original browser experiments. Select one and play instantly."
     />
     <meta property="og:url" content="https://timesink.vercel.app/" />
-    <meta name="twitter:card" content="summary" />
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Share+Tech+Mono&display=swap"
-      rel="stylesheet"
-    />
+    <meta property="og:image" content="https://timesink.vercel.app/assets/og-home.png" />
+    <meta property="og:image:alt" content="SYS://ARCADE.NET — a cabinet of small experiments" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SYS://ARCADE.NET — insert coin" />
+    <meta name="twitter:description" content="A cabinet of small, original browser experiments. Select one and play instantly." />
+    <meta name="twitter:image" content="https://timesink.vercel.app/assets/og-home.png" />
 
     <link rel="stylesheet" href="/shared/tokens.css" />
     <link rel="stylesheet" href="/shared/base.css" />
@@ -37,20 +36,29 @@
     />
   </head>
   <body data-page="home" data-accent="cyan">
+    <a class="skip-link" href="#main">Skip to content</a>
     <main id="main" class="home">
       <section class="boot wrap" aria-label="System boot">
-        <pre class="boot__log" id="boot-log"></pre>
         <h1 class="boot__title">ARCADE.NET</h1>
         <p class="boot__sub">A CABINET OF SMALL EXPERIMENTS. NO COINS REQUIRED.</p>
-        <dl class="telegrid" id="hero-stats"></dl>
+        <details class="boot__drawer">
+          <summary>BIOS TELEMETRY</summary>
+          <pre class="boot__log" id="boot-log"></pre>
+        </details>
       </section>
 
       <section class="games wrap" id="games" aria-label="Experiment directory">
         <div class="section-head">
           <h2 class="section-title">SELECT EXPERIMENT</h2>
-          <div class="filterbar" id="filterbar" role="tablist" aria-label="Filter experiments"></div>
+          <div class="filterbar" id="filterbar" role="group" aria-label="Filter experiments"></div>
         </div>
         <div class="game-grid" id="game-grid"></div>
+        <noscript>
+          <div class="panel"><div class="panel__body">
+            <p>This directory needs JavaScript to list experiments. Start here:</p>
+            <p><a href="/games/mars-base">MARS BASE — turn-based colony experiment</a></p>
+          </div></div>
+        </noscript>
       </section>
 
       <section class="about wrap" id="about" aria-label="About">

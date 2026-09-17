@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A hub of small, original browser games.",
+  "description": "A cabinet of small, original browser experiments.",
   "scripts": {
     "dev": "npx --yes serve . -l 5173",
     "start": "npx --yes serve . -l 5173",
-    "preview": "npx --yes serve dist -l 4173",
-    "test": "node games/mars-base/engine.test.mjs"
+    "preview": "npx --yes serve . -l 4173",
+    "test": "node games/mars-base/engine.test.mjs && node shared/shared.test.mjs"
   }
 }

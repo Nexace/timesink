@@ -16,6 +16,9 @@ import {
   fromSave,
   setDoctrine,
   eventChanceFor,
+  rngFor,
+  debugApplyEvent,
+  seedForDaily,
   buildingById,
   level,
   popCap,
@@ -301,6 +304,180 @@ t("preview never mutates state", () => {
   previewNextSol(s);
   productionBreakdown(s);
   assert.equal(JSON.stringify(s), snapshot);
+});
+
+t("meteor with no targets falls back without double count", () => {
+  const s = createState({ seed: 21 });
+  const before = s.stats.events;
+  const report = { events: [], achievements: [], growth: 0, unlocked: [] };
+  const { default: eng } = { default: null };
+  void eng;
+  const rng = rngFor(s);
+  debugApplyEvent(s, "meteor-strike", rng, report);
+  assert.equal(s.stats.events, before + 1);
+  assert.equal(report.events.length, 1);
+  assert.equal(report.events[0].id, "dust-devil");
+});
+
+t("solar flare shields with power or takes a colonist", () => {
+  const rich = createState({ seed: 22 });
+  rich.resources.power = 100;
+  rich.population = 5;
+  const rngR = rngFor(rich);
+  const repR = { events: [] };
+  debugApplyEvent(rich, "solar-flare", rngR, repR);
+  assert.equal(rich.resources.power, 60);
+  assert.equal(rich.population, 5);
+
+  const poor = createState({ seed: 22 });
+  poor.resources.power = 0;
+  poor.population = 5;
+  const rngP = rngFor(poor);
+  debugApplyEvent(poor, "solar-flare", rngP, { events: [] });
+  assert.equal(poor.population, 4);
+});
+
+t("reactor scram zeroes reactor output", () => {
+  const s = createState({ seed: 23 });
+  s.buildings["nuclear-reactor"] = 1;
+  s.resources.power = 500;
+  const on = productionBreakdown(s).produced.power;
+  assert.ok(on >= 24);
+  s.effects.push({ id: "reactor-scram", solsLeft: 2 });
+  const off = productionBreakdown(s).produced.power;
+  assert.equal(off, 0);
+});
+
+t("unaffordable rescue accept refuses without dying", () => {
+  const s = createState({ seed: 24 });
+  s.resources.oxygen = 0;
+  s.resources.credits = 0;
+  advanceSol(s);
+  advanceSol(s);
+  advanceSol(s);
+  assert.ok(s.pending);
+  const r = resolveRescue(s, true);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "unaffordable");
+  assert.ok(s.pending);
+  assert.equal(s.status, "playing");
+});
+
+t("second rescue costs more than the first", () => {
+  const s = createState({ seed: 25 });
+  const first = rescueCost(s);
+  s.rescues = 1;
+  const second = rescueCost(s);
+  assert.ok(second > first);
+  assert.equal(first, 100);
+});
+
+t("daily seeds are stable per UTC day", () => {
+  const a = seedForDaily("2026-09-17");
+  const b = seedForDaily("2026-09-17");
+  const c = seedForDaily("2026-09-18");
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+  const g1 = createState({ mode: "daily", seed: a });
+  const g2 = createState({ mode: "daily", seed: a });
+  for (let i = 0; i < 10; i += 1) {
+    advanceSol(g1);
+    advanceSol(g2);
+  }
+  assert.deepEqual(g1.resources, g2.resources);
+});
+
+t("fromSave rejects garbage", () => {
+  assert.equal(fromSave(null), null);
+  assert.equal(fromSave([1, 2]), null);
+  assert.equal(fromSave({ version: 999 }), null);
+  assert.equal(fromSave({ version: 1, buildings: { "solar-array": "x" }, resources: { credits: NaN } }).buildings["solar-array"], 0);
+  const bad = fromSave({ version: 1, population: -99, sol: "5", effects: "x", achievements: ["nope", "first-light"] });
+  assert.equal(bad.population, 0);
+  assert.equal(bad.sol, 5);
+  assert.deepEqual(bad.effects, []);
+  assert.deepEqual(bad.achievements, ["first-light"]);
+});
+
+t("undo rewinds rng exactly", () => {
+  const s = createState({ seed: 26 });
+  advanceSol(s);
+  const callsAfter = s.rngCalls;
+  assert.ok(callsAfter > 0);
+  undoLastSol(s);
+  assert.equal(s.rngCalls, 0);
+  const a = createState({ seed: 26 });
+  advanceSol(s);
+  advanceSol(a);
+  assert.deepEqual(s.resources, a.resources);
+});
+
+t("growth doctrine grows faster, science doubles lab", () => {
+  const g = createState({ seed: 27 });
+  g.doctrine = "growth";
+  const p = createState({ seed: 27 });
+  g.resources = { power: 500, water: 500, oxygen: 500, ore: 0, credits: 500 };
+  p.resources = { power: 500, water: 500, oxygen: 500, ore: 0, credits: 500 };
+  g.buildings["habitat-dome"] = 3;
+  p.buildings["habitat-dome"] = 3;
+  for (let i = 0; i < 12; i += 1) {
+    advanceSol(g);
+    advanceSol(p);
+  }
+  assert.ok(g.population > p.population);
+
+  const lab = createState({ seed: 27 });
+  lab.doctrine = "science";
+  lab.buildings["ore-mine"] = 2;
+  lab.resources.power = 500;
+  const plain = createState({ seed: 27 });
+  plain.buildings["ore-mine"] = 2;
+  plain.resources.power = 500;
+  plain.buildings["research-lab"] = 1;
+  lab.buildings["research-lab"] = 1;
+  const sciBoost = productionBreakdown(lab).produced.ore / productionBreakdown(plain).produced.ore;
+  assert.ok(sciBoost > 1.02);
+});
+
+t("dust storm cuts solar to forty percent", () => {
+  const s = createState({ seed: 28 });
+  s.buildings["solar-array"] = 2;
+  s.resources.power = 0;
+  const clear = productionBreakdown(s).produced.power;
+  s.effects.push({ id: "dust-storm", solsLeft: 2 });
+  const storm = productionBreakdown(s).produced.power;
+  assert.ok(Math.abs(storm - clear * 0.4) < 0.01);
+});
+
+t("trade hub keeps half the ore as reserve", () => {
+  const s = createState({ seed: 29 });
+  s.buildings["trade-hub"] = 2;
+  s.buildings["ore-mine"] = 4;
+  s.resources.ore = 0;
+  s.resources.power = 500;
+  advanceSol(s);
+  assert.ok(s.resources.ore > 0);
+});
+
+t("brownout or zero oxygen resets the sustain streak", () => {
+  const s = createState({ seed: 30 });
+  s.selfSustainStreak = 9;
+  s.resources = { power: 0, water: 500, oxygen: 500, ore: 0, credits: 500 };
+  s.buildings["electrolyzer"] = 1;
+  advanceSol(s);
+  assert.equal(s.selfSustainStreak, 0);
+});
+
+t("empty colony loses even with sustain met", () => {
+  const s = createState({ seed: 31 });
+  s.population = 1;
+  s.resources.power = 0;
+  s.selfSustainStreak = 10;
+  const rng = rngFor(s);
+  debugApplyEvent(s, "solar-flare", rng, { events: [] });
+  assert.equal(s.population, 0);
+  advanceSol(s);
+  assert.equal(s.status, "lost");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

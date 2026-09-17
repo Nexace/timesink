@@ -24,7 +24,7 @@ export const games = [
     tagline: "Snake, except every apple deletes a tile of the grid behind you.",
     kind: "arcade",
     tags: ["arcade", "one-more-run"],
-    accent: "lime",
+    accent: "cyan",
     motif: "snake",
     version: "0.1",
     status: "soon",
@@ -46,7 +46,7 @@ export const games = [
     tagline: "Guess what ordinary things cost. Most answers will upset you.",
     kind: "quiz",
     tags: ["quiz", "data"],
-    accent: "violet",
+    accent: "purple",
     motif: "target",
     version: "0.1",
     status: "soon",
@@ -58,7 +58,7 @@ export function getGame(slug) {
 }
 
 export function gameHref(slug) {
-  return `/games/${slug}`;
+  return `/games/${encodeURIComponent(String(slug ?? ""))}`;
 }
 
 export function liveGames() {

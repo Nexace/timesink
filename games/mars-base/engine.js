@@ -82,13 +82,21 @@ export function createState({ mode = "normal", seed = null } = {}) {
 
 export function rngFor(state) {
   const rng = rngFromSnapshot({ seed: state.seed, calls: state.rngCalls });
-  const wrapped = {
-    ...rng,
+  return {
+    next: () => rng.next(),
+    float: (min, max) => rng.float(min, max),
+    int: (min, max) => rng.int(min, max),
+    chance: (p) => rng.chance(p),
+    pick: (list) => rng.pick(list),
+    weighted: (entries) => rng.weighted(entries),
+    shuffle: (list) => rng.shuffle(list),
+    get calls() {
+      return rng.calls;
+    },
     commit() {
       state.rngCalls = rng.calls;
     },
   };
-  return wrapped;
 }
 
 export function level(state, id) {
@@ -372,9 +380,13 @@ export function eventChanceFor(sol) {
   return EVENT_CHANCE_EARLY;
 }
 
-function applyEvent(state, id, rng, report) {
+export function debugApplyEvent(state, id, rng, report) {
+  return applyEvent(state, id, rng, report);
+}
+
+function applyEvent(state, id, rng, report, count = true) {
   const def = eventById(id);
-  state.stats.events += 1;
+  if (count) state.stats.events += 1;
 
   switch (id) {
     case "dust-storm": {
@@ -387,7 +399,7 @@ function applyEvent(state, id, rng, report) {
     case "meteor-strike": {
       const targets = BUILDING_IDS.filter((b) => b !== "landing-pad" && b !== "habitat-dome" && level(state, b) > 0);
       if (!targets.length) {
-        applyEvent(state, "dust-devil", rng, report);
+        applyEvent(state, "dust-devil", rng, report, false);
         return;
       }
       const target = rng.pick(targets);
@@ -441,20 +453,23 @@ function applyEvent(state, id, rng, report) {
 }
 
 export function rescueCost(state) {
-  return RESCUE_BASE_COST * 2 ** state.rescues;
+  return Math.round(RESCUE_BASE_COST * 1.5 ** state.rescues);
 }
 
 export function resolveRescue(state, accept) {
   if (!state.pending || state.pending.type !== "rescue") return { ok: false };
   const cost = state.pending.cost;
+
+  if (accept && state.resources.credits < cost) return { ok: false, reason: "unaffordable" };
+
   state.pending = null;
 
-  if (accept && state.resources.credits >= cost) {
+  if (accept) {
     state.resources.credits -= cost;
     state.rescues += 1;
     state.stats.rescues += 1;
-    state.resources.oxygen = Math.max(state.resources.oxygen, 20);
-    state.resources.water = Math.max(state.resources.water, 10);
+    state.resources.oxygen = Math.max(state.resources.oxygen, 20, Math.ceil(state.population * 1.2));
+    state.resources.water = Math.max(state.resources.water, 10, Math.ceil(state.population * 0.8));
     state.outputPenaltySols = RESCUE_PENALTY_SOLS;
     state.suffocation = 0;
     pushLog(state, `Rescue mission accepted for ${cost} credits. Output halved for ${RESCUE_PENALTY_SOLS} sols.`, "info");
@@ -517,15 +532,64 @@ export function toSave(state) {
   return copy;
 }
 
+function num(value, fallback, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
 export function fromSave(data) {
-  if (!data || typeof data !== "object") return null;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   if (data.version !== SAVE_VERSION) return null;
-  const state = createState({ mode: data.mode ?? "normal", seed: data.seed });
-  const merged = { ...state, ...clone(data), history: [] };
-  merged.buildings = { ...state.buildings, ...(data.buildings ?? {}) };
-  merged.resources = { ...state.resources, ...(data.resources ?? {}) };
-  merged.stats = { ...state.stats, ...(data.stats ?? {}) };
-  return merged;
+  const seed = num(data.seed, 0, 0, 0xffffffff);
+  const mode = data.mode === "daily" ? "daily" : "normal";
+  const state = createState({ mode, seed });
+
+  state.sol = Math.max(1, Math.floor(num(data.sol, 1, 1, 100000)));
+  state.status = data.status === "won" || data.status === "lost" ? data.status : "playing";
+  state.doctrine = ["industry", "science", "growth"].includes(data.doctrine) ? data.doctrine : null;
+  state.rngCalls = Math.max(0, Math.floor(num(data.rngCalls, 0, 0, 10000000)));
+  state.population = Math.max(0, Math.floor(num(data.population, 2, 0, 10000)));
+  state.growthTimer = Math.max(0, Math.floor(num(data.growthTimer, 0, 0, 1000)));
+  state.suffocation = Math.max(0, Math.floor(num(data.suffocation, 0, 0, 1000)));
+  state.selfSustainStreak = Math.max(0, Math.floor(num(data.selfSustainStreak, 0, 0, 100000)));
+  state.rescues = Math.max(0, Math.floor(num(data.rescues, 0, 0, 1000)));
+  state.outputPenaltySols = Math.max(0, Math.floor(num(data.outputPenaltySols, 0, 0, 1000)));
+  state.pending = null;
+
+  if (data.buildings && typeof data.buildings === "object") {
+    for (const def of BUILDINGS) {
+      const lvl = Math.floor(num(data.buildings[def.id], def.startLevel ?? 0, 0, def.maxLevel));
+      state.buildings[def.id] = lvl;
+    }
+  }
+  if (data.resources && typeof data.resources === "object") {
+    for (const res of RESOURCE_IDS) {
+      state.resources[res] = num(data.resources[res], START_RESOURCES[res], 0, 1e12);
+    }
+  }
+  if (data.stats && typeof data.stats === "object") {
+    for (const key of Object.keys(state.stats)) {
+      state.stats[key] = Math.max(0, Math.floor(num(data.stats[key], 0, 0, 1e12)));
+    }
+  }
+  if (Array.isArray(data.achievements)) {
+    const valid = new Set(ACHIEVEMENTS.map((a) => a.id));
+    state.achievements = data.achievements.filter((id) => valid.has(id));
+  }
+  if (Array.isArray(data.effects)) {
+    state.effects = data.effects
+      .filter((e) => e && typeof e.id === "string" && eventById(e.id))
+      .map((e) => ({ id: e.id, solsLeft: Math.max(1, Math.floor(num(e.solsLeft, 1, 1, 100))) }));
+  }
+  if (Array.isArray(data.log)) {
+    state.log = data.log
+      .filter((e) => e && typeof e.text === "string")
+      .slice(0, 80)
+      .map((e) => ({ sol: Math.max(1, Math.floor(num(e.sol, 1, 1, 100000))), type: String(e.type ?? "info"), text: String(e.text).slice(0, 500) }));
+  }
+  state.history = [];
+  return state;
 }
 
 export function seedForDaily(key) {

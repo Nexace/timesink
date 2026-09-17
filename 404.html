@@ -2,16 +2,10 @@
 <html lang="en" data-accent="magenta" class="crt-on">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>SIGNAL LOST — SYS://ARCADE.NET</title>
     <meta name="robots" content="noindex" />
     <meta name="theme-color" content="#050508" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Share+Tech+Mono&display=swap"
-      rel="stylesheet"
-    />
     <link rel="stylesheet" href="/shared/tokens.css" />
     <link rel="stylesheet" href="/shared/base.css" />
     <link rel="stylesheet" href="/404.css" />
@@ -21,15 +15,16 @@
     />
   </head>
   <body data-page="404" data-accent="magenta">
+    <a class="skip-link" href="#main">Skip to content</a>
     <main id="main" class="notfound wrap">
-      <p class="notfound__code">404</p>
+      <p class="notfound__code" aria-hidden="true">404</p>
       <h1 class="notfound__title">SIGNAL LOST</h1>
       <pre class="notfound__log">> ROUTE NOT FOUND
 > CARRIER DROPPED
 > RE-ROUTING TO DIRECTORY_</pre>
       <div class="notfound__actions">
         <a class="btn btn--primary" href="/">RETURN TO DIRECTORY</a>
-        <a class="btn btn--ghost" href="/games/mars-base">PLAY MARS BASE</a>
+        <a class="btn btn--ghost" href="/#games">BROWSE EXPERIMENTS</a>
       </div>
     </main>
     <script type="module">

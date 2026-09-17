@@ -35,19 +35,27 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   applyCrt(prefs.get("crt", true));
   applyPhosphor(prefs.get("phosphor", "full"));
 
-  const skip = document.createElement("a");
-  skip.className = "skip-link";
-  skip.href = "#main";
-  skip.textContent = "Skip to content";
+  const skip = document.querySelector("a.skip-link") ?? document.createElement("a");
+  if (!skip.isConnected) {
+    skip.className = "skip-link";
+    skip.href = "#main";
+    skip.textContent = "Skip to content";
+  }
+
+  const cosmos = document.createElement("div");
+  cosmos.className = "cosmos";
+  cosmos.setAttribute("aria-hidden", "true");
 
   const crt = document.createElement("div");
   crt.className = "crt-overlay";
   crt.setAttribute("aria-hidden", "true");
 
-  body.prepend(skip, crt);
+  body.prepend(skip, cosmos, crt);
 
   const online = String(liveGames().length).padStart(2, "0");
   const total = String(games.length).padStart(2, "0");
+  const phosLabel = `PHOS:${PHOSPHORS.find((p) => p.id === prefs.get("phosphor", "full"))?.label ?? "FULL"}`;
+  const crtOn = prefs.get("crt", true);
 
   const header = document.createElement("header");
   header.className = "shell";
@@ -61,15 +69,18 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
     </div>
     <nav class="shell__nav" aria-label="Site">
       ${showGameLinks ? `<a class="hbtn" href="/" title="All games" aria-label="All games">${icon("gamepad", { size: 14 })}</a>` : ""}
-      <button class="hbtn" type="button" data-crt-toggle aria-pressed="false">CRT</button>
-      <button class="hbtn" type="button" data-phosphor-toggle>PHOS:FULL</button>
+      <button class="hbtn" type="button" data-crt-toggle aria-pressed="${crtOn}">CRT</button>
+      <button class="hbtn" type="button" data-phosphor-toggle aria-pressed="${prefs.get("phosphor", "full") !== "full"}">${phosLabel}</button>
       <button class="hbtn" type="button" data-sound-toggle aria-pressed="false">SFX:OFF</button>
       <a class="hbtn" href="${SITE.repo}" target="_blank" rel="noopener noreferrer" title="Source code" aria-label="Source code">${icon("github", { size: 14 })}</a>
     </nav>
   `;
 
-  const main = body.querySelector("main") ?? body.firstElementChild;
-  body.insertBefore(header, main);
+  if (document.querySelector("header.shell")) return document.querySelector("header.shell");
+
+  const main = body.querySelector("main");
+  if (main) body.insertBefore(header, main);
+  else body.appendChild(header);
 
   const footer = document.createElement("footer");
   footer.className = "footer";
@@ -129,14 +140,16 @@ function applyPhosphor(id) {
   else document.documentElement.dataset.phosphor = mode;
   document.querySelectorAll("[data-phosphor-toggle]").forEach((btn) => {
     btn.textContent = `PHOS:${PHOSPHORS.find((p) => p.id === mode).label}`;
+    btn.setAttribute("aria-pressed", String(mode !== "full"));
   });
 }
 
 function wireToggles(header) {
-  setSoundEnabled(prefs.get("sound", false));
+  setSoundEnabled(prefs.get("sound", false) === true);
   const soundBtn = header.querySelector("[data-sound-toggle]");
   const crtBtn = header.querySelector("[data-crt-toggle]");
   const phosBtn = header.querySelector("[data-phosphor-toggle]");
+  if (!soundBtn || !crtBtn || !phosBtn) return;
 
   function syncSound() {
     const on = isSoundEnabled();
@@ -196,7 +209,8 @@ export function toast({ title, body = "", icon: iconName = "sparkle", duration =
   `;
   stack.appendChild(el);
 
-  const timer = setTimeout(dismiss, duration);
+  const ms = Number.isFinite(duration) ? Math.min(Math.max(0, duration), 2 ** 31 - 1) : 3400;
+  const timer = setTimeout(dismiss, ms);
   function dismiss() {
     clearTimeout(timer);
     if (el.isConnected) el.remove();
@@ -214,16 +228,17 @@ export function openModal({
   dismissible = true,
   onClose = null,
 }) {
-  activeModal?.close();
+  if (activeModal) activeModal.close(null);
 
   const previouslyFocused = document.activeElement;
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
 
+  const VARIANTS = new Set(["primary", "ghost", "danger"]);
   const buttons = actions
     .map(
       (a, i) =>
-        `<button type="button" class="btn ${a.variant ? `btn--${a.variant}` : ""}" data-action="${i}">${escapeHtml(a.label)}</button>`
+        `<button type="button" class="btn ${VARIANTS.has(a.variant) ? `btn--${a.variant}` : ""}" data-action="${i}">${escapeHtml(a.label)}</button>`
     )
     .join("");
 
@@ -239,6 +254,7 @@ export function openModal({
   `;
 
   document.body.appendChild(backdrop);
+  const priorOverflow = document.body.style.overflow;
   document.body.style.overflow = "hidden";
 
   let resolveAction = null;
@@ -249,7 +265,7 @@ export function openModal({
   function close(result = null) {
     if (!backdrop.isConnected) return;
     backdrop.remove();
-    document.body.style.overflow = "";
+    document.body.style.overflow = priorOverflow;
     activeModal = null;
     if (previouslyFocused?.isConnected) previouslyFocused.focus();
     resolveAction(result);
@@ -268,8 +284,13 @@ export function openModal({
     const actionBtn = event.target.closest("[data-action]");
     if (actionBtn) {
       const action = actions[Number(actionBtn.dataset.action)];
-      action?.onClick?.();
-      close(action.id ?? action.label);
+      if (!action) return;
+      let veto = false;
+      try {
+        veto = action.onClick?.() === false;
+      } finally {
+        if (!veto) close(action.id ?? action.label);
+      }
     }
   });
 
@@ -280,8 +301,13 @@ export function openModal({
       return;
     }
     if (event.key !== "Tab") return;
-    const focusables = backdrop.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-    if (!focusables.length) return;
+    const focusables = [...backdrop.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(
+      (n) => !n.disabled && n.offsetParent !== null
+    );
+    if (!focusables.length) {
+      event.preventDefault();
+      return;
+    }
     const list = [...focusables];
     const first = list[0];
     const last = list[list.length - 1];
@@ -303,11 +329,14 @@ export function openModal({
   activeModal = { close: wrapped, el: backdrop };
 
   const primary =
-    backdrop.querySelector('[data-action="0"]') ?? backdrop.querySelector("[data-close]") ?? backdrop.querySelector("button");
+    backdrop.querySelector("input,textarea,select") ??
+    backdrop.querySelector('[data-action="0"]') ??
+    backdrop.querySelector("[data-close]") ??
+    backdrop.querySelector("button");
   primary?.focus();
 
   settled.finally(() => document.removeEventListener("keydown", onKeydown));
-  return { close: wrapped, result: settled };
+  return { close: wrapped, el: backdrop, result: settled };
 }
 
 export function confirmDialog({

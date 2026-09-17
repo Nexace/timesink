@@ -1,4 +1,6 @@
 User-agent: *
 Allow: /
+Disallow: /game-template.html
+Disallow: /game-template
 
 Sitemap: https://timesink.vercel.app/sitemap.xml

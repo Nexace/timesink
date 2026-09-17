@@ -59,8 +59,11 @@ const PATHS = {
 export function icon(name, { size = 20, strokeWidth = 1.8, cls = "" } = {}) {
   const body = PATHS[name];
   if (!body) return "";
-  const classes = cls ? ` class="${cls}"` : "";
-  return `<svg${classes} width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
+  const px = Math.min(256, Math.max(8, Math.floor(Number(size) || 20)));
+  const sw = Math.min(8, Math.max(0.5, Number(strokeWidth) || 1.8));
+  const safeCls = String(cls).replace(/[^a-zA-Z0-9 _-]/g, "").slice(0, 64);
+  const classes = safeCls ? ` class="${safeCls}"` : "";
+  return `<svg${classes} width="${px}" height="${px}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
 }
 
 export function iconNames() {

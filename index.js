@@ -1,16 +1,16 @@
-import { initShell, escapeHtml, toast } from "/shared/shell.js";
+import { initShell, escapeHtml, toast, prefersReducedMotion } from "/shared/shell.js";
 import { games, gameHref, liveGames } from "/shared/registry.js";
 import { sfx } from "/shared/sound.js";
-import { prefersReducedMotion } from "/shared/shell.js";
 
 const ACCENTS = {
-  flare: "#ff4900",
+  flare: "#ff5500",
   cyan: "#00f0ff",
-  magenta: "#ff0055",
+  magenta: "#ff007f",
   lime: "#00ff66",
-  violet: "#b06bff",
-  amber: "#ffb000",
-  rust: "#ff4900",
+  violet: "#7b2ff7",
+  purple: "#7b2ff7",
+  amber: "#ffb700",
+  rust: "#ff5500",
 };
 
 const FILTERS = [
@@ -25,12 +25,13 @@ let activeFilter = "all";
 initShell();
 
 bootLog();
-renderStats();
 renderFilters();
 renderGrid();
+wireGrid(document.getElementById("game-grid"));
 
 function bootLog() {
   const host = document.getElementById("boot-log");
+  if (!host) return;
   const live = liveGames().length;
   const lines = [
     "> SYS://ARCADE.NET BIOS v2.1",
@@ -51,37 +52,18 @@ function bootLog() {
   }, 24);
 }
 
-function renderStats() {
-  const host = document.getElementById("hero-stats");
-  const live = liveGames().length;
-  const kinds = new Set(games.map((g) => g.kind)).size;
-  const stats = [
-    { label: "EXPERIMENTS", value: String(games.length).padStart(2, "0") },
-    { label: "ONLINE", value: String(live).padStart(2, "0") },
-    { label: "GENRES", value: String(kinds).padStart(2, "0") },
-  ];
-  host.innerHTML = stats
-    .map(
-      (s) => `
-      <div class="telegrid__cell">
-        <dt>${escapeHtml(s.label)}</dt>
-        <dd>${escapeHtml(s.value)}</dd>
-      </div>`
-    )
-    .join("");
-}
-
 function renderFilters() {
   const host = document.getElementById("filterbar");
+  if (!host) return;
   host.innerHTML = FILTERS.map(
-    (f) => `<button type="button" role="tab" class="fbtn" data-filter="${f.id}" aria-selected="${f.id === activeFilter}">[${escapeHtml(f.label)}]</button>`
+    (f) => `<button type="button" class="fbtn" data-filter="${f.id}" aria-pressed="${f.id === activeFilter}">[${escapeHtml(f.label)}]</button>`
   ).join("");
   host.querySelectorAll("[data-filter]").forEach((btn) => {
     btn.addEventListener("click", () => {
       activeFilter = btn.dataset.filter;
       sfx.click();
       host.querySelectorAll("[data-filter]").forEach((b) =>
-        b.setAttribute("aria-selected", String(b === btn))
+        b.setAttribute("aria-pressed", String(b === btn))
       );
       renderGrid();
     });
@@ -102,57 +84,79 @@ function isNew(game) {
 
 function renderGrid() {
   const host = document.getElementById("game-grid");
+  if (!host) return;
   host.innerHTML = visibleGames().map(renderCard).join("");
+}
 
-  host.addEventListener(
-    "click",
-    (event) => {
-      const soon = event.target.closest(".card--soon");
-      if (soon) {
-        event.preventDefault();
-        sfx.deny();
-        toast({
-          title: "CARTRIDGE MISSING",
-          body: `${soon.dataset.title} is still on the workbench.`,
-          icon: "lock",
-        });
-      }
-    },
-    { once: true }
-  );
+function denySoon(soon) {
+  sfx.deny();
+  toast({
+    title: "CARTRIDGE MISSING",
+    body: `${soon.dataset.title} is still on the workbench.`,
+    icon: "lock",
+  });
+}
 
+function wireGrid(host) {
+  if (!host) return;
+  host.addEventListener("click", (event) => {
+    const soon = event.target.closest(".card--soon");
+    if (soon) {
+      event.preventDefault();
+      denySoon(soon);
+    }
+  });
+
+  host.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const soon = event.target.closest(".card--soon");
+    if (soon) {
+      event.preventDefault();
+      denySoon(soon);
+    }
+  });
+
+  let lastHover = 0;
   host.addEventListener("pointerover", (event) => {
-    if (event.target.closest(".card:not(.card--soon)")) sfx.hover();
+    const now = Date.now();
+    if (now - lastHover < 120) return;
+    if (event.target.closest(".card:not(.card--soon)")) {
+      lastHover = now;
+      sfx.hover();
+    }
   });
 }
 
 function renderCard(game) {
   const live = game.status === "live";
   const color = ACCENTS[game.accent] ?? ACCENTS.cyan;
+  const tags = Array.isArray(game.tags) ? game.tags : [];
   const status = live
-    ? `<span class="badge badge--accent card__ver">v${escapeHtml(game.version ?? "1.0")} // ACTIVE</span>`
-    : `<span class="badge card__ver">v${escapeHtml(game.version ?? "0.1")} // STANDBY</span>`;
-  const fresh = live && isNew(game) ? `<span class="badge badge--ok card__new">NEW</span>` : "";
-  const tags = game.tags.map((t) => `<span class="chip">${escapeHtml(t)}</span>`).join("");
+    ? `v${escapeHtml(game.version ?? "1.0")} // ACTIVE`
+    : `v${escapeHtml(game.version ?? "0.1")} // STANDBY`;
+  const fresh = live && isNew(game) ? `<span class="badge card__new">NEW</span>` : "";
+  const tagChips = tags.map((t) => `<span class="chip">${escapeHtml(t)}</span>`).join("");
+  const fx = live ? "" : `<div class="card__radar" aria-hidden="true"></div><div class="card__noise" aria-hidden="true"></div>`;
 
   const inner = `
+    <div class="card__banner"><span>${status}</span>${fresh}</div>
     <div class="card__thumb">
       <div class="card__thumb-inner">${motif(game.motif, color)}</div>
-      ${status}${fresh}
+      ${fx}
     </div>
     <div class="card__body">
-      <span class="card__kind">${escapeHtml(game.kind)}</span>
+      <span class="card__kind">${escapeHtml(game.kind ?? "experiment")}</span>
       <span class="card__title">${escapeHtml(game.title)}</span>
-      <p class="card__tagline">${escapeHtml(game.tagline)}</p>
-      <div class="card__tags">${tags}</div>
+      <p class="card__tagline">${escapeHtml(game.tagline ?? "")}</p>
+      <div class="card__tags">${tagChips}</div>
       <span class="card__cta"><span>${live ? "LAUNCH" : "STANDBY"}</span><span aria-hidden="true">&gt;&gt;</span></span>
     </div>
   `;
 
   if (live) {
-    return `<a class="card" href="${gameHref(game.slug)}" data-accent="${game.accent}" style="--card-accent:${color}">${inner}</a>`;
+    return `<a class="card" href="${gameHref(game.slug)}" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}">${inner}</a>`;
   }
-  return `<div class="card card--soon" data-accent="${game.accent}" style="--card-accent:${color}" data-title="${escapeHtml(game.title)}" tabindex="0" role="button" aria-disabled="true">${inner}</div>`;
+  return `<div class="card card--soon" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}" data-title="${escapeHtml(game.title)}" tabindex="0" role="button" aria-disabled="true" aria-label="${escapeHtml(game.title)} — coming soon">${inner}</div>`;
 }
 
 function motif(kind, color) {
@@ -168,7 +172,7 @@ function motif(kind, color) {
       <rect x="48" y="33" width="11" height="11" fill="${color}"/>
       <rect x="48" y="22" width="11" height="11" fill="${color}"/>
       <rect x="60" y="22" width="11" height="11" fill="${color}"/>
-      <rect x="84" y="22" width="11" height="11" fill="#ff0055"/>
+      <rect x="84" y="22" width="11" height="11" fill="#ff007f"/>
       ${close}`;
   }
   if (kind === "cards") {
@@ -183,7 +187,7 @@ function motif(kind, color) {
     return `${open}${bg}${grid}
       <rect x="38" y="11" width="44" height="44" fill="none" stroke="${color}" stroke-width="3"/>
       <rect x="48" y="21" width="24" height="24" fill="none" stroke="${color}" stroke-width="3"/>
-      <rect x="56" y="29" width="8" height="8" fill="#ff0055"/>
+      <rect x="56" y="29" width="8" height="8" fill="#ff007f"/>
       ${close}`;
   }
   return `${open}${bg}${grid}

@@ -36,6 +36,8 @@ let lastStocks = null;
 
 const refs = { res: {}, bld: {}, prow: {} };
 
+const LOG_TYPES = new Set(["info", "good", "bad", "danger", "build"]);
+
 const el = (id) => document.getElementById(id);
 
 initShell();
@@ -162,7 +164,7 @@ function doctrineModal(onDone) {
     </button>`
   ).join("");
 
-  const { result } = openModal({
+  const { close, el: modalEl, result } = openModal({
     title: "Found a colony on Mars",
     body: `
       <p>Pick a founding doctrine. It shapes how your colony grows and cannot be changed later.</p>
@@ -173,12 +175,11 @@ function doctrineModal(onDone) {
     actions: [{ id: "skip", label: "No doctrine", variant: "ghost" }],
   });
 
-  document.querySelectorAll("[data-doctrine]").forEach((btn) => {
+  modalEl.querySelectorAll("[data-doctrine]").forEach((btn) => {
     btn.addEventListener("click", () => {
       setDoctrine(state, btn.dataset.doctrine);
       sfx.build();
-      document.querySelector(".modal-backdrop")?.remove();
-      document.body.style.overflow = "";
+      close(`doctrine:${btn.dataset.doctrine}`);
       onDone?.();
     });
   });
@@ -200,14 +201,19 @@ function wireControls() {
 
 function wireKeyboard() {
   document.addEventListener("keydown", (event) => {
+    if (!(event.target instanceof Element)) return;
     if (event.target.matches("input, textarea, select")) return;
     if (document.querySelector(".modal-backdrop")) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
 
+    const onControl = event.target.closest("button, a");
     if (event.code === "Space") {
+      if (onControl) return;
       event.preventDefault();
       onAdvance();
       return;
     }
+    if (event.code === "Enter" && onControl) return;
     if (event.key === "u" || event.key === "U") {
       onUndo();
       return;
@@ -296,7 +302,7 @@ function endModal() {
   else sfx.bad();
 
   let streakLine = "";
-  if (state.mode === "daily") {
+  if (state.mode === "daily" && won) {
     const streak = recordDailyStreak();
     streakLine = `<p>DAILY LOGGED. STREAK: <strong>${streak}</strong> DAY${streak === 1 ? "" : "S"}.</p>`;
   }
@@ -307,7 +313,7 @@ function endModal() {
     ? `<div class="hs-entry"><input id="fame-name" maxlength="3" placeholder="AAA" aria-label="Your initials" /><button type="button" class="btn btn--sm" id="fame-save">LOG SCORE</button></div>`
     : "";
 
-  openModal({
+  const { el: modalEl } = openModal({
     title: won ? "COLONY ESTABLISHED" : "COLONY LOST",
     body: `
       <p>${won
@@ -325,9 +331,11 @@ function endModal() {
     ],
   });
 
-  if (fameOpen) {
-    el("fame-save")?.addEventListener("click", () => {
-      const name = el("fame-name")?.value?.trim() || "ACE";
+  if (fameOpen && modalEl) {
+    const saveBtn = modalEl.querySelector("#fame-save");
+    const nameInput = modalEl.querySelector("#fame-name");
+    saveBtn?.addEventListener("click", () => {
+      const name = nameInput?.value?.trim() || "ACE";
       addFameEntry(name, sols);
       sfx.good();
       toast({ title: "LOGGED", body: `${name.toUpperCase().slice(0, 3)} — ${sols} SOLS`, icon: "trophy" });
@@ -363,7 +371,14 @@ function exportModal() {
         label: "Copy",
         variant: "primary",
         onClick: () => {
-          navigator.clipboard?.writeText(code).then(() => toast({ title: "Copied", icon: "check" }));
+          if (!navigator.clipboard?.writeText) {
+            toast({ title: "COPY UNAVAILABLE", body: "Select the text and copy it manually.", icon: "alert" });
+            return false;
+          }
+          navigator.clipboard.writeText(code).then(
+            () => toast({ title: "Copied", icon: "check" }),
+            () => toast({ title: "COPY FAILED", body: "Select the text and copy it manually.", icon: "alert" })
+          );
         },
       },
       { id: "close", label: "Close", variant: "ghost" },
@@ -386,10 +401,15 @@ function importModal() {
         onClick: () => {
           const raw = el("import-input")?.value ?? "";
           const data = importCode(raw);
-          const restored = data ? fromSave(data) : null;
+          let restored = null;
+          try {
+            restored = data ? fromSave(data) : null;
+          } catch {
+            restored = null;
+          }
           if (!restored) {
             toast({ title: "Invalid code", body: "That is not a colony I recognise.", icon: "alert" });
-            return;
+            return false;
           }
           state = restored;
           lastStocks = null;
@@ -449,9 +469,10 @@ function yesterdayKey() {
 
 function recordDailyStreak() {
   const today = dailySeedKey();
-  if (prefs.get("lastDaily", "") === today) return getStreak();
-  const next = prefs.get("lastDaily", "") === yesterdayKey() ? getStreak() + 1 : 1;
-  prefs.set("lastDaily", today);
+  const last = prefs.get("mars-base:lastDaily", "");
+  if (last === today) return Number(getStreak()) || 0;
+  const next = last === yesterdayKey() ? (Number(getStreak()) || 0) + 1 : 1;
+  prefs.set("mars-base:lastDaily", today);
   setStreak(next);
   return next;
 }
@@ -476,19 +497,23 @@ function copyResult() {
 
 function getFame() {
   const list = fame.load([]);
-  return Array.isArray(list) ? list.filter((e) => e && typeof e.sols === "number").slice(0, 5) : [];
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((e) => e && Number.isFinite(e.sols))
+    .sort((a, b) => a.sols - b.sols || String(a.date ?? "").localeCompare(String(b.date ?? "")))
+    .slice(0, 5);
 }
 
 function qualifiesForFame(sols) {
   if (state.status !== "won") return false;
   const list = getFame();
-  return list.length < 5 || sols < list[list.length - 1].sols;
+  return list.length < 5 || sols <= list[list.length - 1].sols;
 }
 
 function addFameEntry(name, sols) {
   const list = getFame();
-  list.push({ name: String(name).toUpperCase().slice(0, 3) || "ACE", sols, date: dailySeedKey() });
-  list.sort((a, b) => a.sols - b.sols);
+  list.push({ name: String(name).toUpperCase().slice(0, 3) || "ACE", sols, date: dailySeedKey(), mode: state.mode });
+  list.sort((a, b) => a.sols - b.sols || String(a.date ?? "").localeCompare(String(b.date ?? "")));
   fame.save(list.slice(0, 5));
   renderFame();
 }
@@ -554,8 +579,10 @@ function renderHud() {
 
 function renderResources() {
   const preview = previewNextSol(state);
+  const summary = [];
   for (const res of RESOURCES) {
     const r = refs.res[res.id];
+    if (!r) continue;
     const stock = state.resources[res.id];
     const net = preview.net[res.id];
     const sign = net > 0.001 ? "up" : net < -0.001 ? "down" : "flat";
@@ -567,7 +594,10 @@ function renderResources() {
 
     const changed = lastStocks ? stock !== lastStocks[res.id] : false;
     r.node.classList.toggle("res--flash", changed);
+    summary.push(`${res.name} ${fmt(stock, 0)} (${fmtDelta(net, 0)})`);
   }
+  const summaryEl = el("res-summary");
+  if (summaryEl) summaryEl.textContent = `Sol ${state.sol}. ${summary.join(", ")}. Population ${state.population} of ${popCap(state)}.`;
 }
 
 function renderBuildings() {
@@ -638,7 +668,11 @@ function segments(value, max, count) {
 function renderLog() {
   el("log").innerHTML = state.log.length
     ? state.log
-        .map((entry) => `<li class="log__item log__item--${entry.type}"><span class="log__sol">S${entry.sol}</span> ${escapeHtml(entry.text)}</li>`)
+        .map((entry) => {
+          const type = LOG_TYPES.has(entry?.type) ? entry.type : "info";
+          const sol = Number.isFinite(Number(entry?.sol)) ? Math.max(1, Math.floor(Number(entry.sol))) : state.sol;
+          return `<li class="log__item log__item--${type}"><span class="log__sol">S${sol}</span> ${escapeHtml(entry?.text ?? "")}</li>`;
+        })
         .join("")
     : `<li class="log__item log__item--info"><span class="log__sol">S1</span> Touchdown confirmed. The dust settles. Begin.</li>`;
 }

@@ -9,24 +9,23 @@
       content="A turn-based Mars colony experiment. Manage power, water, oxygen, ore and credits across sols, survive dust storms and meteors, and grow a self-sustaining colony of fifty."
     />
     <meta name="theme-color" content="#050508" />
+    <meta name="color-scheme" content="dark" />
     <link rel="canonical" href="https://timesink.vercel.app/games/mars-base" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="SYS://ARCADE.NET" />
-    <meta property="og:title" content="MARS BASE — turn-based colony experiment" />
+    <meta property="og:title" content="MARS BASE — SYS://ARCADE.NET" />
     <meta
       property="og:description"
       content="Build a colony one sol at a time. Oxygen is a suggestion until it isn't."
     />
     <meta property="og:url" content="https://timesink.vercel.app/games/mars-base" />
-    <meta name="twitter:card" content="summary" />
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Share+Tech+Mono&display=swap"
-      rel="stylesheet"
-    />
+    <meta property="og:image" content="https://timesink.vercel.app/assets/mars-base-og.png" />
+    <meta property="og:image:alt" content="MARS BASE — turn-based colony experiment" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MARS BASE — SYS://ARCADE.NET" />
+    <meta name="twitter:description" content="Build a colony one sol at a time. Oxygen is a suggestion until it isn't." />
+    <meta name="twitter:image" content="https://timesink.vercel.app/assets/mars-base-og.png" />
 
     <link rel="stylesheet" href="/shared/tokens.css" />
     <link rel="stylesheet" href="/shared/base.css" />
@@ -37,10 +36,11 @@
     />
   </head>
   <body data-page="game" data-accent="flare">
+    <a class="skip-link" href="#main">Skip to content</a>
     <main id="main" class="game wrap">
       <div class="stage-bar">
         <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
-        <span class="stage-bar__title">MARS BASE</span>
+        <h1 class="stage-bar__title">MARS BASE</h1>
         <span class="stage-bar__meta">
           <span>SOL <b id="sol">1</b></span>
           <span>SESSION T+<b data-session-clock>00:00</b></span>
@@ -49,7 +49,7 @@
       </div>
 
       <div class="gamerow">
-        <span class="gamerow__pop" title="Population / capacity">
+        <span class="gamerow__pop" aria-label="Population over capacity">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.4a3.2 3.2 0 0 1 0 5.2"/><path d="M18.5 20a6 6 0 0 0-2.6-4.9"/></svg>
           <span id="pop">2/4</span>
         </span>
@@ -57,14 +57,15 @@
           <span id="doctrine-badge"></span>
           <span id="mode-badge"></span>
         </span>
-        <span class="gamerow__status" id="status-banner"></span>
+        <span class="gamerow__status" id="status-banner" role="status"></span>
       </div>
 
-      <section class="resources" id="resources" aria-label="Resources" aria-live="polite"></section>
+      <section class="resources" id="resources" aria-label="Resources" aria-live="off"></section>
+      <p class="sr-only" id="res-summary" role="status"></p>
 
       <div class="layout">
         <section class="panel" aria-label="Structures">
-          <div class="panel__head"><span class="panel__title">STRUCTURES</span></div>
+          <div class="panel__head"><h2 class="panel__title">STRUCTURES</h2></div>
           <div class="buildings__list" id="buildings"></div>
         </section>
 
@@ -88,7 +89,7 @@
           </section>
 
           <section class="panel" aria-label="Next sol preview">
-            <div class="panel__head"><span class="panel__title">PROJ // NEXT SOL</span></div>
+            <div class="panel__head"><h2 class="panel__title">PROJ // NEXT SOL</h2></div>
             <div class="panel__body">
               <div id="preview-rows"></div>
               <div id="preview-notes"></div>
@@ -97,12 +98,12 @@
           </section>
 
           <section class="panel" aria-label="Colony log">
-            <div class="panel__head"><span class="panel__title">COLONY LOG</span></div>
+            <div class="panel__head"><h2 class="panel__title">COLONY LOG</h2></div>
             <ul class="log__list" id="log"></ul>
           </section>
 
           <section class="panel" aria-label="Top operators">
-            <div class="panel__head"><span class="panel__title">TOP OPERATORS</span></div>
+            <div class="panel__head"><h2 class="panel__title">TOP OPERATORS</h2></div>
             <div class="hs-wrap" id="hall-of-fame"></div>
           </section>
         </aside>

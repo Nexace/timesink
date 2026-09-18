@@ -355,10 +355,13 @@ function logoff() {
   window.addEventListener("keydown", onKey);
 }
 
+const sessionStarted = Date.now();
+
 function startClock() {
   const tick = () => {
-    const now = new Date();
-    const text = [now.getHours(), now.getMinutes(), now.getSeconds()]
+    if (document.hidden) return;
+    const s = Math.floor((Date.now() - sessionStarted) / 1000);
+    const text = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
       .map((v) => String(v).padStart(2, "0"))
       .join(":");
     document.querySelectorAll("[data-tele-clock]").forEach((el) => {

@@ -39,7 +39,8 @@
   <body data-page="home" data-accent="cyan">
     <a class="skip-link" href="#main">Skip to content</a>
     <main id="main" class="home">
-      <section class="boot wrap" aria-label="System boot">
+      <span class="corner-note corner-note--bl" aria-hidden="true">CORE TEMP: 310K<br>DISK IO: 1.1MB/S</span>
+      <span class="corner-note corner-note--br" aria-hidden="true">GRID 32PX<br>PHOSPHOR OK</span>      <section class="boot wrap" aria-label="System boot">
         <i class="boot__xh tl" aria-hidden="true">+</i>
         <i class="boot__xh tr" aria-hidden="true">+</i>
         <i class="boot__xh bl" aria-hidden="true">+</i>
@@ -59,8 +60,10 @@
       </section>
 
       <section class="games wrap" id="games" aria-label="Experiment directory">
+        <div class="amber-floor" aria-hidden="true"></div>
         <div class="section-head">
           <h2 class="section-title">SELECT EXPERIMENT</h2>
+          <span class="page-xh" aria-hidden="true">+</span>
           <div class="filterbar" id="filterbar" role="group" aria-label="Filter experiments"></div>
         </div>
         <div class="game-grid" id="game-grid"></div>
@@ -75,6 +78,7 @@
       <section class="about wrap" id="about" aria-label="About">
         <div class="section-head">
           <h2 class="section-title">SYSTEM MANUAL</h2>
+          <span class="page-xh" aria-hidden="true">+</span>
         </div>
         <div class="about__grid">
           <article class="about__card">

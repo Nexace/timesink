@@ -2,7 +2,8 @@
 
 A cabinet of small, original browser experiments, styled as an 80s deep-space
 terminal. No frameworks, no build step, no trackers, no third-party requests —
-plain HTML, CSS, and JavaScript served as static files with self-hosted fonts.
+plain HTML, CSS, and JavaScript served as static files with self-hosted fonts, except the
+Allotropic display masthead which loads from the Adobe Fonts CDN.
 
 Live experiment: **Mars Base**, a turn-based colony sim. Grow a Mars settlement
 to 50 colonists and keep it self-sustaining, one sol at a time.

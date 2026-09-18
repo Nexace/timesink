@@ -86,9 +86,9 @@
 }
 
 .boot__title {
-  font-family: var(--font-marquee);
-  font-size: clamp(2.2rem, 1.2rem + 4.6vw, 3.8rem);
-  font-weight: 400;
+  font-family: var(--font-hero);
+  font-size: clamp(2.6rem, 1.4rem + 5.5vw, 4.4rem);
+  font-weight: 700;
   line-height: 0.95;
   letter-spacing: 0.02em;
   background: var(--chrome);

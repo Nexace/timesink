@@ -4,13 +4,7 @@ import { createPrefStore } from "./storage.js";
 import { setSoundEnabled, isSoundEnabled, onSoundStateChange } from "./sound.js";
 
 const prefs = createPrefStore("prefs");
-
-const PHOSPHORS = [
-  { id: "full", label: "FULL" },
-  { id: "green", label: "GRN" },
-  { id: "amber", label: "AMB" },
-  { id: "cyan", label: "CYN" },
-];
+const BUILD = "2.2.0";
 
 let clockStarted = false;
 
@@ -33,9 +27,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   if (accent) document.documentElement.dataset.accent = accent;
 
   applyCrt(crtPref());
-  applyPhosphor(prefs.get("phosphor", "full"));
-
-  const skip = document.querySelector("a.skip-link") ?? document.createElement("a");
+  applyPhosphor(prefs.get("phosphor", "full"));  const skip = document.querySelector("a.skip-link") ?? document.createElement("a");
   if (!skip.isConnected) {
     skip.className = "skip-link";
     skip.href = "#main";
@@ -51,6 +43,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
     <div class="cosmos__sparkles"></div>
     <div class="cosmos__grain"></div>
     <div class="cosmos__grid"></div>
+    <div class="cosmos__board"></div>
     <svg class="cosmos__planet" viewBox="0 0 300 300" aria-hidden="true" focusable="false">
       <defs>
         <radialGradient id="ts-planet" cx="38%" cy="34%" r="72%">
@@ -88,12 +81,16 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   crt.className = "crt-overlay";
   crt.setAttribute("aria-hidden", "true");
 
+  const bezel = document.createElement("div");
+  bezel.className = "bezel";
+  bezel.setAttribute("aria-hidden", "true");
+
   body.prepend(skip, cosmos, crt);
+  body.appendChild(bezel);
 
   const online = String(liveGames().length).padStart(2, "0");
   const total = String(games.length).padStart(2, "0");
-  const phosLabel = `PHOS:${PHOSPHORS.find((p) => p.id === prefs.get("phosphor", "full"))?.label ?? "FULL"}`;
-  const crtOn = prefs.get("crt", true);
+  const operator = (prefs.get("operator", "AAA") || "AAA").toUpperCase().slice(0, 3);
 
   const header = document.createElement("header");
   header.className = "shell";
@@ -105,11 +102,11 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
       <span class="tele">STREAK: [<b data-tele-streak>${pad2(prefs.get("streak", 0))}</b>]</span>
       <span class="tele" data-tele-clock>--:--:--</span>
     </div>
-    <nav class="shell__nav" aria-label="Site">
+    <nav class="shell__nav" aria-label="Terminal">
       ${showGameLinks ? `<a class="hbtn" href="/" title="All games" aria-label="All games">${icon("gamepad", { size: 14 })}</a>` : ""}
-      <button class="hbtn" type="button" data-crt-toggle aria-pressed="${crtOn}">CRT</button>
-      <button class="hbtn" type="button" data-phosphor-toggle aria-pressed="${prefs.get("phosphor", "full") !== "full"}">${phosLabel}</button>
-      <button class="hbtn" type="button" data-sound-toggle aria-pressed="false">SFX:OFF</button>
+      <button class="hbtn" type="button" data-user-prof>OP:${escapeHtml(operator)}</button>
+      <button class="hbtn" type="button" data-sysinfo>SYSINFO</button>
+      <button class="hbtn hbtn--logout" type="button" data-logoff>LOGOFF</button>
       ${SITE.repo ? `<a class="hbtn" href="${SITE.repo}" target="_blank" rel="noopener noreferrer" title="Source code" aria-label="Source code">${icon("github", { size: 14 })}</a>` : ""}
     </nav>
   `;
@@ -138,13 +135,38 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   `;
   body.appendChild(footer);
 
+  const deck = document.createElement("div");
+  deck.className = "deck";
+  deck.innerHTML = `
+    <span class="deck__led" aria-hidden="true"></span>
+    <span class="deck__led-label">PWR</span>
+    <span class="deck__sep" aria-hidden="true"></span>
+    <button class="deck__switch" type="button" role="switch" aria-checked="false" aria-label="Toggle scanlines" data-crt-toggle>
+      <span class="deck__track"><span class="deck__thumb"></span></span>
+      <span class="deck__label">CRT</span>
+    </button>
+    <button class="deck__switch" type="button" role="switch" aria-checked="false" aria-label="Toggle phosphor tint" data-phosphor-toggle>
+      <span class="deck__track"><span class="deck__thumb"></span></span>
+      <span class="deck__label">PHOS</span>
+    </button>
+    <button class="deck__switch" type="button" role="switch" aria-checked="false" aria-label="Toggle sound" data-sound-toggle>
+      <span class="deck__track"><span class="deck__thumb"></span></span>
+      <span class="deck__label">SFX</span>
+    </button>
+    <span class="deck__knobs" aria-hidden="true"><i></i><i></i></span>
+    <span class="deck__vents" aria-hidden="true"></span>
+    <span class="deck__hazard" aria-hidden="true"></span>
+  `;
+  body.appendChild(deck);
+
   const toastStack = document.createElement("div");
   toastStack.className = "toast-stack";
   toastStack.setAttribute("role", "status");
   toastStack.setAttribute("aria-live", "polite");
   body.appendChild(toastStack);
 
-  wireToggles(header);
+  wireDeck(deck);
+  wireHud(header);
   startClock();
   document.documentElement.classList.add("js");
   return { header, footer, toastStack };
@@ -165,70 +187,188 @@ export function getStreak() {
   return prefs.get("streak", 0);
 }
 
-const CRT_MODES = ["lite", "full", "off"];
-
 function crtPref() {
   const raw = prefs.get("crt", "lite");
   if (raw === true) return "lite";
   if (raw === false) return "off";
-  return CRT_MODES.includes(raw) ? raw : "lite";
+  return raw === "full" || raw === "off" ? raw : "lite";
+}
+
+function setSwitch(selector, on) {
+  document.querySelectorAll(selector).forEach((el) => {
+    el.setAttribute("aria-checked", String(on));
+    el.classList.toggle("is-on", on);
+  });
 }
 
 function applyCrt(mode) {
-  const next = CRT_MODES.includes(mode) ? mode : "lite";
-  document.documentElement.classList.remove("crt-on");
+  const next = mode === "full" || mode === "off" ? mode : "lite";
+  const on = next !== "off";
   document.documentElement.classList.toggle("crt-lite", next === "lite");
   document.documentElement.classList.toggle("crt-full", next === "full");
-  document.querySelectorAll("[data-crt-toggle]").forEach((btn) => {
-    btn.textContent = `CRT:${next.toUpperCase()}`;
-    btn.setAttribute("aria-pressed", String(next !== "off"));
-  });
+  setSwitch("[data-crt-toggle]", on);
 }
 
-function applyPhosphor(id) {
-  const mode = PHOSPHORS.some((p) => p.id === id) ? id : "full";
-  if (mode === "full") document.documentElement.removeAttribute("data-phosphor");
-  else document.documentElement.dataset.phosphor = mode;
-  document.querySelectorAll("[data-phosphor-toggle]").forEach((btn) => {
-    btn.textContent = `PHOS:${PHOSPHORS.find((p) => p.id === mode).label}`;
-    btn.setAttribute("aria-pressed", String(mode !== "full"));
-  });
+function applyPhosphor(mode) {
+  const on = mode === "amber" || mode === "green" || mode === "cyan";
+  if (on) document.documentElement.dataset.phosphor = mode;
+  else document.documentElement.removeAttribute("data-phosphor");
+  setSwitch("[data-phosphor-toggle]", on);
 }
 
-function wireToggles(header) {
+function wireDeck(deck) {
   setSoundEnabled(prefs.get("sound", false) === true);
-  const soundBtn = header.querySelector("[data-sound-toggle]");
-  const crtBtn = header.querySelector("[data-crt-toggle]");
-  const phosBtn = header.querySelector("[data-phosphor-toggle]");
-  if (!soundBtn || !crtBtn || !phosBtn) return;
+
+  const crtBtn = deck.querySelector("[data-crt-toggle]");
+  const phosBtn = deck.querySelector("[data-phosphor-toggle]");
+  const soundBtn = deck.querySelector("[data-sound-toggle]");
+
+  applyCrt(crtPref());
+  applyPhosphor(prefs.get("phosphor", "full"));
 
   function syncSound() {
     const on = isSoundEnabled();
-    soundBtn.textContent = on ? "SFX:ON" : "SFX:OFF";
-    soundBtn.setAttribute("aria-pressed", String(on));
+    setSwitch("[data-sound-toggle]", on);
   }
   syncSound();
   onSoundStateChange(syncSound);
+
   soundBtn.addEventListener("click", () => {
     prefs.set("sound", setSoundEnabled(!isSoundEnabled()));
     syncSound();
   });
 
-  crtBtn.textContent = `CRT:${crtPref().toUpperCase()}`;
-  crtBtn.setAttribute("aria-pressed", String(crtPref() !== "off"));
   crtBtn.addEventListener("click", () => {
-    const current = crtPref();
-    const next = CRT_MODES[(CRT_MODES.indexOf(current) + 1) % CRT_MODES.length];
-    prefs.set("crt", next);
-    applyCrt(next);
+    const on = crtBtn.getAttribute("aria-checked") === "true";
+    prefs.set("crt", on ? "off" : "lite");
+    applyCrt(on ? "off" : "lite");
   });
 
   phosBtn.addEventListener("click", () => {
-    const current = prefs.get("phosphor", "full");
-    const next = PHOSPHORS[(PHOSPHORS.findIndex((p) => p.id === current) + 1) % PHOSPHORS.length].id;
-    prefs.set("phosphor", next);
-    applyPhosphor(next);
+    const on = phosBtn.getAttribute("aria-checked") === "true";
+    prefs.set("phosphor", on ? "full" : "amber");
+    applyPhosphor(on ? "full" : "amber");
   });
+}
+
+function wireHud(header) {
+  const sysinfoBtn = header.querySelector("[data-sysinfo]");
+  const userBtn = header.querySelector("[data-user-prof]");
+  const logoffBtn = header.querySelector("[data-logoff]");
+
+  sysinfoBtn?.addEventListener("click", sysinfoModal);
+  userBtn?.addEventListener("click", userProfModal);
+  logoffBtn?.addEventListener("click", logoff);
+}
+
+export function getOperator() {
+  return (prefs.get("operator", "AAA") || "AAA").toUpperCase().slice(0, 3);
+}
+
+export function setOperator(value) {
+  const op = String(value || "AAA").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3).padEnd(3, "A");
+  prefs.set("operator", op);
+  document.querySelectorAll("[data-user-prof]").forEach((el) => {
+    el.textContent = `OP:${op}`;
+  });
+  return op;
+}
+
+function storageBytes() {
+  let bytes = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i) ?? "";
+      const v = localStorage.getItem(k) ?? "";
+      bytes += (k.length + v.length) * 2;
+    }
+  } catch {
+    bytes = 0;
+  }
+  return bytes;
+}
+
+function fmtBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function sysinfoModal() {
+  const kb = fmtBytes(storageBytes());
+  const crt = crtPref() === "off" ? "OFF" : crtPref().toUpperCase();
+  const phos = document.documentElement.dataset.phosphor ?? "FULL";
+  const sfx = isSoundEnabled() ? "ON" : "OFF";
+  openModal({
+    title: "SYSINFO",
+    body: `
+      <table class="hs-table">
+        <tbody>
+          <tr><th>BUILD</th><td>${escapeHtml(BUILD)}</td></tr>
+          <tr><th>GAMES ONLINE</th><td>${liveGames().length}/${games.length}</td></tr>
+          <tr><th>OPERATOR</th><td>${escapeHtml(getOperator())}</td></tr>
+          <tr><th>STREAK</th><td>${pad2(prefs.get("streak", 0))} DAYS</td></tr>
+          <tr><th>LOCAL STORAGE</th><td>${escapeHtml(kb)}</td></tr>
+          <tr><th>SCANLINES</th><td>${crt}</td></tr>
+          <tr><th>PHOSPHOR</th><td>${phos}</td></tr>
+          <tr><th>SOUND</th><td>${sfx}</td></tr>
+        </tbody>
+      </table>
+      <p class="modal__hint">Everything runs in this browser. No data leaves the terminal.</p>
+    `,
+    actions: [{ id: "close", label: "Close", variant: "primary" }],
+  });
+}
+
+function userProfModal() {
+  const current = getOperator();
+  openModal({
+    title: "OPERATOR PROFILE",
+    body: `
+      <p>Enter your three-letter operator call sign. It is stored locally and pre-fills the halls of fame.</p>
+      <div class="hs-entry">
+        <input id="operator-input" maxlength="3" value="${escapeHtml(current)}" aria-label="Operator call sign" />
+      </div>
+    `,
+    actions: [
+      {
+        id: "save",
+        label: "Save call sign",
+        variant: "primary",
+        onClick: () => {
+          const input = document.querySelector("#operator-input");
+          setOperator(input?.value ?? "AAA");
+        },
+      },
+      { id: "close", label: "Cancel", variant: "ghost" },
+    ],
+  });
+}
+
+function logoff() {
+  if (document.querySelector(".logoff")) return;
+  const overlay = document.createElement("div");
+  overlay.className = "logoff";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-label", "Session ended");
+  overlay.setAttribute("tabindex", "-1");
+  overlay.innerHTML = `
+    <p class="logoff__eyebrow">SESSION ENDED</p>
+    <p class="logoff__line">LOG OFF COMPLETE — TERMINAL DETACHED</p>
+    <p class="logoff__hint">PRESS ANY KEY TO RE-INITIALIZE<span class="cursor" aria-hidden="true"></span></p>
+  `;
+  document.body.appendChild(overlay);
+  overlay.focus();
+
+  function dismiss() {
+    window.removeEventListener("keydown", onKey);
+    overlay.remove();
+  }
+  function onKey() {
+    dismiss();
+  }
+  overlay.addEventListener("click", dismiss);
+  window.addEventListener("keydown", onKey);
 }
 
 function startClock() {

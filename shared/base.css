@@ -12,7 +12,7 @@
 html {
   -webkit-text-size-adjust: 100%;
   scrollbar-color: var(--border-bright) var(--bg);
-  background: var(--bg);
+  background: #000;
 }
 
 body {
@@ -23,6 +23,7 @@ body {
   font-size: var(--fs-md);
   line-height: 1.35;
   overflow-x: clip;
+  padding-bottom: 84px;
 }
 
 @supports not (overflow: clip) {
@@ -67,10 +68,10 @@ h1,
 h2,
 h3,
 h4 {
-  font-family: var(--font-display);
+  font-family: var(--font-marquee);
   font-weight: 400;
   line-height: 1.25;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
   color: var(--cream);
 }
 
@@ -241,6 +242,17 @@ h4 {
   color: var(--bg);
 }
 
+.hbtn--logout {
+  color: var(--magenta);
+  border-color: var(--magenta);
+}
+
+.hbtn--logout:hover {
+  background: var(--magenta);
+  border-color: var(--magenta);
+  color: #050508;
+}
+
 .filterbar {
   display: flex;
   flex-wrap: wrap;
@@ -402,7 +414,6 @@ h4 {
   background: var(--action);
   border-color: var(--action);
   color: #050508;
-  font-weight: 700;
   box-shadow: var(--glow-action), var(--shadow-1);
 }
 
@@ -653,8 +664,8 @@ table.hs-table {
 }
 
 .modal__title {
-  font-family: var(--font-display);
-  font-size: var(--fs-sm);
+  font-family: var(--font-marquee);
+  font-size: var(--fs-lg);
   color: var(--cream);
 }
 
@@ -716,8 +727,8 @@ table.hs-table {
 }
 
 .stage-bar__title {
-  font-family: var(--font-display);
-  font-size: var(--fs-sm);
+  font-family: var(--font-marquee);
+  font-size: var(--fs-lg);
   color: var(--cream);
 }
 
@@ -827,5 +838,253 @@ table.hs-table {
   .cursor {
     animation: none;
     opacity: 1;
+  }
+}
+
+.bezel {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  pointer-events: none;
+  border-radius: 22px;
+  box-shadow:
+    inset 0 0 0 14px #141414,
+    inset 0 0 0 15px #000,
+    inset 0 0 0 17px rgba(255, 255, 255, 0.05),
+    inset 0 0 130px rgba(0, 0, 0, 0.6);
+}
+
+.deck {
+  position: fixed;
+  left: 26px;
+  right: 26px;
+  bottom: 18px;
+  z-index: 160;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  background: linear-gradient(180deg, #1d1d1d, #0a0a0a);
+  border: 1px solid #000;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 6px 18px rgba(0, 0, 0, 0.85);
+}
+
+.deck__led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green), 0 0 18px var(--green);
+  animation: led-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes led-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.deck__led-label,
+.deck__label {
+  font-family: var(--font-display);
+  font-size: 9px;
+  color: var(--dim);
+  letter-spacing: 0.1em;
+}
+
+.deck__sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 0;
+  background: var(--border-bright);
+}
+
+.deck__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1);
+  color: var(--dim);
+}
+
+.deck__track {
+  position: relative;
+  width: 40px;
+  height: 18px;
+  border-radius: 4px;
+  background: #050505;
+  border: 1px solid #000;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8), inset 0 0 0 1px var(--border-bright);
+}
+
+.deck__thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #2a2a2a, #111);
+  border: 1px solid #000;
+  transition: transform var(--dur-med) var(--ease-snap);
+}
+
+.deck__switch.is-on .deck__thumb {
+  transform: translateX(22px);
+  background: linear-gradient(180deg, var(--accent), color-mix(in oklab, var(--accent) 50%, #000));
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.deck__switch.is-on .deck__label {
+  color: var(--accent);
+}
+
+.deck__switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.deck__knobs {
+  display: flex;
+  gap: var(--s-2);
+  margin-left: auto;
+}
+
+.deck__knobs i {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: repeating-conic-gradient(#2a2a2a 0 12.5%, #1a1a1a 0 25%);
+  border: 1px solid #000;
+  box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.12), 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.deck__vents {
+  width: 80px;
+  height: 26px;
+  background: repeating-linear-gradient(to right, #050505 0 4px, transparent 4px 9px);
+  border: 1px solid #000;
+  border-radius: 3px;
+}
+
+.deck__hazard {
+  width: 34px;
+  align-self: stretch;
+  margin: -8px 0;
+  background: repeating-linear-gradient(45deg, var(--amber) 0 8px, #000 8px 16px);
+  opacity: 0.55;
+}
+
+.logoff {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  background: #000;
+  color: var(--green);
+  text-align: center;
+  animation: logoff-flicker 1.2s steps(1, end) 1;
+  cursor: pointer;
+}
+
+@keyframes logoff-flicker {
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  14% {
+    opacity: 0.3;
+  }
+  20%,
+  100% {
+    opacity: 1;
+  }
+}
+
+.logoff__eyebrow {
+  font-family: var(--font-marquee);
+  font-size: clamp(1.6rem, 4vw, 2.6rem);
+  color: var(--green);
+}
+
+.logoff__line {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  letter-spacing: 0.2em;
+}
+
+.logoff__hint {
+  font-family: var(--font-body);
+  font-size: var(--fs-lg);
+  color: var(--green);
+}
+
+@media (max-width: 860px) {
+  body {
+    padding-bottom: 76px;
+  }
+
+  .bezel {
+    border-radius: 14px;
+    box-shadow:
+      inset 0 0 0 8px #141414,
+      inset 0 0 0 9px #000,
+      inset 0 0 90px rgba(0, 0, 0, 0.6);
+  }
+
+  .deck {
+    left: 14px;
+    right: 14px;
+    bottom: 10px;
+  }
+}
+
+@media (max-width: 560px) {
+  .deck {
+    gap: var(--s-2);
+    padding: var(--s-1) var(--s-2);
+  }
+
+  .deck__knobs,
+  .deck__vents,
+  .deck__hazard,
+  .deck__sep {
+    display: none;
+  }
+
+  .deck__track {
+    width: 34px;
+  }
+
+  .deck__switch.is-on .deck__thumb {
+    transform: translateX(16px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deck__led {
+    animation: none;
+  }
+
+  .logoff {
+    animation: none;
+  }
+
+  .deck__thumb {
+    transition: none;
   }
 }

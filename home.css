@@ -26,8 +26,9 @@
 }
 
 .boot__title {
-  font-size: clamp(2.6rem, 1.4rem + 5.5vw, 4.4rem);
-  font-weight: 700;
+  font-family: var(--font-marquee);
+  font-size: clamp(2.2rem, 1.2rem + 4.6vw, 3.8rem);
+  font-weight: 400;
   line-height: 0.95;
   letter-spacing: 0.02em;
   background: var(--chrome);
@@ -128,8 +129,9 @@
 .section-title {
   position: relative;
   padding-bottom: var(--s-2);
+  font-family: var(--font-marquee);
   font-size: var(--fs-lg);
-  font-weight: 700;
+  font-weight: 400;
   color: var(--cream);
 }
 
@@ -206,6 +208,10 @@
 
 .card--featured .card__thumb {
   height: 180px;
+}
+
+.card--featured .card__banner {
+  border-bottom: 4px solid var(--card-accent);
 }
 
 @media (min-width: 860px) {
@@ -349,6 +355,13 @@
   padding: var(--s-3);
 }
 
+.card__id {
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.08em;
+  color: var(--faint);
+}
+
 .card__kind {
   font-family: var(--font-display);
   font-size: 10px;
@@ -359,7 +372,6 @@
 .card__title {
   font-family: var(--font-display);
   font-size: var(--fs-sm);
-  font-weight: 700;
   color: var(--cream);
   line-height: 1.5;
   overflow-wrap: break-word;

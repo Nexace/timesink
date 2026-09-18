@@ -9,7 +9,7 @@
 }
 
 .notfound__code {
-  font-family: var(--font-display);
+  font-family: var(--font-marquee);
   font-size: clamp(3rem, 12vw, 7rem);
   line-height: 1;
   color: var(--magenta);

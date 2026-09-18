@@ -85,7 +85,7 @@ function isNew(game) {
 function renderGrid() {
   const host = document.getElementById("game-grid");
   if (!host) return;
-  host.innerHTML = visibleGames().map(renderCard).join("");
+  host.innerHTML = visibleGames().map((g, i) => renderCard(g, i)).join("");
 }
 
 function denySoon(soon) {
@@ -127,10 +127,11 @@ function wireGrid(host) {
   });
 }
 
-function renderCard(game) {
+function renderCard(game, index) {
   const live = game.status === "live";
   const color = ACCENTS[game.accent] ?? ACCENTS.cyan;
   const tags = Array.isArray(game.tags) ? game.tags : [];
+  const id = `CF-${String(index + 1).padStart(3, "0")}`;
   const status = live
     ? `v${escapeHtml(game.version ?? "1.0")} // ACTIVE${game.featured ? " // FLAGSHIP" : ""}`
     : `v${escapeHtml(game.version ?? "0.1")} // STANDBY`;
@@ -145,6 +146,7 @@ function renderCard(game) {
       ${fx}
     </div>
     <div class="card__body">
+      <span class="card__id">${id}</span>
       <span class="card__kind">${escapeHtml(game.kind ?? "experiment")}</span>
       <span class="card__title">${escapeHtml(game.title)}</span>
       <p class="card__tagline">${escapeHtml(game.tagline ?? "")}</p>

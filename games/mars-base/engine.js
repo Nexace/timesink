@@ -555,7 +555,11 @@ export function fromSave(data) {
   state.selfSustainStreak = Math.max(0, Math.floor(num(data.selfSustainStreak, 0, 0, 100000)));
   state.rescues = Math.max(0, Math.floor(num(data.rescues, 0, 0, 1000)));
   state.outputPenaltySols = Math.max(0, Math.floor(num(data.outputPenaltySols, 0, 0, 1000)));
-  state.pending = null;
+  if (data.pending && typeof data.pending === "object" && data.pending.type === "rescue" && state.suffocation >= SUFFOCATION_LIMIT) {
+    state.pending = { type: "rescue", cost: rescueCost(state) };
+  } else {
+    state.pending = null;
+  }
 
   if (data.buildings && typeof data.buildings === "object") {
     for (const def of BUILDINGS) {

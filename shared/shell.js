@@ -26,8 +26,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   const accent = body.dataset.accent;
   if (accent) document.documentElement.dataset.accent = accent;
 
-  applyCrt(crtPref());
-  applyPhosphor(prefs.get("phosphor", "full"));  const skip = document.querySelector("a.skip-link") ?? document.createElement("a");
+  const skip = document.querySelector("a.skip-link") ?? document.createElement("a");
   if (!skip.isConnected) {
     skip.className = "skip-link";
     skip.href = "#main";
@@ -38,44 +37,8 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   cosmos.className = "cosmos";
   cosmos.setAttribute("aria-hidden", "true");
   cosmos.innerHTML = `
-    <div class="cosmos__beams"></div>
-    <div class="cosmos__stars"></div>
-    <div class="cosmos__sparkles"></div>
-    <div class="cosmos__grain"></div>
-    <div class="cosmos__grid"></div>
-    <div class="cosmos__board"></div>
-    <svg class="cosmos__planet" viewBox="0 0 300 300" aria-hidden="true" focusable="false">
-      <defs>
-        <radialGradient id="ts-planet" cx="38%" cy="34%" r="72%">
-          <stop offset="0%" stop-color="#ff7a2e"/>
-          <stop offset="34%" stop-color="#c22e6d"/>
-          <stop offset="62%" stop-color="#3b1a5e"/>
-          <stop offset="100%" stop-color="#0b0e14"/>
-        </radialGradient>
-        <linearGradient id="ts-ring1" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#ff007f"/>
-          <stop offset="55%" stop-color="#00f0ff"/>
-          <stop offset="100%" stop-color="#7b2ff7"/>
-        </linearGradient>
-        <linearGradient id="ts-ring2" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#00f0ff"/>
-          <stop offset="100%" stop-color="#ff007f"/>
-        </linearGradient>
-        <radialGradient id="ts-halo" cx="50%" cy="50%" r="50%">
-          <stop offset="70%" stop-color="#ff007f" stop-opacity="0"/>
-          <stop offset="88%" stop-color="#ff007f" stop-opacity="0.14"/>
-          <stop offset="100%" stop-color="#ff007f" stop-opacity="0"/>
-        </radialGradient>
-      </defs>
-      <circle cx="150" cy="150" r="146" fill="url(#ts-halo)"/>
-      <ellipse cx="150" cy="168" rx="128" ry="30" fill="none" stroke="url(#ts-ring2)" stroke-width="3" opacity="0.55" transform="rotate(-14 150 168)"/>
-      <circle cx="150" cy="150" r="72" fill="url(#ts-planet)"/>
-      <ellipse cx="150" cy="150" rx="118" ry="26" fill="none" stroke="url(#ts-ring1)" stroke-width="7" transform="rotate(-14 150 150)"/>
-      <ellipse cx="150" cy="150" rx="104" ry="22" fill="none" stroke="#0b0e14" stroke-width="10" opacity="0.85" transform="rotate(-14 150 150)"/>
-      <ellipse cx="150" cy="150" rx="118" ry="26" fill="none" stroke="url(#ts-ring1)" stroke-width="2" opacity="0.9" transform="rotate(-14 150 150)"/>
-      <circle cx="252" cy="66" r="9" fill="#f0f4fc" opacity="0.9"/>
-      <circle cx="249" cy="63" r="9" fill="#0b0e14" opacity="0.35"/>
-    </svg>`;
+    <div class="cosmos__scrim"></div>
+    <div class="cosmos__grain"></div>`;
 
   const crt = document.createElement("div");
   crt.className = "crt-overlay";
@@ -126,7 +89,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
         <span>VID TERMINAL-80</span>
         <span class="footer__links">
           <a href="/">DIRECTORY</a>
-          <a href="#about">ABOUT</a>
+          <a href="/#about">ABOUT</a>
           ${SITE.repo ? `<a href="${SITE.repo}" target="_blank" rel="noopener noreferrer">SOURCE</a>` : ""}
         </span>
       </div>
@@ -152,6 +115,10 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
     <button class="deck__switch" type="button" role="switch" aria-checked="false" aria-label="Toggle sound" data-sound-toggle>
       <span class="deck__track"><span class="deck__thumb"></span></span>
       <span class="deck__label">SFX</span>
+    </button>
+    <button class="deck__switch" type="button" role="switch" aria-checked="false" aria-label="Toggle heavy scanlines" data-scan-toggle>
+      <span class="deck__track"><span class="deck__thumb"></span></span>
+      <span class="deck__label">SCAN</span>
     </button>
     <span class="deck__knobs" aria-hidden="true"><i></i><i></i></span>
     <span class="deck__vents" aria-hidden="true"></span>
@@ -190,8 +157,17 @@ export function getStreak() {
 function crtPref() {
   const raw = prefs.get("crt", "lite");
   if (raw === true) return "lite";
-  if (raw === false) return "off";
-  return raw === "full" || raw === "off" ? raw : "lite";
+  if (raw === false || raw === "off") return "off";
+  if (raw === "full") {
+    prefs.set("scan", "full");
+    prefs.set("crt", "lite");
+    return "lite";
+  }
+  return "lite";
+}
+
+function scanPref() {
+  return prefs.get("scan", "lite") === "full" ? "full" : "lite";
 }
 
 function setSwitch(selector, on) {
@@ -202,11 +178,15 @@ function setSwitch(selector, on) {
 }
 
 function applyCrt(mode) {
-  const next = mode === "full" || mode === "off" ? mode : "lite";
-  const on = next !== "off";
-  document.documentElement.classList.toggle("crt-lite", next === "lite");
-  document.documentElement.classList.toggle("crt-full", next === "full");
+  const on = mode !== "off";
+  document.documentElement.classList.toggle("crt-lite", on);
   setSwitch("[data-crt-toggle]", on);
+}
+
+function applyScan(mode) {
+  const heavy = mode === "full";
+  document.documentElement.classList.toggle("crt-full", heavy);
+  setSwitch("[data-scan-toggle]", heavy);
 }
 
 function applyPhosphor(mode) {
@@ -222,8 +202,11 @@ function wireDeck(deck) {
   const crtBtn = deck.querySelector("[data-crt-toggle]");
   const phosBtn = deck.querySelector("[data-phosphor-toggle]");
   const soundBtn = deck.querySelector("[data-sound-toggle]");
+  const scanBtn = deck.querySelector("[data-scan-toggle]");
+  if (!crtBtn || !phosBtn || !soundBtn || !scanBtn) return;
 
   applyCrt(crtPref());
+  applyScan(scanPref());
   applyPhosphor(prefs.get("phosphor", "full"));
 
   function syncSound() {
@@ -248,6 +231,12 @@ function wireDeck(deck) {
     const on = phosBtn.getAttribute("aria-checked") === "true";
     prefs.set("phosphor", on ? "full" : "amber");
     applyPhosphor(on ? "full" : "amber");
+  });
+
+  scanBtn.addEventListener("click", () => {
+    const heavy = scanBtn.getAttribute("aria-checked") === "true";
+    prefs.set("scan", heavy ? "lite" : "full");
+    applyScan(heavy ? "lite" : "full");
   });
 }
 
@@ -304,14 +293,14 @@ function sysinfoModal() {
     body: `
       <table class="hs-table">
         <tbody>
-          <tr><th>BUILD</th><td>${escapeHtml(BUILD)}</td></tr>
-          <tr><th>GAMES ONLINE</th><td>${liveGames().length}/${games.length}</td></tr>
-          <tr><th>OPERATOR</th><td>${escapeHtml(getOperator())}</td></tr>
-          <tr><th>STREAK</th><td>${pad2(prefs.get("streak", 0))} DAYS</td></tr>
-          <tr><th>LOCAL STORAGE</th><td>${escapeHtml(kb)}</td></tr>
-          <tr><th>SCANLINES</th><td>${crt}</td></tr>
-          <tr><th>PHOSPHOR</th><td>${phos}</td></tr>
-          <tr><th>SOUND</th><td>${sfx}</td></tr>
+          <tr><th scope="row">BUILD</th><td>${escapeHtml(BUILD)}</td></tr>
+          <tr><th scope="row">GAMES ONLINE</th><td>${liveGames().length}/${games.length}</td></tr>
+          <tr><th scope="row">OPERATOR</th><td>${escapeHtml(getOperator())}</td></tr>
+          <tr><th scope="row">STREAK</th><td>${pad2(prefs.get("streak", 0))} DAYS</td></tr>
+          <tr><th scope="row">LOCAL STORAGE</th><td>${escapeHtml(kb)}</td></tr>
+          <tr><th scope="row">SCANLINES</th><td>${crt}</td></tr>
+          <tr><th scope="row">PHOSPHOR</th><td>${escapeHtml(phos)}</td></tr>
+          <tr><th scope="row">SOUND</th><td>${sfx}</td></tr>
         </tbody>
       </table>
       <p class="modal__hint">Everything runs in this browser. No data leaves the terminal.</p>
@@ -421,7 +410,10 @@ export function openModal({
   dismissible = true,
   onClose = null,
 }) {
-  if (activeModal) activeModal.close(null);
+  if (activeModal) {
+    if (activeModal.dismissible === false) return { close: () => {}, el: null, result: Promise.resolve(null) };
+    activeModal.close(null);
+  }
 
   const previouslyFocused = document.activeElement;
   const backdrop = document.createElement("div");
@@ -459,6 +451,7 @@ export function openModal({
     if (!backdrop.isConnected) return;
     backdrop.remove();
     document.body.style.overflow = priorOverflow;
+    document.querySelector(".deck")?.removeAttribute("inert");
     activeModal = null;
     if (previouslyFocused?.isConnected) previouslyFocused.focus();
     resolveAction(result);
@@ -519,7 +512,8 @@ export function openModal({
     close(result);
   };
 
-  activeModal = { close: wrapped, el: backdrop };
+  activeModal = { close: wrapped, el: backdrop, dismissible, result: settled };
+  document.querySelector(".deck")?.setAttribute("inert", "");
 
   const primary =
     backdrop.querySelector("input,textarea,select") ??

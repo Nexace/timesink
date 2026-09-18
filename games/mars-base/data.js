@@ -55,13 +55,13 @@ export const DOCTRINES = [
     id: "science",
     name: "Science",
     icon: "flask",
-    desc: "Research Lab efficiency bonus doubled (+6% per level).",
+    desc: `Research Lab efficiency bonus doubled (+${Math.round(LAB_EFFICIENCY_PER_LEVEL * 200)}% per level).`,
   },
   {
     id: "growth",
     name: "Growth",
     icon: "users",
-    desc: "Colonists arrive twice as often and consume 10% less.",
+    desc: "Colonists arrive every 2 sols instead of 3 and consume 10% less.",
   },
 ];
 

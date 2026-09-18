@@ -202,117 +202,22 @@
   z-index: var(--z-bg);
   pointer-events: none;
   contain: strict;
-  background:
-    radial-gradient(1100px 520px at 30% -10%, var(--horizon-magenta), transparent 62%),
-    radial-gradient(900px 480px at 74% -6%, var(--horizon-flare), transparent 60%),
-    radial-gradient(1500px 900px at 50% 118%, var(--horizon-purple), transparent 65%),
-    var(--bg);
+  background: url("/assets/cosmos-highway.jpg") center / cover no-repeat var(--bg);
 }
 
-.cosmos__beams {
+.cosmos__scrim {
   position: absolute;
   inset: 0;
   background:
-    conic-gradient(from 168deg at 8% -10%, transparent 0deg, var(--beam-white) 7deg, transparent 14deg),
-    conic-gradient(from 192deg at 94% -12%, transparent 0deg, var(--beam-cyan) 8deg, transparent 16deg),
-    linear-gradient(to bottom, var(--beam-white), transparent 46%);
-  animation: beam-sway 26s ease-in-out infinite alternate;
-}
-
-@keyframes beam-sway {
-  from {
-    opacity: 0.55;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.cosmos__stars {
-  position: absolute;
-  inset: 0;
-  background-image:
-    radial-gradient(1px 1px at 12px 18px, rgba(240, 244, 252, 0.75), transparent),
-    radial-gradient(1px 1px at 52px 66px, rgba(0, 240, 255, 0.55), transparent),
-    radial-gradient(1px 1px at 88px 34px, rgba(255, 183, 0, 0.5), transparent),
-    radial-gradient(2px 2px at 34px 96px, rgba(240, 244, 252, 0.4), transparent),
-    radial-gradient(1px 1px at 104px 88px, rgba(255, 0, 127, 0.45), transparent);
-  background-size: 132px 132px;
-  animation: star-twinkle 5s steps(2, end) infinite;
-}
-
-.cosmos__sparkles {
-  position: absolute;
-  inset: 0;
-  opacity: 0.5;
-  background-image:
-    linear-gradient(to right, transparent 49.4%, rgba(240, 244, 252, 0.5) 49.4%, rgba(240, 244, 252, 0.5) 50.6%, transparent 50.6%),
-    linear-gradient(to bottom, transparent 49.2%, rgba(240, 244, 252, 0.5) 49.2%, rgba(240, 244, 252, 0.5) 50.8%, transparent 50.8%);
-  background-size: 340px 340px;
-  background-position: 40px 60px;
-  animation: star-twinkle 7s steps(2, end) infinite reverse;
-  mask-image:
-    radial-gradient(3px 3px at 40px 60px, black, transparent),
-    radial-gradient(2px 2px at 210px 180px, black, transparent),
-    radial-gradient(3px 3px at 120px 300px, black, transparent);
-  mask-size: 340px 340px;
-  mask-repeat: repeat;
+    linear-gradient(to bottom, rgba(3, 3, 8, 0.34) 0%, rgba(3, 3, 8, 0.30) 30%, rgba(3, 3, 8, 0.55) 60%, rgba(3, 3, 8, 0.94) 100%),
+    radial-gradient(130% 90% at 50% 42%, transparent 40%, rgba(3, 3, 8, 0.55) 100%);
 }
 
 .cosmos__grain {
   position: absolute;
   inset: 0;
-  background-image: repeating-conic-gradient(rgba(240, 244, 252, 0.015) 0% 25%, transparent 0% 50%);
+  background-image: repeating-conic-gradient(rgba(240, 244, 252, 0.02) 0% 25%, transparent 0% 50%);
   background-size: 3px 3px;
-}
-
-.cosmos__grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    repeating-linear-gradient(to right, rgba(0, 240, 255, 0.03) 0 1px, transparent 1px 32px),
-    repeating-linear-gradient(to bottom, rgba(0, 240, 255, 0.03) 0 1px, transparent 1px 32px);
-  mask-image: linear-gradient(to bottom, black 0%, black 28%, transparent 72%);
-}
-
-.cosmos__board {
-  position: absolute;
-  inset: 0;
-  opacity: 0.5;
-  background-image:
-    radial-gradient(4px 4px at 24px 40px, transparent 46%, rgba(0, 240, 255, 0.5) 46%, rgba(0, 240, 255, 0.5) 52%, transparent 52%),
-    radial-gradient(4px 4px at 96px 120px, transparent 46%, rgba(255, 85, 0, 0.4) 46%, rgba(255, 85, 0, 0.4) 52%, transparent 52%),
-    linear-gradient(to bottom, transparent 0 39px, rgba(0, 240, 255, 0.22) 39px 41px, transparent 41px 71px, rgba(0, 240, 255, 0.18) 71px 73px, transparent 73px 118px, rgba(255, 85, 0, 0.2) 118px 120px, transparent 120px),
-    linear-gradient(to right, transparent 0 23px, rgba(0, 240, 255, 0.2) 23px 25px, transparent 25px 95px, rgba(0, 240, 255, 0.22) 95px 97px, transparent 97px);
-  background-size: 160px 160px;
-  mask-image: radial-gradient(120% 90% at 50% 0%, transparent 55%, black 92%), linear-gradient(transparent 60%, black 90%);
-}
-
-.cosmos__planet {
-  position: absolute;
-  top: -40px;
-  right: -60px;
-  width: 300px;
-  height: 300px;
-  opacity: 0.85;
-}
-
-body[data-page="game"] .cosmos__planet {
-  width: 210px;
-  height: 210px;
-  top: -70px;
-  right: -90px;
-  opacity: 0.6;
-}
-
-@keyframes star-twinkle {
-  0%,
-  100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 1;
-  }
 }
 
 .crt-overlay {
@@ -351,28 +256,11 @@ html:not(.crt-lite):not(.crt-full) .crt-overlay::after {
   display: none;
 }
 
-@media (max-width: 560px) {
-  .cosmos__grid,
-  .cosmos__planet {
-    display: none;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-fast: 0ms;
     --dur-med: 0ms;
     --dur-slow: 0ms;
-  }
-
-  .cosmos__stars,
-  .cosmos__sparkles,
-  .cosmos__beams {
-    animation: none;
-  }
-
-  .cosmos__stars {
-    opacity: 0.8;
   }
 
   .crt-overlay {

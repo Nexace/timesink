@@ -139,6 +139,14 @@ function renderCard(game, index) {
   const tagChips = tags.map((t) => `<span class="chip">${escapeHtml(t)}</span>`).join("");
   const fx = live ? "" : `<div class="card__radar" aria-hidden="true"></div><div class="card__noise" aria-hidden="true"></div>`;
 
+  const meta = `
+    <dl class="card__meta">
+      <div class="card__meta-row"><dt>ID</dt><dd>${id}</dd></div>
+      <div class="card__meta-row"><dt>TITLE</dt><dd>${escapeHtml(game.title)}</dd></div>
+      <div class="card__meta-row"><dt>GENRE</dt><dd>${escapeHtml([game.kind, ...tags.slice(0, 2)].filter(Boolean).join(" / "))}</dd></div>
+      <div class="card__meta-row"><dt>SUMMARY</dt><dd>${escapeHtml(game.tagline ?? "")}</dd></div>
+    </dl>`;
+
   const inner = `
     <div class="card__banner"><span>${status}</span>${fresh}</div>
     <div class="card__thumb">
@@ -146,10 +154,7 @@ function renderCard(game, index) {
       ${fx}
     </div>
     <div class="card__body">
-      <span class="card__id">${id}</span>
-      <span class="card__kind">${escapeHtml(game.kind ?? "experiment")}</span>
-      <span class="card__title">${escapeHtml(game.title)}</span>
-      <p class="card__tagline">${escapeHtml(game.tagline ?? "")}</p>
+      ${meta}
       <div class="card__tags">${tagChips}</div>
       <span class="card__cta"><span>${live ? "LAUNCH" : "IN PRODUCTION"}</span><span aria-hidden="true">&gt;&gt;</span></span>
     </div>
@@ -157,7 +162,10 @@ function renderCard(game, index) {
 
   if (live) {
     const featured = game.featured ? " card--featured" : "";
-    return `<a class="card${featured}" href="${gameHref(game.slug)}" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}">${inner}</a>`;
+    const lever = game.featured
+      ? `<span class="card__lever" aria-hidden="true"><span class="card__lever-track"><span class="card__lever-thumb"></span></span><span class="card__lever-label">SYS LAUNCH</span></span>`
+      : "";
+    return `<a class="card${featured}" href="${gameHref(game.slug)}" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}">${inner}${lever}</a>`;
   }
   return `<div class="card card--soon" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}" data-title="${escapeHtml(game.title)}" tabindex="0" role="button" aria-disabled="true" aria-label="${escapeHtml(game.title)} — coming soon">${inner}</div>`;
 }

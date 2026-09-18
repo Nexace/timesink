@@ -44,12 +44,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   crt.className = "crt-overlay";
   crt.setAttribute("aria-hidden", "true");
 
-  const bezel = document.createElement("div");
-  bezel.className = "bezel";
-  bezel.setAttribute("aria-hidden", "true");
-
   body.prepend(skip, cosmos, crt);
-  body.appendChild(bezel);
 
   const online = String(liveGames().length).padStart(2, "0");
   const total = String(games.length).padStart(2, "0");

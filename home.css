@@ -245,32 +245,35 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  background: var(--panel-bg);
-  border: 3px solid var(--card-accent);
-  box-shadow: var(--shadow-2);
+  background: linear-gradient(180deg, var(--surface-2), var(--panel-bg));
+  border: 5px solid var(--card-accent);
+  border-radius: 10px;
+  box-shadow: var(--shadow-2), 0 0 18px color-mix(in srgb, var(--card-accent) 35%, transparent);
   color: var(--text);
+  overflow: hidden;
 }
 
 .card::before,
 .card::after {
   content: "";
   position: absolute;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border: 2px solid var(--amber);
   pointer-events: none;
+  z-index: 2;
 }
 
 .card::before {
-  top: -2px;
-  left: -2px;
+  top: 5px;
+  left: 5px;
   border-right: none;
   border-bottom: none;
 }
 
 .card::after {
-  bottom: -2px;
-  right: -2px;
+  bottom: 5px;
+  right: 5px;
   border-left: none;
   border-top: none;
 }
@@ -621,6 +624,7 @@
 }
 
 .about__card h3 {
+  font-family: var(--font-display);
   font-size: var(--fs-xs);
   color: var(--amber);
   margin-bottom: var(--s-2);

@@ -101,42 +101,13 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   `;
   body.appendChild(footer);
 
-  const deck = document.createElement("div");
-  deck.className = "deck";
-  deck.innerHTML = `
-    <span class="deck__led" aria-hidden="true"></span>
-    <span class="deck__led-label">PWR</span>
-    <span class="deck__sep" aria-hidden="true"></span>
-    <button class="deck__switch" type="button" role="switch" aria-checked="false" aria-label="Toggle scanlines" data-crt-toggle>
-      <span class="deck__track"><span class="deck__thumb"></span></span>
-      <span class="deck__label">CRT</span>
-    </button>
-    <button class="deck__switch" type="button" role="switch" aria-checked="false" aria-label="Toggle phosphor tint" data-phosphor-toggle>
-      <span class="deck__track"><span class="deck__thumb"></span></span>
-      <span class="deck__label">PHOS</span>
-    </button>
-    <button class="deck__switch" type="button" role="switch" aria-checked="false" aria-label="Toggle sound" data-sound-toggle>
-      <span class="deck__track"><span class="deck__thumb"></span></span>
-      <span class="deck__label">SFX</span>
-    </button>
-    <button class="deck__switch" type="button" role="switch" aria-checked="false" aria-label="Toggle heavy scanlines" data-scan-toggle>
-      <span class="deck__track"><span class="deck__thumb"></span></span>
-      <span class="deck__label">SCAN</span>
-    </button>
-    <label class="deck__volume">VOL <input type="range" class="deck__slider" data-volume min="0" max="100" value="100" aria-label="Sound volume" /></label>
-    <span class="deck__knobs" aria-hidden="true"><i></i><i></i></span>
-    <span class="deck__vents" aria-hidden="true"></span>
-    <span class="deck__hazard" aria-hidden="true"></span>
-  `;
-  body.appendChild(deck);
-
   const toastStack = document.createElement("div");
   toastStack.className = "toast-stack";
   toastStack.setAttribute("role", "status");
   toastStack.setAttribute("aria-live", "polite");
   body.appendChild(toastStack);
 
-  wireDeck(deck);
+  wireSettings();
   wireHud(header);
   startClock();
   document.documentElement.classList.add("js");
@@ -200,51 +171,47 @@ function applyPhosphor(mode) {
   setSwitch("[data-phosphor-toggle]", on);
 }
 
-function wireDeck(deck) {
+function wireSettings() {
   setSoundEnabled(prefs.get("sound", false) === true);
   setVolume(prefs.get("volume", 1));
-
-  const crtBtn = deck.querySelector("[data-crt-toggle]");
-  const phosBtn = deck.querySelector("[data-phosphor-toggle]");
-  const soundBtn = deck.querySelector("[data-sound-toggle]");
-  const scanBtn = deck.querySelector("[data-scan-toggle]");
-  const volSlider = deck.querySelector("[data-volume]");
-  if (!crtBtn || !phosBtn || !soundBtn || !scanBtn) return;
-
   applyCrt(crtPref());
   applyScan(scanPref());
   applyPhosphor(prefs.get("phosphor", "full"));
+}
 
-  function syncSound() {
-    const on = isSoundEnabled();
-    setSwitch("[data-sound-toggle]", on);
-  }
-  syncSound();
-  onSoundStateChange(syncSound);
+function wireModalSettings(modalEl) {
+  if (!modalEl) return;
+  setSwitch("[data-crt-toggle]", crtPref() !== "off");
+  setSwitch("[data-scan-toggle]", scanPref() === "full");
+  setSwitch("[data-phosphor-toggle]", document.documentElement.hasAttribute("data-phosphor"));
+  setSwitch("[data-sound-toggle]", isSoundEnabled());
 
-  soundBtn.addEventListener("click", () => {
-    prefs.set("sound", setSoundEnabled(!isSoundEnabled()));
-    syncSound();
-  });
+  const crtBtn = modalEl.querySelector("[data-crt-toggle]");
+  const scanBtn = modalEl.querySelector("[data-scan-toggle]");
+  const phosBtn = modalEl.querySelector("[data-phosphor-toggle]");
+  const soundBtn = modalEl.querySelector("[data-sound-toggle]");
+  const volSlider = modalEl.querySelector("[data-volume]");
+  if (!crtBtn || !scanBtn || !phosBtn || !soundBtn) return;
 
   crtBtn.addEventListener("click", () => {
     const on = crtBtn.getAttribute("aria-checked") === "true";
     prefs.set("crt", on ? "off" : "lite");
     applyCrt(on ? "off" : "lite");
   });
-
-  phosBtn.addEventListener("click", () => {
-    const on = phosBtn.getAttribute("aria-checked") === "true";
-    prefs.set("phosphor", on ? "full" : "amber");
-    applyPhosphor(on ? "full" : "amber");
-  });
-
   scanBtn.addEventListener("click", () => {
     const heavy = scanBtn.getAttribute("aria-checked") === "true";
     prefs.set("scan", heavy ? "lite" : "full");
     applyScan(heavy ? "lite" : "full");
   });
-
+  phosBtn.addEventListener("click", () => {
+    const on = phosBtn.getAttribute("aria-checked") === "true";
+    prefs.set("phosphor", on ? "full" : "amber");
+    applyPhosphor(on ? "full" : "amber");
+  });
+  soundBtn.addEventListener("click", () => {
+    prefs.set("sound", setSoundEnabled(!isSoundEnabled()));
+    setSwitch("[data-sound-toggle]", isSoundEnabled());
+  });
   if (volSlider) {
     volSlider.value = String(Math.round(getVolume() * 100));
     volSlider.addEventListener("input", () => {
@@ -298,10 +265,7 @@ function fmtBytes(bytes) {
 
 function sysinfoModal() {
   const kb = fmtBytes(storageBytes());
-  const crt = crtPref() === "off" ? "OFF" : crtPref().toUpperCase();
-  const phos = document.documentElement.dataset.phosphor ?? "FULL";
-  const sfx = isSoundEnabled() ? "ON" : "OFF";
-  openModal({
+  const { el: modalEl } = openModal({
     title: "SYSINFO",
     body: `
       <table class="hs-table">
@@ -311,15 +275,21 @@ function sysinfoModal() {
           <tr><th scope="row">OPERATOR</th><td>${escapeHtml(getOperator())}</td></tr>
           <tr><th scope="row">STREAK</th><td>${pad2(prefs.get("streak", 0))} DAYS</td></tr>
           <tr><th scope="row">LOCAL STORAGE</th><td>${escapeHtml(kb)}</td></tr>
-          <tr><th scope="row">SCANLINES</th><td>${crt}</td></tr>
-          <tr><th scope="row">PHOSPHOR</th><td>${escapeHtml(phos)}</td></tr>
-          <tr><th scope="row">SOUND</th><td>${sfx}</td></tr>
         </tbody>
       </table>
+      <h3 class="modal__sub">DISPLAY + SOUND</h3>
+      <div class="settings-grid">
+        <button class="setrow" type="button" data-crt-toggle role="switch" aria-checked="false" aria-label="Toggle scanlines"><span class="setrow__sw"><span></span></span><span>SCANLINES</span></button>
+        <button class="setrow" type="button" data-scan-toggle role="switch" aria-checked="false" aria-label="Toggle heavy scanlines"><span class="setrow__sw"><span></span></span><span>HEAVY SCAN</span></button>
+        <button class="setrow" type="button" data-phosphor-toggle role="switch" aria-checked="false" aria-label="Toggle phosphor tint"><span class="setrow__sw"><span></span></span><span>PHOSPHOR</span></button>
+        <button class="setrow" type="button" data-sound-toggle role="switch" aria-checked="false" aria-label="Toggle sound"><span class="setrow__sw"><span></span></span><span>SOUND</span></button>
+        <label class="setrow setrow--slider">VOLUME <input type="range" data-volume min="0" max="100" value="100" aria-label="Sound volume" /></label>
+      </div>
       <p class="modal__hint">Everything runs in this browser. No data leaves the terminal.</p>
     `,
     actions: [{ id: "close", label: "Close", variant: "primary" }],
   });
+  wireModalSettings(modalEl);
 }
 
 function userProfModal() {

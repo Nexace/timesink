@@ -2,9 +2,6 @@ import { initShell, escapeHtml, toast, prefersReducedMotion } from "/shared/shel
 import { games, gameHref, liveGames } from "/shared/registry.js";
 import { sfx } from "/shared/sound.js";
 import { icon } from "/shared/icons.js";
-import { createPrefStore } from "/shared/storage.js";
-
-const prefs = createPrefStore("prefs");
 
 const ACCENTS = {
   flare: "#ff5500",
@@ -17,28 +14,13 @@ const ACCENTS = {
   rust: "#ff5500",
 };
 
-const FILTERS = [
-  { id: "all", label: "ALL_EXPERIMENTS", kinds: null },
-  { id: "sim", label: "SIMULATIONS", kinds: ["tycoon", "sim"] },
-  { id: "arcade", label: "RETRO_ARCADE", kinds: ["arcade"] },
-  { id: "archived", label: "ARCHIVED", kinds: null, status: "archived" },
-  { id: "chaos", label: "CHAOS", kinds: ["toy", "quiz", "puzzle"] },
-];
-
 const MOTIF_ICONS = { dome: "dome", snake: "gamepad", cards: "grid", target: "target" };
-
-let activeFilter = "all";
-{
-  const saved = prefs.get("filter", "all");
-  if (FILTERS.some((f) => f.id === saved)) activeFilter = saved;
-}
 
 initShell();
 
 wireKonami();
 
 bootLog();
-renderFilters();
 renderGrid();
 wireGrid(document.getElementById("game-grid"));
 
@@ -65,31 +47,8 @@ function bootLog() {
   }, 24);
 }
 
-function renderFilters() {
-  const host = document.getElementById("filterbar");
-  if (!host) return;
-  host.innerHTML = FILTERS.map(
-    (f) => `<button type="button" class="fbtn" data-filter="${f.id}" aria-pressed="${f.id === activeFilter}">[${escapeHtml(f.label)}]</button>`
-  ).join("");
-  host.querySelectorAll("[data-filter]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      activeFilter = btn.dataset.filter;
-      prefs.set("filter", activeFilter);
-      sfx.click();
-      host.querySelectorAll("[data-filter]").forEach((b) =>
-        b.setAttribute("aria-pressed", String(b === btn))
-      );
-      renderGrid();
-    });
-  });
-}
-
 function visibleGames() {
-  const filter = FILTERS.find((f) => f.id === activeFilter);
-  if (!filter) return games;
-  if (filter.status === "archived") return games.filter((g) => g.status !== "live");
-  if (!filter.kinds) return games;
-  return games.filter((g) => filter.kinds.includes(g.kind));
+  return games;
 }
 
 function isNew(game) {
@@ -177,11 +136,7 @@ function renderCard(game, index) {
   `;
 
   if (live) {
-    const featured = game.featured ? " card--featured" : "";
-    const lever = game.featured
-      ? `<span class="card__lever" aria-hidden="true"><span class="card__lever-track"><span class="card__lever-thumb"></span></span><span class="card__lever-label">SYS LAUNCH</span></span>`
-      : "";
-    return `<a class="card${featured}" href="${gameHref(game.slug)}" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}">${inner}${lever}</a>`;
+    return `<a class="card" href="${gameHref(game.slug)}" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}">${inner}</a>`;
   }
   return `<div class="card card--soon" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}" data-title="${escapeHtml(game.title)}" tabindex="0" role="button" aria-disabled="true" aria-label="${escapeHtml(game.title)} — coming soon">${inner}</div>`;
 }

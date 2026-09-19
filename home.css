@@ -8,7 +8,7 @@
 
 .corner-note {
   position: fixed;
-  bottom: 96px;
+  bottom: var(--s-3);
   z-index: 30;
   font-family: var(--font-body);
   font-size: var(--fs-md);
@@ -361,14 +361,6 @@
   opacity: 1;
 }
 
-.card--featured .card__thumb {
-  height: 180px;
-}
-
-.card--featured .card__banner {
-  border-bottom: 4px solid var(--card-accent);
-}
-
 .card__meta {
   display: flex;
   flex-direction: column;
@@ -398,88 +390,6 @@
   color: var(--card-accent);
 }
 
-.card--featured {
-  position: relative;
-}
-
-.card__lever {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-3) var(--s-2);
-  background: linear-gradient(180deg, #2b2b30, #17171a);
-  border: 1px solid #000;
-  border-left: 3px solid var(--card-accent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-
-.card__lever-track {
-  position: relative;
-  width: 34px;
-  height: 76px;
-  background: #050505;
-  border: 1px solid #000;
-  border-radius: 17px;
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.9), inset 0 0 0 1px var(--border-bright);
-}
-
-.card__lever-thumb {
-  position: absolute;
-  left: 50%;
-  top: 4px;
-  width: 10px;
-  height: 44px;
-  transform: translateX(-50%) rotate(-16deg);
-  transform-origin: bottom center;
-  background: linear-gradient(180deg, #4a4a50, #1c1c1f);
-  border: 1px solid #000;
-  border-radius: 5px;
-}
-
-.card__lever-thumb::after {
-  content: "";
-  position: absolute;
-  top: -13px;
-  left: 50%;
-  width: 22px;
-  height: 22px;
-  transform: translateX(-50%);
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #6a6a72, #26262b 70%);
-  border: 1px solid #000;
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35);
-}
-
-.card:hover .card__lever-thumb,
-.card:focus-visible .card__lever-thumb {
-  top: auto;
-  bottom: 4px;
-  transform: translateX(-50%) rotate(16deg);
-  transform-origin: top center;
-}
-
-.card:hover .card__lever-thumb::after,
-.card:focus-visible .card__lever-thumb::after {
-  top: auto;
-  bottom: -13px;
-  background: radial-gradient(circle at 35% 30%, var(--card-accent), color-mix(in oklab, var(--card-accent) 45%, #000) 70%);
-  box-shadow: 0 0 12px var(--card-accent);
-}
-
-.card__lever-label {
-  font-family: var(--font-display);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  color: var(--dim);
-  writing-mode: vertical-rl;
-}
-
-.card:hover .card__lever-label,
-.card:focus-visible .card__lever-label {
-  color: var(--card-accent);
-}
-
 body.konami .card {
   box-shadow:
     var(--shadow-2),
@@ -502,78 +412,6 @@ body.konami .boot__title {
 @media (min-width: 1100px) {
   .game-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 860px) {
-  .card--featured {
-    grid-column: span 2;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 92px;
-  }
-
-  .card--featured .card__banner {
-    grid-column: 1 / -1;
-  }
-
-  .card--featured .card__thumb,
-  .card--featured .card__body {
-    min-width: 0;
-  }
-
-  .card--featured .card__lever {
-    grid-column: 2;
-    grid-row: 2 / span 2;
-  }
-}
-
-@media (max-width: 859px) {
-  .card--featured .card__lever {
-    flex-direction: row;
-    justify-content: center;
-  }
-
-  .card__lever-track {
-    width: 76px;
-    height: 34px;
-    border-radius: 17px;
-  }
-
-  .card__lever-thumb {
-    left: 4px;
-    top: 50%;
-    right: auto;
-    width: 44px;
-    height: 10px;
-    transform: translateY(-50%) rotate(0deg);
-  }
-
-  .card__lever-thumb::after {
-    top: 50%;
-    left: -13px;
-    transform: translateY(-50%);
-  }
-
-  .card:hover .card__lever-thumb,
-  .card:focus-visible .card__lever-thumb {
-    top: 50%;
-    bottom: auto;
-    left: auto;
-    right: 4px;
-    transform: translateY(-50%) rotate(0deg);
-    transform-origin: center;
-  }
-
-  .card:hover .card__lever-thumb::after,
-  .card:focus-visible .card__lever-thumb::after {
-    top: 50%;
-    bottom: auto;
-    left: auto;
-    right: -13px;
-  }
-
-  .card__lever-label {
-    writing-mode: horizontal-tb;
   }
 }
 

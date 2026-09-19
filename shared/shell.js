@@ -37,6 +37,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   cosmos.className = "cosmos";
   cosmos.setAttribute("aria-hidden", "true");
   cosmos.innerHTML = `
+    <div class="cosmos__warm"></div>
     <div class="cosmos__scrim"></div>
     <div class="cosmos__grain"></div>`;
 
@@ -45,6 +46,12 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   crt.setAttribute("aria-hidden", "true");
 
   body.prepend(skip, cosmos, crt);
+
+  const corner = document.createElement("span");
+  corner.className = "corner-note corner-note--tr-top";
+  corner.setAttribute("aria-hidden", "true");
+  corner.innerHTML = `CORE TEMP: <b data-core-temp>312K</b><br>DISK IO: 1.2MB/S`;
+  body.appendChild(corner);
 
   const bezel = document.createElement("div");
   bezel.className = "bezel";
@@ -59,6 +66,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   header.className = "shell";
   header.innerHTML = `
     <a class="shell__logo" href="/" aria-label="${escapeHtml(SITE.name)} home">SYS://ARCADE.NET<span class="cursor" aria-hidden="true"></span></a>
+    <span class="shell__sys" aria-hidden="true">CORE TEMP: <b data-core-temp>312K</b><br>DISK IO: 1.2MB/S</span>
     <div class="shell__telemetry" aria-label="System telemetry">
       <span class="tele">GAMES ONLINE: [<b data-tele-games>${online}</b>/${total}]</span>
       <span class="tele tele--ok">SYS STATUS: NOMINAL</span>
@@ -373,6 +381,7 @@ function logoff() {
 const sessionStarted = Date.now();
 
 function startClock() {
+  let temp = 312;
   const tick = () => {
     if (document.hidden) return;
     const s = Math.floor((Date.now() - sessionStarted) / 1000);
@@ -381,6 +390,10 @@ function startClock() {
       .join(":");
     document.querySelectorAll("[data-tele-clock]").forEach((el) => {
       el.textContent = text;
+    });
+    temp = Math.min(318, Math.max(306, temp + (Math.random() < 0.5 ? -1 : 1)));
+    document.querySelectorAll("[data-core-temp]").forEach((el) => {
+      el.textContent = `${temp}K`;
     });
   };
   tick();

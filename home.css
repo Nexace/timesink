@@ -124,7 +124,7 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  filter: drop-shadow(0 0 6px rgba(255, 246, 232, 0.7)) drop-shadow(0 0 22px rgba(255, 85, 0, 0.55)) drop-shadow(0 0 54px rgba(255, 0, 127, 0.4));
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.85)) drop-shadow(0 0 6px rgba(255, 246, 232, 0.7)) drop-shadow(0 0 22px rgba(255, 85, 0, 0.55)) drop-shadow(0 0 54px rgba(255, 0, 127, 0.4));
   animation: marquee-flicker 2.4s steps(1, end) 1;
 }
 
@@ -310,7 +310,7 @@
   flex-direction: column;
   background: linear-gradient(180deg, var(--surface-2), var(--panel-bg));
   border: 5px solid var(--card-accent);
-  border-radius: 10px;
+  border-radius: 14px;
   box-shadow: var(--shadow-2), 0 0 18px color-mix(in srgb, var(--card-accent) 35%, transparent);
   color: var(--text);
   overflow: hidden;
@@ -474,6 +474,12 @@
   color: var(--card-accent);
 }
 
+@media (min-width: 1100px) {
+  .game-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (min-width: 860px) {
   .card--featured {
     grid-column: span 2;
@@ -562,6 +568,15 @@
 .card__banner .badge {
   background: #050508;
   border-color: #050508;
+  color: var(--card-accent);
+}
+
+.card__sigil {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  background: #050508;
   color: var(--card-accent);
 }
 

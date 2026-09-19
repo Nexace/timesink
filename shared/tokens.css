@@ -197,6 +197,15 @@
   background: url("/assets/cosmos-highway.jpg") center / cover no-repeat var(--bg);
 }
 
+.cosmos__warm {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(900px 420px at 50% 6%, rgba(255, 85, 0, 0.12), transparent 65%),
+    radial-gradient(700px 380px at 82% 22%, rgba(255, 0, 127, 0.1), transparent 65%),
+    radial-gradient(800px 500px at 12% 68%, rgba(255, 183, 0, 0.06), transparent 65%);
+}
+
 .cosmos__scrim {
   position: absolute;
   inset: 0;

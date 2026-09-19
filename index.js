@@ -1,6 +1,7 @@
 import { initShell, escapeHtml, toast, prefersReducedMotion } from "/shared/shell.js";
 import { games, gameHref, liveGames } from "/shared/registry.js";
 import { sfx } from "/shared/sound.js";
+import { icon } from "/shared/icons.js";
 
 const ACCENTS = {
   flare: "#ff5500",
@@ -17,8 +18,11 @@ const FILTERS = [
   { id: "all", label: "ALL_EXPERIMENTS", kinds: null },
   { id: "sim", label: "SIMULATIONS", kinds: ["tycoon", "sim"] },
   { id: "arcade", label: "RETRO_ARCADE", kinds: ["arcade"] },
+  { id: "archived", label: "ARCHIVED", kinds: null, status: "archived" },
   { id: "chaos", label: "CHAOS", kinds: ["toy", "quiz", "puzzle"] },
 ];
+
+const MOTIF_ICONS = { dome: "dome", snake: "gamepad", cards: "grid", target: "target" };
 
 let activeFilter = "all";
 
@@ -72,7 +76,9 @@ function renderFilters() {
 
 function visibleGames() {
   const filter = FILTERS.find((f) => f.id === activeFilter);
-  if (!filter || !filter.kinds) return games;
+  if (!filter) return games;
+  if (filter.status === "archived") return games.filter((g) => g.status !== "live");
+  if (!filter.kinds) return games;
   return games.filter((g) => filter.kinds.includes(g.kind));
 }
 
@@ -143,12 +149,12 @@ function renderCard(game, index) {
     <dl class="card__meta">
       <div class="card__meta-row"><dt>ID</dt><dd>${id}</dd></div>
       <div class="card__meta-row"><dt>TITLE</dt><dd>${escapeHtml(game.title)}</dd></div>
-      <div class="card__meta-row"><dt>GENRE</dt><dd>${escapeHtml([game.kind, ...tags.slice(0, 2)].filter(Boolean).join(" / "))}</dd></div>
+      ${live && game.featured ? `<div class="card__meta-row"><dt>GENRE</dt><dd>${escapeHtml([game.kind, ...tags.slice(0, 2)].filter(Boolean).join(" / "))}</dd></div>` : ""}
       <div class="card__meta-row"><dt>SUMMARY</dt><dd>${escapeHtml(game.tagline ?? "")}</dd></div>
     </dl>`;
 
   const inner = `
-    <div class="card__banner"><span>${status}</span>${fresh}</div>
+    <div class="card__banner"><span>${status}</span><span class="card__sigil">${icon(MOTIF_ICONS[game.motif] ?? "grid", { size: 14 })}</span>${fresh}</div>
     <div class="card__thumb">
       <div class="card__thumb-inner">${motif(game.motif, color)}</div>
       ${fx}

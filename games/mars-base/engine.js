@@ -592,6 +592,9 @@ export function fromSave(data) {
       .slice(0, 80)
       .map((e) => ({ sol: Math.max(1, Math.floor(num(e.sol, 1, 1, 100000))), type: String(e.type ?? "info"), text: String(e.text).slice(0, 500) }));
   }
+  if (typeof data.dailyKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.dailyKey)) {
+    state.dailyKey = data.dailyKey;
+  }
   state.history = [];
   return state;
 }

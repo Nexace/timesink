@@ -2,6 +2,9 @@ import { initShell, escapeHtml, toast, prefersReducedMotion } from "/shared/shel
 import { games, gameHref, liveGames } from "/shared/registry.js";
 import { sfx } from "/shared/sound.js";
 import { icon } from "/shared/icons.js";
+import { createPrefStore } from "/shared/storage.js";
+
+const prefs = createPrefStore("prefs");
 
 const ACCENTS = {
   flare: "#ff5500",
@@ -25,8 +28,14 @@ const FILTERS = [
 const MOTIF_ICONS = { dome: "dome", snake: "gamepad", cards: "grid", target: "target" };
 
 let activeFilter = "all";
+{
+  const saved = prefs.get("filter", "all");
+  if (FILTERS.some((f) => f.id === saved)) activeFilter = saved;
+}
 
 initShell();
+
+wireKonami();
 
 bootLog();
 renderFilters();
@@ -65,6 +74,7 @@ function renderFilters() {
   host.querySelectorAll("[data-filter]").forEach((btn) => {
     btn.addEventListener("click", () => {
       activeFilter = btn.dataset.filter;
+      prefs.set("filter", activeFilter);
       sfx.click();
       host.querySelectorAll("[data-filter]").forEach((b) =>
         b.setAttribute("aria-pressed", String(b === btn))
@@ -216,4 +226,35 @@ function motif(kind, color) {
     <rect x="24" y="8" width="2" height="2" fill="#f0f4fc"/>
     <rect x="90" y="12" width="2" height="2" fill="#f0f4fc"/>
     ${close}`;
+}
+
+const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+
+function wireKonami() {
+  let progress = 0;
+  let timer = 0;
+  document.addEventListener("keydown", (event) => {
+    if (event.target instanceof Element && event.target.matches("input, textarea, select")) {
+      progress = 0;
+      return;
+    }
+    const want = KONAMI[progress];
+    const got = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    if (got === want) {
+      progress += 1;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        progress = 0;
+      }, 2500);
+    } else {
+      progress = got === KONAMI[0] ? 1 : 0;
+    }
+    if (progress === KONAMI.length) {
+      progress = 0;
+      document.body.classList.add("konami");
+      sfx.win();
+      toast({ title: "CHEAT ACCEPTED", body: "Cabinet overdrive engaged for 10 sols of glory.", icon: "sparkle", duration: 5000 });
+      setTimeout(() => document.body.classList.remove("konami"), 10000);
+    }
+  });
 }

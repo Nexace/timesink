@@ -257,6 +257,18 @@ html:not(.crt-lite):not(.crt-full) .crt-overlay::after {
   display: none;
 }
 
+@media (prefers-reduced-data: reduce) {
+  .cosmos {
+    background: var(--bg);
+  }
+
+  .cosmos__warm,
+  .cosmos__scrim,
+  .cosmos__grain {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-fast: 0ms;

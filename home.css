@@ -39,7 +39,7 @@
   flex-direction: column;
   align-items: center;
   gap: var(--s-2);
-  padding: var(--s-6) var(--s-4) 0;
+  padding: var(--s-4) var(--s-4) 0;
   overflow: hidden;
   background: transparent;
   border: none;
@@ -190,7 +190,7 @@
 
 .boot__floor {
   position: relative;
-  height: 120px;
+  height: 90px;
   margin: var(--s-3) calc(-1 * var(--s-4)) 0;
   overflow: hidden;
   background:
@@ -256,6 +256,7 @@
   font-size: var(--fs-lg);
   font-weight: 400;
   color: var(--cream);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95), 0 0 3px #000;
 }
 
 .section-title::before {
@@ -308,10 +309,15 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, var(--surface-2), var(--panel-bg));
-  border: 5px solid var(--card-accent);
+  border: 5px solid transparent;
   border-radius: 14px;
-  box-shadow: var(--shadow-2), 0 0 18px color-mix(in srgb, var(--card-accent) 35%, transparent);
+  background:
+    linear-gradient(180deg, var(--surface-2), var(--panel-bg)) padding-box,
+    linear-gradient(165deg, #d7d7dc 0%, #8f8f96 28%, #55555c 52%, #c9c9cf 78%, #6e6e74 100%) border-box;
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 2px var(--card-accent),
+    0 0 18px color-mix(in srgb, var(--card-accent) 35%, transparent);
   color: var(--text);
   overflow: hidden;
 }
@@ -472,6 +478,25 @@
 .card:hover .card__lever-label,
 .card:focus-visible .card__lever-label {
   color: var(--card-accent);
+}
+
+body.konami .card {
+  box-shadow:
+    var(--shadow-2),
+    0 0 24px var(--card-accent),
+    0 0 64px color-mix(in srgb, var(--card-accent) 45%, transparent);
+}
+
+body.konami .boot__title {
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.85)) drop-shadow(0 0 14px rgba(255, 246, 232, 0.9)) drop-shadow(0 0 44px rgba(255, 85, 0, 0.8)) drop-shadow(0 0 90px rgba(255, 0, 127, 0.6));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.konami .card,
+  body.konami .boot__title {
+    box-shadow: var(--shadow-2);
+    filter: none;
+  }
 }
 
 @media (min-width: 1100px) {

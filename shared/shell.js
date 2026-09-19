@@ -53,11 +53,6 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   corner.innerHTML = `CORE TEMP: <b data-core-temp>312K</b><br>DISK IO: 1.2MB/S`;
   body.appendChild(corner);
 
-  const bezel = document.createElement("div");
-  bezel.className = "bezel";
-  bezel.setAttribute("aria-hidden", "true");
-  body.appendChild(bezel);
-
   const online = String(liveGames().length).padStart(2, "0");
   const total = String(games.length).padStart(2, "0");
   const operator = (prefs.get("operator", "AAA") || "AAA").toUpperCase().slice(0, 3);
@@ -329,10 +324,25 @@ function sysinfoModal() {
 
 function userProfModal() {
   const current = getOperator();
+  const streak = Number(getStreak()) || 0;
+  const fameCount = (() => {
+    try {
+      const raw = localStorage.getItem("timesink:mars-base-fame:save");
+      const list = raw ? JSON.parse(raw)?.data : [];
+      return Array.isArray(list) ? list.length : 0;
+    } catch {
+      return 0;
+    }
+  })();
   openModal({
     title: "OPERATOR PROFILE",
     body: `
       <p>Enter your three-letter operator call sign. It is stored locally and pre-fills the halls of fame.</p>
+      <dl class="recap">
+        <div><dt>CALL SIGN</dt><dd>${escapeHtml(current)}</dd></div>
+        <div><dt>DAILY STREAK</dt><dd>${streak} DAY${streak === 1 ? "" : "S"}</dd></div>
+        <div><dt>FAME ENTRIES</dt><dd>${fameCount}/5</dd></div>
+      </dl>
       <div class="hs-entry">
         <input id="operator-input" maxlength="3" value="${escapeHtml(current)}" aria-label="Operator call sign" />
       </div>
@@ -434,6 +444,7 @@ export function openModal({
   body = "",
   actions = [],
   dismissible = true,
+  tone = null,
   onClose = null,
 }) {
   if (activeModal) {
@@ -454,7 +465,7 @@ export function openModal({
     .join("");
 
   backdrop.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+    <div class="modal${tone === "danger" ? " modal--danger" : tone === "ok" ? " modal--ok" : ""}" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
       <div class="modal__head">
         <h2 class="modal__title">${escapeHtml(title)}</h2>
         ${dismissible ? `<button type="button" class="btn btn--ghost btn--sm modal__close" data-close aria-label="Close">${icon("close", { size: 14 })}</button>` : ""}
@@ -562,6 +573,7 @@ export function confirmDialog({
   const { result } = openModal({
     title,
     body,
+    tone: danger ? "danger" : null,
     actions: [
       { id: true, label: confirmLabel, variant: danger ? "danger" : "primary" },
       { id: false, label: cancelLabel, variant: "ghost" },

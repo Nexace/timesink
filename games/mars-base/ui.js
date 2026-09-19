@@ -4,7 +4,7 @@ import { sfx } from "../../shared/sound.js";
 import { createStore, exportCode, importCode, createPrefStore } from "../../shared/storage.js";
 import { dailySeedKey } from "../../shared/rng.js";
 import { fmt, fmtDelta } from "../../shared/format.js";
-import { RESOURCES, BUILDINGS, DOCTRINES, ACHIEVEMENTS } from "./data.js";
+import { RESOURCES, BUILDINGS, DOCTRINES, ACHIEVEMENTS, WIN_POPULATION, WIN_SUSTAIN_STREAK, SUFFOCATION_LIMIT } from "./data.js";
 import {
   createState,
   advanceSol,
@@ -65,14 +65,20 @@ function buildStatic() {
     refs.res[r.id] = { node, stock: node.querySelector("[data-stock]"), delta: node.querySelector("[data-delta]") };
   }
 
+  const TIER_NAMES = { 1: "FOUNDATION", 2: "EXPANSION", 3: "FUSION" };
   const bldHost = el("buildings");
+  let lastTier = 0;
   bldHost.innerHTML = BUILDINGS.map((def, index) => {
     const keyHint = index === 9 ? "0" : String(index + 1);
+    const tierHead = def.tier !== lastTier
+      ? `<h3 class="bld__tier">TIER ${def.tier} — <b>${TIER_NAMES[def.tier] ?? ""}</b></h3>`
+      : "";
+    lastTier = def.tier;
     const flow = [
-      ...Object.entries(def.produces).map(([res, amt]) => `<span class="flow flow--up" title="+${amt} ${res} per level per sol">${icon(resIcon(res), { size: 13 })}+${amt}</span>`),
-      ...Object.entries(def.consumes).map(([res, amt]) => `<span class="flow flow--down" title="−${amt} ${res} per level per sol">${icon(resIcon(res), { size: 13 })}−${amt}</span>`),
+      ...Object.entries(def.produces).map(([res, amt]) => `<span class="flow flow--up" title="+${amt} ${res} per level per sol">${icon(resIcon(res), { size: 13 })}<span aria-hidden="true">↑</span>+${amt}</span>`),
+      ...Object.entries(def.consumes).map(([res, amt]) => `<span class="flow flow--down" title="−${amt} ${res} per level per sol">${icon(resIcon(res), { size: 13 })}<span aria-hidden="true">↓</span>−${amt}</span>`),
     ].join("");
-    return `
+    return `${tierHead}
       <article class="bld" data-id="${def.id}">
         <span class="bld__icon">${icon(def.icon)}</span>
         <div class="bld__main">
@@ -134,7 +140,7 @@ function boot() {
     if (restored) {
       state = restored;
       render();
-      toast({ title: `Resumed at sol ${state.sol}`, body: "Your colony kept the lights on.", icon: "rocket" });
+      toast({ title: `RESUMED — SOL ${state.sol}`, body: "Your colony kept the lights on.", icon: "rocket" });
       if (state.pending) rescueModal();
       else if (state.status !== "playing") endModal();
       return;
@@ -143,15 +149,24 @@ function boot() {
   startFlow("normal");
 }
 
-function startFlow(mode) {
-  const seed = mode === "daily" ? seedForDaily(dailySeedKey()) : undefined;
+function startFlow(mode, seedKey = null) {
+  const key = mode === "daily" ? seedKey ?? dailySeedKey() : null;
+  const seed = mode === "daily" ? seedForDaily(key) : undefined;
   state = createState({ mode, seed });
+  if (mode === "daily") state.dailyKey = key;
   lastStocks = null;
   render();
   doctrineModal(() => {
     render();
     save();
+    maybeOnboard();
   });
+}
+
+function maybeOnboard() {
+  if (prefs.get("mars-base:onboarded", false)) return;
+  prefs.set("mars-base:onboarded", true);
+  toast({ title: "FIRST ORDERS", body: "Build power first: press 1 for a Solar Array, then 2 and 3 for water and air.", icon: "info", duration: 7000 });
 }
 
 function doctrineModal(onDone) {
@@ -165,7 +180,7 @@ function doctrineModal(onDone) {
   ).join("");
 
   const { close, el: modalEl, result } = openModal({
-    title: "Found a colony on Mars",
+    title: "FOUND COLONY",
     body: `
       <p>Pick a founding doctrine. It shapes how your colony grows and cannot be changed later.</p>
       <div class="doctrine-grid">${cards}</div>
@@ -196,6 +211,11 @@ function wireControls() {
   el("btn-export").addEventListener("click", exportModal);
   el("btn-import").addEventListener("click", importModal);
   el("btn-daily").addEventListener("click", () => resetTo("daily"));
+  el("btn-yesterday")?.addEventListener("click", () => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 1);
+    resetTo("daily", dailySeedKey(d));
+  });
   el("btn-reset").addEventListener("click", () => resetTo("normal"));
 }
 
@@ -208,7 +228,7 @@ function wireKeyboard() {
 
     const onControl = event.target.closest("button, a");
     if (event.code === "Space") {
-      if (onControl) return;
+      if (onControl || event.repeat) return;
       event.preventDefault();
       onAdvance();
       return;
@@ -273,17 +293,18 @@ function onUndo() {
   lastStocks = null;
   save();
   render();
-  toast({ title: "Rewound one sol", icon: "undo", duration: 1600 });
+  toast({ title: "REWOUND ONE SOL", icon: "undo", duration: 1600 });
 }
 
 function rescueModal() {
   const cost = state.pending?.cost ?? rescueCost(state);
   const affordable = state.resources.credits >= cost;
   openModal({
-    title: "Life support collapse",
+    title: "LIFE SUPPORT COLLAPSE",
+    tone: "danger",
     body: `
       <p>Oxygen has been at zero too long. Your colonists are suffocating.</p>
-      <p>Earth will launch an emergency rescue for <strong>${fmt(cost)} credits</strong>, restoring oxygen and water but halving all output for five sols while the colony recovers.</p>
+      <p>Earth will launch an emergency rescue for <strong>${fmt(cost)} credits</strong>, restoring <strong>${fmt(Math.max(20, Math.ceil(state.population * 1.2)))} oxygen</strong> and <strong>${fmt(Math.max(10, Math.ceil(state.population * 0.8)))} water</strong> but halving all output for five sols while the colony recovers. The next rescue will cost <strong>${fmt(Math.round(cost * 1.5))} credits</strong>.</p>
       ${affordable ? "" : `<p class="modal__danger">You cannot afford the rescue.</p>`}
     `,
     dismissible: false,
@@ -312,22 +333,33 @@ function endModal() {
   const fameForm = fameOpen
     ? `<div class="hs-entry"><input id="fame-name" maxlength="3" placeholder="AAA" aria-label="Your initials" /><button type="button" class="btn btn--sm" id="fame-save">LOG SCORE</button></div>`
     : "";
+  const recap = `
+    <dl class="recap">
+      <div><dt>SOLS</dt><dd>${sols}</dd></div>
+      <div><dt>COLONISTS</dt><dd>${state.population}</dd></div>
+      <div><dt>ORE MINED</dt><dd>${fmt(state.stats.oreMined ?? 0)}</dd></div>
+      <div><dt>CREDITS EARNED</dt><dd>${fmt(state.stats.creditsEarned ?? 0)}</dd></div>
+      <div><dt>STRUCTURES BUILT</dt><dd>${state.stats.buildingsBuilt ?? 0}</dd></div>
+      <div><dt>EVENTS SURVIVED</dt><dd>${state.stats.events ?? 0}</dd></div>
+    </dl>`;
 
   const { el: modalEl } = openModal({
     title: won ? "COLONY ESTABLISHED" : "COLONY LOST",
+    tone: won ? "ok" : "danger",
     body: `
       <p>${won
         ? `After ${sols} sols and ${state.population} colonists, Mars is officially someone's home.`
-        : `The colony lasted ${sols} sols and peaked at ${state.population} colonists. Mars keeps its silence.`}</p>
-      <p>BADGES: <strong>${state.achievements.length}/${ACHIEVEMENTS.length}</strong></p>
+        : `The colony lasted ${sols} sols and ended with ${state.population} colonists. Mars keeps its silence.`}</p>
+      <p>ACHIEVEMENTS: <strong>${state.achievements.length}/${ACHIEVEMENTS.length}</strong></p>
+      ${recap}
       ${streakLine}
       ${fameForm}
     `,
     dismissible: true,
     actions: [
+      { id: "stay", label: "View colony", variant: "ghost" },
       { id: "copy", label: "Copy result", variant: "ghost", onClick: () => copyResult() },
       { id: "new", label: "New colony", variant: "primary", onClick: () => resetTo(state.mode) },
-      { id: "stay", label: "Look around", variant: "ghost" },
     ],
   });
 
@@ -345,27 +377,32 @@ function endModal() {
 
 function helpModal() {
   openModal({
-    title: "How to play",
+    title: "FIELD MANUAL",
     body: `
-      <p><strong>Goal:</strong> reach 50 colonists and stay self-sustaining for 10 consecutive sols.</p>
-      <p>Each <strong>sol</strong> (Mars day) you press Advance. Buildings produce and consume resources, colonists breathe and drink, and Mars occasionally throws something at you.</p>
-      <p><strong>Power</strong> gates everything: if demand exceeds supply you brown out and all other production scales down. <strong>Oxygen</strong> at zero for three sols in a row forces a rescue or ends the run.</p>
-      <p><strong>Ore</strong> is both a construction material for advanced structures and an export good at the Trade Hub &mdash; spend it or sell it, not both.</p>
+      <ul class="manual-list">
+        <li><strong>Goal:</strong> reach ${WIN_POPULATION} colonists and stay self-sustaining for ${WIN_SUSTAIN_STREAK} consecutive sols (no shortages, no brownouts).</li>
+        <li><strong>Each sol</strong> (Mars day) press Advance. Buildings produce and consume resources, colonists breathe and drink, and Mars occasionally throws something at you.</li>
+        <li><strong>Power</strong> gates everything: if demand exceeds supply you brown out and all other production scales down — brownouts also break your sustain streak.</li>
+        <li><strong>Oxygen</strong> at zero for ${SUFFOCATION_LIMIT} sols in a row forces a rescue or ends the run.</li>
+        <li><strong>Ore</strong> is both a construction material for advanced structures and an export good at the Trade Hub &mdash; spend it or sell it, not both.</li>
+      </ul>
       <p class="modal__hint">Keys: <span class="kbd">Space</span> advance &middot; <span class="kbd">1</span>&ndash;<span class="kbd">0</span> build/upgrade &middot; <span class="kbd">U</span> undo &middot; <span class="kbd">?</span> help</p>
     `,
-    actions: [{ id: "ok", label: "Got it", variant: "primary" }],
+    actions: [{ id: "ok", label: "Close", variant: "primary" }],
   });
 }
 
 function exportModal() {
   const code = exportCode(toSave(state)) ?? "";
   openModal({
-    title: "Export colony",
+    title: "EXPORT COLONY",
     body: `
       <p>Copy this code to back up or share your colony.</p>
-      <textarea class="code-box" readonly rows="6">${escapeHtml(code)}</textarea>
+      <label class="modal__label" for="export-code">COLONY CODE</label>
+      <textarea class="code-box" id="export-code" readonly rows="6">${escapeHtml(code)}</textarea>
     `,
     actions: [
+      { id: "close", label: "Close", variant: "ghost" },
       {
         id: "copy",
         label: "Copy",
@@ -376,24 +413,25 @@ function exportModal() {
             return false;
           }
           navigator.clipboard.writeText(code).then(
-            () => toast({ title: "Copied", icon: "check" }),
+            () => toast({ title: "COPIED", icon: "check" }),
             () => toast({ title: "COPY FAILED", body: "Select the text and copy it manually.", icon: "alert" })
           );
         },
       },
-      { id: "close", label: "Close", variant: "ghost" },
     ],
   });
 }
 
 function importModal() {
   openModal({
-    title: "Import colony",
+    title: "IMPORT COLONY",
     body: `
       <p>Paste a colony code. This replaces your current save.</p>
+      <label class="modal__label" for="import-input">COLONY CODE</label>
       <textarea class="code-box" id="import-input" rows="6" placeholder="Paste code here"></textarea>
     `,
     actions: [
+      { id: "close", label: "Cancel", variant: "ghost" },
       {
         id: "load",
         label: "Load",
@@ -408,22 +446,21 @@ function importModal() {
             restored = null;
           }
           if (!restored) {
-            toast({ title: "Invalid code", body: "That is not a colony I recognise.", icon: "alert" });
+            toast({ title: "INVALID CODE", body: "That is not a colony I recognise.", icon: "alert" });
             return false;
           }
           state = restored;
           lastStocks = null;
           save();
           render();
-          toast({ title: `Loaded sol ${state.sol}`, icon: "check" });
+          toast({ title: `LOADED — SOL ${state.sol}`, icon: "check" });
         },
       },
-      { id: "close", label: "Cancel", variant: "ghost" },
     ],
   });
 }
 
-async function resetTo(mode) {
+async function resetTo(mode, seedKey = null) {
   if (state && state.status === "playing" && state.sol > 1) {
     const ok = await confirmDialog({
       title: "Abandon this colony?",
@@ -434,7 +471,7 @@ async function resetTo(mode) {
     if (!ok) return;
   }
   if (mode === "normal") store.clear();
-  startFlow(mode);
+  startFlow(mode, seedKey);
 }
 
 function save() {
@@ -469,6 +506,8 @@ function yesterdayKey() {
 
 function recordDailyStreak() {
   const today = dailySeedKey();
+  const key = state?.dailyKey ?? today;
+  if (key !== today) return Number(getStreak()) || 0;
   const last = prefs.get("mars-base:lastDaily", "");
   if (last === today) return Number(getStreak()) || 0;
   const next = last === yesterdayKey() ? (Number(getStreak()) || 0) + 1 : 1;
@@ -478,7 +517,7 @@ function recordDailyStreak() {
 }
 
 function resultText() {
-  const mode = state.mode === "daily" ? `DAILY ${dailySeedKey()}` : "STANDARD";
+  const mode = state.mode === "daily" ? `DAILY ${state.dailyKey ?? dailySeedKey()}` : "STANDARD";
   const outcome = state.status === "won" ? "COLONY ESTABLISHED" : "COLONY LOST";
   return `[MARS BASE // ${mode}] ${outcome} — sol ${state.sol - 1}, pop ${state.population}, ${state.achievements.length}/13 badges. Think you can do better?`;
 }
@@ -523,12 +562,12 @@ function renderFame() {
   if (!host) return;
   const list = getFame();
   if (!list.length) {
-    host.innerHTML = `<p class="modal__hint">NO OPERATORS ON RECORD. ESTABLISH A COLONY.</p>`;
+    host.innerHTML = `<p class="hs-empty">No operators yet — establish a colony to log the first run.</p>`;
     return;
   }
   host.innerHTML = `
     <table class="hs-table">
-      <caption>FEWEST SOLS TO ESTABLISH</caption>
+      <caption>FEWEST SOLS — TOP 5</caption>
       <thead><tr><th>#</th><th>OP</th><th>SOLS</th><th>DATE</th></tr></thead>
       <tbody>
         ${list.map((e, i) => `<tr><td class="rank">${i + 1}</td><td>${escapeHtml(e.name)}</td><td>${e.sols}</td><td>${escapeHtml(e.date)}</td></tr>`).join("")}
@@ -594,6 +633,10 @@ function renderResources() {
 
     const changed = lastStocks ? stock !== lastStocks[res.id] : false;
     r.node.classList.toggle("res--flash", changed);
+    const critical = stock <= 0 || ((res.id === "oxygen" || res.id === "water") && net < -0.001 && stock < 5);
+    r.node.classList.toggle("res--critical", critical);
+    if (critical) r.node.setAttribute("aria-label", `${res.name} critical`);
+    else r.node.removeAttribute("aria-label");
     summary.push(`${res.name} ${fmt(stock, 0)} (${fmtDelta(net, 0)})`);
   }
   const summaryEl = el("res-summary");
@@ -653,8 +696,8 @@ function renderPreview() {
     : `<p class="note note--ok">${icon("check", { size: 13 })} All systems nominal.</p>`;
 
   el("win-progress").innerHTML = `
-    <div class="meter"><span class="meter__label">POP</span><span class="meter__bar">${segments(state.population, 50, 10)}</span><span class="meter__val">${state.population}/50</span></div>
-    <div class="meter"><span class="meter__label">SUS</span><span class="meter__bar">${segments(state.selfSustainStreak, 10, 10)}</span><span class="meter__val">${state.selfSustainStreak}/10</span></div>
+    <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="50" aria-valuenow="${state.population}" aria-label="Population"><span class="meter__label" title="Population">POPULATION</span><span class="meter__bar">${segments(state.population, 50, 10)}</span><span class="meter__val">${state.population}/50</span></div>
+    <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="10" aria-valuenow="${state.selfSustainStreak}" aria-label="Self-sustaining sols" title="Self-sustaining sols"><span class="meter__label">SUSTAIN</span><span class="meter__bar">${segments(state.selfSustainStreak, 10, 10)}</span><span class="meter__val">${state.selfSustainStreak}/10</span></div>
   `;
 }
 
@@ -671,10 +714,10 @@ function renderLog() {
         .map((entry) => {
           const type = LOG_TYPES.has(entry?.type) ? entry.type : "info";
           const sol = Number.isFinite(Number(entry?.sol)) ? Math.max(1, Math.floor(Number(entry.sol))) : state.sol;
-          return `<li class="log__item log__item--${type}"><span class="log__sol">S${sol}</span> ${escapeHtml(entry?.text ?? "")}</li>`;
+          return `<li class="log__item log__item--${type}"><span class="log__sol">SOL ${sol}</span> ${escapeHtml(entry?.text ?? "")}</li>`;
         })
         .join("")
-    : `<li class="log__item log__item--info"><span class="log__sol">S1</span> Touchdown confirmed. The dust settles. Begin.</li>`;
+    : `<li class="log__item log__item--info"><span class="log__sol">SOL 1</span> Touchdown confirmed. The dust settles. Begin.</li>`;
 }
 
 function renderControls() {

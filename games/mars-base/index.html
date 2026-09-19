@@ -81,7 +81,10 @@
               <div class="controls__row controls__row--tight">
                 <button id="btn-export" type="button" class="btn btn--ghost btn--sm">EXPORT</button>
                 <button id="btn-import" type="button" class="btn btn--ghost btn--sm">IMPORT</button>
-                <button id="btn-daily" type="button" class="btn btn--ghost btn--sm">DAILY</button>
+              </div>
+              <div class="controls__daily">
+                <button id="btn-daily" type="button" class="btn btn--ghost btn--sm" style="width:100%">PLAY DAILY SOL</button>
+                <button id="btn-yesterday" type="button" class="btn btn--ghost btn--sm" style="width:100%">PLAY YESTERDAY</button>
               </div>
               <button id="btn-reset" type="button" class="btn btn--danger btn--sm">ABANDON COLONY</button>
             </div>
@@ -90,6 +93,7 @@
           <section class="panel" aria-label="Next sol preview">
             <div class="panel__head"><h2 class="panel__title">PROJ // NEXT SOL</h2></div>
             <div class="panel__body">
+              <div class="prow prow--head" aria-hidden="true"><span>RESOURCE</span><span>NOW</span><span>Δ/SOL</span><span>NEXT</span></div>
               <div id="preview-rows"></div>
               <div id="preview-notes"></div>
               <div id="win-progress"></div>

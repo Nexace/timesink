@@ -1,12 +1,4 @@
 @font-face {
-  font-family: "Monoton";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("/assets/fonts/monoton-latin.woff2") format("woff2");
-}
-
-@font-face {
   font-family: "Press Start 2P";
   font-style: normal;
   font-weight: 400;
@@ -66,8 +58,7 @@
   --c-credits: #f5eddc;
   --c-pop: #ff007f;
 
-  --font-hero: allotropic, "Press Start 2P", sans-serif;
-  --font-marquee: "Monoton", "Press Start 2P", sans-serif;
+  --font-marquee: "Press Start 2P", ui-monospace, monospace;
   --font-display: "Press Start 2P", ui-monospace, monospace;
   --font-body: "VT323", "Share Tech Mono", ui-monospace, monospace;
 

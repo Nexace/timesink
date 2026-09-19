@@ -1,5 +1,7 @@
 let ctx = null;
+let master = null;
 let enabled = false;
+let volume = 1;
 const listeners = new Set();
 let sharedNoise = null;
 
@@ -14,6 +16,11 @@ function ac() {
     if (ctx.state === "suspended") {
       const resumed = ctx.resume?.();
       resumed?.catch?.(() => {});
+    }
+    if (!master) {
+      master = ctx.createGain();
+      master.gain.value = volume;
+      master.connect(ctx.destination);
     }
     return ctx;
   } catch {
@@ -35,7 +42,7 @@ function blip({ freq = 440, freq2 = null, dur = 0.08, type = "square", gain = 0.
   amp.gain.setValueAtTime(0.0001, t0);
   amp.gain.exponentialRampToValueAtTime(gain, t0 + 0.008);
   amp.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  osc.connect(amp).connect(audio.destination);
+  osc.connect(amp).connect(master ?? audio.destination);
     osc.start(t0);
     osc.stop(t0 + dur + 0.02);
   } catch {
@@ -64,7 +71,7 @@ function noise({ dur = 0.16, gain = 0.05, delay = 0, hp = 600 }) {
     filter.frequency.value = hp;
     amp.gain.setValueAtTime(gain, t0);
     amp.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    src.connect(filter).connect(amp).connect(audio.destination);
+    src.connect(filter).connect(amp).connect(master ?? audio.destination);
     src.start(t0);
     src.stop(t0 + dur + 0.02);
   } catch {
@@ -99,6 +106,23 @@ export const sfx = {
     );
   },
 };
+
+export function setVolume(value) {
+  const v = Math.min(1, Math.max(0, Number(value)));
+  volume = Number.isFinite(v) ? v : 1;
+  if (master) {
+    try {
+      master.gain.setTargetAtTime(volume, ctx.currentTime, 0.02);
+    } catch {
+      return volume;
+    }
+  }
+  return volume;
+}
+
+export function getVolume() {
+  return volume;
+}
 
 export function setSoundEnabled(value) {
   enabled = value === true;

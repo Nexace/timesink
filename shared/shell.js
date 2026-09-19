@@ -1,7 +1,7 @@
 import { SITE, games, liveGames } from "./registry.js";
 import { icon } from "./icons.js";
 import { createPrefStore } from "./storage.js";
-import { setSoundEnabled, isSoundEnabled, onSoundStateChange } from "./sound.js";
+import { setSoundEnabled, isSoundEnabled, onSoundStateChange, setVolume, getVolume } from "./sound.js";
 
 const prefs = createPrefStore("prefs");
 const BUILD = "2.2.0";
@@ -45,6 +45,11 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
   crt.setAttribute("aria-hidden", "true");
 
   body.prepend(skip, cosmos, crt);
+
+  const bezel = document.createElement("div");
+  bezel.className = "bezel";
+  bezel.setAttribute("aria-hidden", "true");
+  body.appendChild(bezel);
 
   const online = String(liveGames().length).padStart(2, "0");
   const total = String(games.length).padStart(2, "0");
@@ -115,6 +120,7 @@ export function initShell({ crumb = null, showGameLinks = true } = {}) {
       <span class="deck__track"><span class="deck__thumb"></span></span>
       <span class="deck__label">SCAN</span>
     </button>
+    <label class="deck__volume">VOL <input type="range" class="deck__slider" data-volume min="0" max="100" value="100" aria-label="Sound volume" /></label>
     <span class="deck__knobs" aria-hidden="true"><i></i><i></i></span>
     <span class="deck__vents" aria-hidden="true"></span>
     <span class="deck__hazard" aria-hidden="true"></span>
@@ -193,11 +199,13 @@ function applyPhosphor(mode) {
 
 function wireDeck(deck) {
   setSoundEnabled(prefs.get("sound", false) === true);
+  setVolume(prefs.get("volume", 1));
 
   const crtBtn = deck.querySelector("[data-crt-toggle]");
   const phosBtn = deck.querySelector("[data-phosphor-toggle]");
   const soundBtn = deck.querySelector("[data-sound-toggle]");
   const scanBtn = deck.querySelector("[data-scan-toggle]");
+  const volSlider = deck.querySelector("[data-volume]");
   if (!crtBtn || !phosBtn || !soundBtn || !scanBtn) return;
 
   applyCrt(crtPref());
@@ -233,6 +241,13 @@ function wireDeck(deck) {
     prefs.set("scan", heavy ? "lite" : "full");
     applyScan(heavy ? "lite" : "full");
   });
+
+  if (volSlider) {
+    volSlider.value = String(Math.round(getVolume() * 100));
+    volSlider.addEventListener("input", () => {
+      prefs.set("volume", setVolume(Number(volSlider.value) / 100));
+    });
+  }
 }
 
 function wireHud(header) {

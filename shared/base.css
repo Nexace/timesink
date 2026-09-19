@@ -23,7 +23,7 @@ body {
   font-size: var(--fs-md);
   line-height: 1.35;
   overflow-x: clip;
-  padding-bottom: 84px;
+  padding-bottom: 104px;
 }
 
 @supports not (overflow: clip) {
@@ -842,22 +842,46 @@ table.hs-table {
   }
 }
 
+.bezel {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  pointer-events: none;
+  border-radius: 26px;
+  box-shadow:
+    inset 0 0 0 30px #8f8f96,
+    inset 0 0 0 31px #c9c9cf,
+    inset 0 0 0 33px #6e6e74,
+    inset 0 0 0 34px #101013,
+    inset 0 2px 3px rgba(255, 255, 255, 0.5),
+    inset 0 -4px 8px rgba(0, 0, 0, 0.55),
+    inset 0 0 130px rgba(0, 0, 0, 0.5);
+}
+
+.bezel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 26px;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.05) 0%, transparent 28%);
+}
+
 .deck {
   position: fixed;
-  left: 30px;
-  right: 30px;
-  bottom: 22px;
+  left: 44px;
+  right: 44px;
+  bottom: 34px;
   z-index: 160;
   display: flex;
   align-items: center;
   gap: var(--s-3);
   padding: var(--s-2) var(--s-3);
-  background: linear-gradient(180deg, #43434a 0%, #2c2c31 45%, #1e1e22 100%);
+  background: linear-gradient(180deg, #b5b5bb 0%, #8f8f96 45%, #5f5f65 100%);
   border: 1px solid #0a0a0c;
   border-radius: 10px;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.45),
     0 6px 18px rgba(0, 0, 0, 0.85);
 }
 
@@ -884,7 +908,7 @@ table.hs-table {
 .deck__label {
   font-family: var(--font-display);
   font-size: 9px;
-  color: var(--dim);
+  color: #1a1a1e;
   letter-spacing: 0.1em;
 }
 
@@ -892,7 +916,7 @@ table.hs-table {
   width: 1px;
   align-self: stretch;
   margin: 2px 0;
-  background: var(--border-bright);
+  background: rgba(0, 0, 0, 0.35);
 }
 
 .deck__switch {
@@ -932,7 +956,12 @@ table.hs-table {
 }
 
 .deck__switch.is-on .deck__label {
-  color: var(--accent);
+  color: #050508;
+}
+
+input[type="range"].deck__slider {
+  width: 110px;
+  accent-color: var(--amber);
 }
 
 .deck__switch:focus-visible {
@@ -1027,14 +1056,34 @@ table.hs-table {
 
 @media (max-width: 860px) {
   body {
-    padding-bottom: 76px;
+    padding-bottom: 92px;
+  }
+
+  .bezel {
+    border-radius: 16px;
+    box-shadow:
+      inset 0 0 0 14px #8f8f96,
+      inset 0 0 0 15px #c9c9cf,
+      inset 0 0 0 16px #6e6e74,
+      inset 0 0 0 17px #101013,
+      inset 0 0 90px rgba(0, 0, 0, 0.55);
   }
 
   .deck {
-    left: 14px;
-    right: 14px;
-    bottom: 10px;
+    left: 24px;
+    right: 24px;
+    bottom: 24px;
   }
+}
+
+.deck__volume {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: #1a1a1e;
 }
 
 @media (max-width: 560px) {
@@ -1043,6 +1092,7 @@ table.hs-table {
     padding: var(--s-1) var(--s-2);
   }
 
+  .deck__volume,
   .deck__knobs,
   .deck__vents,
   .deck__hazard,

@@ -4,20 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="robots" content="noindex" />
-    <title>GAME_TITLE — SYS://ARCADE.NET</title>
+    <title>GAME_TITLE — SYS://TIMESINK.NET</title>
     <meta name="description" content="GAME_TAGLINE" />
     <meta name="theme-color" content="#050508" />
     <meta name="color-scheme" content="dark" />
     <link rel="canonical" href="https://timesink.vercel.app/games/GAME_SLUG" />
 
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="SYS://ARCADE.NET" />
-    <meta property="og:title" content="GAME_TITLE — SYS://ARCADE.NET" />
+    <meta property="og:site_name" content="SYS://TIMESINK.NET" />
+    <meta property="og:title" content="GAME_TITLE — SYS://TIMESINK.NET" />
     <meta property="og:description" content="GAME_TAGLINE" />
     <meta property="og:url" content="https://timesink.vercel.app/games/GAME_SLUG" />
     <meta property="og:image" content="https://timesink.vercel.app/assets/GAME_SLUG-og.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="GAME_TITLE — SYS://ARCADE.NET" />
+    <meta name="twitter:title" content="GAME_TITLE — SYS://TIMESINK.NET" />
     <meta name="twitter:description" content="GAME_TAGLINE" />
     <link rel="preload" href="/assets/fonts/vt323-latin.woff2" as="font" type="font/woff2" crossorigin />
 
@@ -59,7 +59,9 @@
 
     <script type="module">
       import { initShell } from "/shared/shell.js";
-      initShell();
+      // initShell automatically creates the bottom-right "How to Play" widget
+      // using the game's registry entry in /shared/registry.js or optional howToPlay parameter.
+      initShell({ crumb: "GAME_TITLE" });
 
       const clockEl = document.querySelector("[data-session-clock]");
       const started = Date.now();

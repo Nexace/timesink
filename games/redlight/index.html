@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en" data-accent="crimson" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>REDLIGHT — SYS://TIMESINK.NET</title>
+    <meta name="description" content="NHRA drag-racing reaction time trainer with Christmas tree, splits, and timeslip receipts." />
+    <meta name="theme-color" content="#0B0E0B" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/games/redlight/game.css" />
+  </head>
+  <body data-page="game" data-accent="crimson">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap game-screen">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">REDLIGHT // NHRA REACTION TRAINER</h1>
+        <span class="stage-bar__meta">
+          <span>MODE: <select id="mode-select">
+            <option value="solo">SOLO PRACTICE</option>
+            <option value="versus">VERSUS (P1: A, P2: L)</option>
+            <option value="endurance">ENDURANCE (10 RUNS)</option>
+          </select></span>
+          <span>TREE: <select id="tree-select">
+            <option value="pro">PRO TREE (.400)</option>
+            <option value="sportsman">SPORTSMAN (.500)</option>
+          </select></span>
+        </span>
+      </div>
+
+      <div class="rl-layout">
+        <!-- Center Drag Strip / Christmas Tree -->
+        <section class="rl-strip-panel">
+          <div class="christmas-tree" id="tree">
+            <!-- Pre-stage & Stage blue lamps -->
+            <div class="tree-row">
+              <div class="lamp lamp--prestage" id="lamp-prestage-l"></div>
+              <div class="tree-post">PRE-STAGE</div>
+              <div class="lamp lamp--prestage" id="lamp-prestage-r"></div>
+            </div>
+            <div class="tree-row">
+              <div class="lamp lamp--stage" id="lamp-stage-l"></div>
+              <div class="tree-post">STAGE</div>
+              <div class="lamp lamp--stage" id="lamp-stage-r"></div>
+            </div>
+
+            <!-- Amber countdown rows -->
+            <div class="tree-row">
+              <div class="lamp lamp--amber" id="lamp-a1-l"></div>
+              <div class="tree-post">AMBER 1</div>
+              <div class="lamp lamp--amber" id="lamp-a1-r"></div>
+            </div>
+            <div class="tree-row">
+              <div class="lamp lamp--amber" id="lamp-a2-l"></div>
+              <div class="tree-post">AMBER 2</div>
+              <div class="lamp lamp--amber" id="lamp-a2-r"></div>
+            </div>
+            <div class="tree-row">
+              <div class="lamp lamp--amber" id="lamp-a3-l"></div>
+              <div class="tree-post">AMBER 3</div>
+              <div class="lamp lamp--amber" id="lamp-a3-r"></div>
+            </div>
+
+            <!-- Green launch -->
+            <div class="tree-row">
+              <div class="lamp lamp--green" id="lamp-green-l"></div>
+              <div class="tree-post">GREEN</div>
+              <div class="lamp lamp--green" id="lamp-green-r"></div>
+            </div>
+
+            <!-- Red foul -->
+            <div class="tree-row">
+              <div class="lamp lamp--red" id="lamp-red-l"></div>
+              <div class="tree-post">RED FOUL</div>
+              <div class="lamp lamp--red" id="lamp-red-r"></div>
+            </div>
+          </div>
+
+          <div class="stage-instructions">
+            <h3 id="stage-prompt">PRESS [SPACE] TO PRE-STAGE</h3>
+            <p id="sub-prompt">7-second staging timeout in effect.</p>
+          </div>
+        </section>
+
+        <!-- Right Side Timeslip Receipt -->
+        <aside class="rl-slip-panel">
+          <div class="panel">
+            <div class="panel__head"><h2 class="panel__title">OFFICIAL NHRA TIMESLIP</h2></div>
+            <div class="panel__body timeslip-body" id="timeslip-body">
+              <div class="timeslip-receipt" id="timeslip">
+                <div class="ts-header">
+                  <span>=== SYS://TIMESINK SPEEDWAY ===</span>
+                  <span>SANCTION #4802-A</span>
+                </div>
+                <div class="ts-meta">
+                  <span id="ts-date">DATE: 2026-09-20</span>
+                  <span id="ts-car">CLASS: TOP FUEL ELIMINATOR</span>
+                </div>
+                <hr class="ts-divider" />
+                <div class="ts-rows" id="ts-rows">
+                  <div class="ts-row"><span>R/T (REACTION)</span><b id="ts-rt">.000</b></div>
+                  <div class="ts-row"><span>60 FT</span><b id="ts-60">.000</b></div>
+                  <div class="ts-row"><span>330 FT</span><b id="ts-330">.000</b></div>
+                  <div class="ts-row"><span>660 FT (1/8 MILE)</span><b id="ts-660">.000</b></div>
+                  <div class="ts-row"><span>1320 FT (1/4 MILE ET)</span><b id="ts-1320">.000</b></div>
+                  <div class="ts-row"><span>TRAP SPEED</span><b id="ts-mph">0.00 MPH</b></div>
+                </div>
+                <hr class="ts-divider" />
+                <div class="ts-footer">
+                  <div id="ts-rank">RANK: AWAITING PASS</div>
+                  <div id="ts-status">READY FOR BURNOUT</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel rolling-avg-panel">
+            <div class="panel__head"><h2 class="panel__title">TELEMETRY STATS</h2></div>
+            <div class="panel__body">
+              <div class="stat-line"><span>ROLLING AVG (LAST 10):</span><b id="stat-avg">.000 s</b></div>
+              <div class="stat-line"><span>BEST REACTION:</span><b id="stat-best">.000 s</b></div>
+              <div class="stat-line" id="endurance-line" style="display: none;"><span>STREAK:</span><b id="stat-streak">0 / 10</b></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <script type="module" src="/games/redlight/main.js"></script>
+  </body>
+</html>

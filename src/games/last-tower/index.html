@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en" data-accent="emerald" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>LAST TOWER — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Grid tower defense with dynamic A* pathfinding, 9 weapon systems, detailed humanoid attackers, tactical commander abilities, and multi-tier upgrade trees." />
+    <meta name="theme-color" content="#020a05" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/src/games/last-tower/game.css" />
+  </head>
+  <body data-page="game" data-accent="emerald">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap stage-page">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">LAST TOWER // DEFENSE CITADEL</h1>
+        <span class="stage-bar__meta">
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+        </span>
+      </div>
+
+      <div class="lt-screen">
+        <div class="lt-canvas-container">
+          <!-- Telemetry HUD -->
+          <div class="lt-hud">
+            <div class="hud-group">
+              <div class="hud-row">
+                <span class="hud-label">TREASURY:</span>
+                <span class="hud-val" id="hud-gold" style="color:#ffd700;">240 G</span>
+                <span class="hud-label" style="margin-left:12px;">CORE SHIELDS:</span>
+                <span class="hud-val" id="hud-lives" style="color:#00e676;">20 / 20</span>
+              </div>
+            </div>
+
+            <div class="hud-group">
+              <div class="hud-row">
+                <span class="hud-label">STATUS:</span>
+                <span class="hud-val" id="hud-wave">WAVE 0</span>
+                <span class="hud-val" id="hud-wave-timer" style="margin-left:8px; color:#ffd700;">NEXT: 10s</span>
+                <button type="button" class="speed-toggle-badge" id="btn-speed-toggle" style="margin-left:10px;">SPEED: 1X [Z]</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tactical Commander Abilities (Bottom Left of Canvas) -->
+          <div class="lt-commander-hud">
+            <button type="button" class="cmd-btn" id="btn-cmd-barrage" title="[1] Orbital Artillery Barrage (40G)">
+              <span>[1] AIR BARRAGE</span>
+              <span class="cmd-cost" id="cmd-barrage-cost">40 G</span>
+            </button>
+            <button type="button" class="cmd-btn" id="btn-cmd-emp" title="[2] EMP Shockwave (50G)">
+              <span>[2] EMP SHOCK</span>
+              <span class="cmd-cost" id="cmd-emp-cost">50 G</span>
+            </button>
+            <button type="button" class="cmd-btn" id="btn-cmd-overdrive" title="[3] Core Overdrive +60% Dmg (60G)">
+              <span>[3] OVERDRIVE</span>
+              <span class="cmd-cost" id="cmd-overdrive-cost">60 G</span>
+            </button>
+          </div>
+
+          <!-- Game Canvas -->
+          <canvas id="lt-canvas" width="960" height="540"></canvas>
+
+          <!-- Game Over Modal -->
+          <div class="lt-modal" id="lt-death-modal" style="display: none;">
+            <h2 class="lt-modal-title">THE LAST TOWER HAS FALLEN</h2>
+            <div id="lt-death-stats" style="color:#fff; font-family:monospace; display:flex; flex-direction:column; gap:6px;"></div>
+            <button type="button" class="btn btn--primary" onclick="window.location.reload()">[ REBUILD DEFENSES ]</button>
+            <a href="/" class="btn btn--ghost" style="color: #00e676;">[ ESCAPE TO DIRECTORY ]</a>
+          </div>
+        </div>
+
+        <!-- 9-Tower Weapon Selection Bar -->
+        <div class="tower-bar">
+          <button type="button" class="tower-btn selected" data-tower="gatling">
+            <span class="tower-btn-icon">⚡</span>
+            <span>VULKAN GATLING</span>
+            <span class="tower-cost">60 G</span>
+          </button>
+          <button type="button" class="tower-btn" data-tower="laser">
+            <span class="tower-btn-icon">🔴</span>
+            <span>THERMAL LASER</span>
+            <span class="tower-cost">110 G</span>
+          </button>
+          <button type="button" class="tower-btn" data-tower="cannon">
+            <span class="tower-btn-icon">💣</span>
+            <span>SIEGE MORTAR</span>
+            <span class="tower-cost">125 G</span>
+          </button>
+          <button type="button" class="tower-btn" data-tower="tesla">
+            <span class="tower-btn-icon">⚡</span>
+            <span>TESLA COIL</span>
+            <span class="tower-cost">150 G</span>
+          </button>
+          <button type="button" class="tower-btn" data-tower="cryo">
+            <span class="tower-btn-icon">❄️</span>
+            <span>CRYO BLASTER</span>
+            <span class="tower-cost">90 G</span>
+          </button>
+          <button type="button" class="tower-btn" data-tower="sniper">
+            <span class="tower-btn-icon">🎯</span>
+            <span>MAG-RAIL SNIPER</span>
+            <span class="tower-cost">180 G</span>
+          </button>
+          <button type="button" class="tower-btn" data-tower="missile">
+            <span class="tower-btn-icon">🚀</span>
+            <span>SWARM ROCKETS</span>
+            <span class="tower-cost">140 G</span>
+          </button>
+          <button type="button" class="tower-btn" data-tower="acid">
+            <span class="tower-btn-icon">☣️</span>
+            <span>ACID SPITTER</span>
+            <span class="tower-cost">95 G</span>
+          </button>
+          <button type="button" class="tower-btn" data-tower="sonic">
+            <span class="tower-btn-icon">🔊</span>
+            <span>SONIC DISRUPTOR</span>
+            <span class="tower-cost">130 G</span>
+          </button>
+        </div>
+
+        <!-- Tower Inspector Panel -->
+        <div class="lt-inspector" id="lt-inspector" style="display: none;">
+          <div class="inspector-group">
+            <b id="inspect-name" style="color:#00f0ff;">GATLING TURRET [LVL 1]</b>
+            <span id="inspect-stats" style="color:#8a97b1;">DMG: 14 | RATE: 0.18s | RNG: 110</span>
+          </div>
+
+          <div class="inspector-group">
+            <span style="color:#63d1c1;">TARGET PRIORITY:</span>
+            <select class="priority-select" id="inspect-priority">
+              <option value="FIRST">FIRST (LEADER)</option>
+              <option value="LAST">LAST (TRAILER)</option>
+              <option value="STRONGEST">STRONGEST (BOSS)</option>
+              <option value="WEAKEST">WEAKEST</option>
+              <option value="CLOSEST">CLOSEST</option>
+            </select>
+            <button type="button" class="btn btn--sm btn--primary" id="btn-upgrade-tower">UPGRADE (110 G)</button>
+            <button type="button" class="btn btn--sm" id="btn-sell-tower" style="border-color:#ff3344; color:#ff3344;">RECYCLE (+42 G)</button>
+          </div>
+        </div>
+
+        <!-- In-game Console Controls -->
+        <div class="console">
+          <span class="console__group">
+            <button type="button" class="btn btn--sm btn--primary" id="btn-call-wave">CALL EARLY (+20% G)</button>
+          </span>
+          <span class="console__group">
+            <span class="console__label">TACTICAL</span>
+            <span>[1] BARRAGE &nbsp; [2] EMP &nbsp; [3] OVERDRIVE</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">CONTROLS</span>
+            <span>CLICK TO BUILD // [Z] SPEED // [ESC] PAUSE</span>
+          </span>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/games/last-tower/game.js"></script>
+  </body>
+</html>

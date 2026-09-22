@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" data-accent="pink" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>THE DIET GAME — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Escalating meal planner with 25 increasingly absurd and contradictory diet rules." />
+    <meta name="theme-color" content="#0B0E0B" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/games/diet-game/game.css" />
+  </head>
+  <body data-page="game" data-accent="pink">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap game-screen">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">THE DIET GAME // MEAL PROTOCOL</h1>
+        <span class="stage-bar__meta">
+          <span id="rules-unlocked-badge">RULE: <b id="rule-count">1 / 25</b></span>
+        </span>
+      </div>
+
+      <div class="dg-layout">
+        <!-- Meal input area -->
+        <section class="dg-main">
+          <div class="panel">
+            <div class="panel__head">
+              <h2 class="panel__title">MEAL PLAN INPUT</h2>
+              <span class="absurdity-wrap">
+                ABSURDITY: <div class="meter-bar"><div class="meter-fill" id="absurdity-fill" style="width: 4%;"></div></div>
+              </span>
+            </div>
+            <div class="panel__body">
+              <label for="meal-input" class="sr-only">Type your meal plan</label>
+              <textarea id="meal-input" rows="7" placeholder="Type your meal plan here... e.g. 1 bowl oatmeal 150 cal, 1 apple 80 cal, 1 carrot 50 cal..."></textarea>
+              <div class="input-stats">
+                <span id="char-stat">CHARS: 0</span>
+                <span id="line-stat">LINES: 1</span>
+                <span id="active-timers"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Plate Visual -->
+          <div class="panel dg-plate-panel">
+            <div class="panel__head">
+              <h2 class="panel__title">DIGITAL MEAL PLATE</h2>
+              <span class="plate-badge" id="plate-badge">STATUS: WAITING</span>
+            </div>
+            <div class="panel__body dg-plate-body">
+              <div class="pixel-dining-scene">
+                <!-- Left Silver Fork in Pixels -->
+                <div class="pixel-cutlery fork" aria-label="Fork">
+                  <svg width="22" height="110" viewBox="0 0 16 80" shape-rendering="crispEdges">
+                    <rect x="2" y="2" width="2" height="24" fill="#cbd5e1"/>
+                    <rect x="6" y="2" width="2" height="24" fill="#ffffff"/>
+                    <rect x="10" y="2" width="2" height="24" fill="#cbd5e1"/>
+                    <rect x="14" y="2" width="2" height="24" fill="#ffffff"/>
+                    <rect x="2" y="24" width="14" height="4" fill="#94a3b8"/>
+                    <rect x="6" y="28" width="6" height="6" fill="#64748b"/>
+                    <rect x="7" y="34" width="4" height="40" fill="#94a3b8"/>
+                    <rect x="8" y="34" width="2" height="38" fill="#f8fafc"/>
+                    <rect x="6" y="74" width="6" height="4" fill="#64748b"/>
+                  </svg>
+                </div>
+
+                <!-- White Pixel Plate -->
+                <div class="pixel-plate" id="pixel-plate">
+                  <div class="pixel-plate__rim">
+                    <div class="pixel-plate__inner-rim">
+                      <div class="pixel-plate__surface" id="plate-items">
+                        <span class="plate-empty">&gt; PLATE EMPTY</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Right Silver Knife in Pixels -->
+                <div class="pixel-cutlery knife" aria-label="Knife">
+                  <svg width="22" height="110" viewBox="0 0 16 80" shape-rendering="crispEdges">
+                    <rect x="8" y="2" width="4" height="30" fill="#f8fafc"/>
+                    <rect x="6" y="2" width="2" height="30" fill="#cbd5e1"/>
+                    <polygon points="12,2 6,32 12,32" fill="#ffffff"/>
+                    <rect x="6" y="32" width="6" height="4" fill="#64748b"/>
+                    <rect x="7" y="36" width="4" height="38" fill="#94a3b8"/>
+                    <rect x="8" y="36" width="2" height="36" fill="#f8fafc"/>
+                    <rect x="6" y="74" width="6" height="4" fill="#64748b"/>
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Live Nutritional Telemetry Strip -->
+              <div class="plate-telemetry-bar">
+                <span class="pt-stat">ITEMS: <b id="pt-items-val">0</b></span>
+                <span class="pt-stat">CALORIES: <b id="pt-cal-val">0 CAL</b></span>
+                <span class="pt-stat">PROTEIN: <b id="pt-protein-val">NONE</b></span>
+                <span class="pt-stat">VEGAN: <b id="pt-vegan-val">YES</b></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Rules Stack -->
+        <aside class="dg-rules-aside">
+          <div class="panel">
+            <div class="panel__head">
+              <h2 class="panel__title">DIETARY DIRECTIVES</h2>
+            </div>
+            <div class="panel__body rules-list" id="rules-list">
+              <!-- Rendered dynamically by rule-engine -->
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Game Over Modal Overlay -->
+      <div class="game-over-overlay" id="fail-overlay" style="display: none;">
+        <div class="game-over-card">
+          <h2 class="game-over-title">DIETARY FAILURE // REJECTED</h2>
+          <p class="game-over-msg" id="fail-msg">You allowed the avocado to rot into toxic slime.</p>
+          <button type="button" class="btn btn--danger" id="btn-restart">[ RE-INITIATE DIET ]</button>
+        </div>
+      </div>
+
+      <!-- Victory Overlay -->
+      <div class="game-over-overlay" id="win-overlay" style="display: none;">
+        <div class="game-over-card win-card">
+          <h2 class="game-over-title" style="color: var(--accent);">DIET PERFECTED // ASCENSION</h2>
+          <p class="game-over-msg">All 25 impossible contradictory directives satisfied. The nutritionist bows before your cosmic metabolism.</p>
+          <button type="button" class="btn btn--primary" id="btn-share-result">[ COPY CERTIFICATE ]</button>
+          <button type="button" class="btn btn--ghost" id="btn-win-restart">[ PLAY AGAIN ]</button>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/games/diet-game/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" data-accent="silver" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>TERAFORM RUN — SYS://TIMESINK.NET</title>
+    <meta name="description" content="1-bit endless runner with multi-box collision, variable jump, fast-fall, roguelite perks, 6 biomes, and combo near-miss system." />
+    <meta name="theme-color" content="#030508" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/src/games/teraform-run/game.css" />
+  </head>
+  <body data-page="game" data-accent="silver">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap stage-page">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">TERAFORM RUN // ENDLESS RUNNER</h1>
+        <span class="stage-bar__meta">
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+        </span>
+      </div>
+
+      <div class="tr-screen">
+        <div class="tr-canvas-container">
+          <!-- HUD Overlay -->
+          <div class="tr-hud">
+            <div class="hud-left">
+              <span class="hud-label">SCORE</span>
+              <span class="hud-val" id="hud-score">00000</span>
+            </div>
+            <div class="hud-center">
+              <span class="hud-biome" id="hud-biome">DESERT</span>
+              <span class="hud-combo" id="hud-combo" hidden>COMBO x<b id="combo-val">1</b></span>
+            </div>
+            <div class="hud-right">
+              <span class="hud-label">HI</span>
+              <span class="hud-val" id="hud-hi">00000</span>
+              <span class="hud-coins">🪙 <b id="hud-coins">0</b></span>
+            </div>
+          </div>
+
+          <!-- Game Canvas -->
+          <canvas id="game-canvas" width="1440" height="520"></canvas>
+
+          <!-- Touch Zones -->
+          <div class="touch-zone touch-zone-left" id="touch-left">
+            <span class="zone-label">DUCK / SLAM</span>
+          </div>
+          <div class="touch-zone touch-zone-right" id="touch-right">
+            <span class="zone-label">JUMP</span>
+          </div>
+
+          <!-- Start Overlay -->
+          <div class="tr-start-overlay" id="start-overlay">
+            <div class="start-title">TERAFORM RUN</div>
+            <div class="start-sub">PRESS SPACE OR TAP TO START</div>
+            <div class="start-hint">↑/SPACE = JUMP &nbsp; ↓ = DUCK/SLAM</div>
+          </div>
+        </div>
+
+        <!-- Perk Selection Modal -->
+        <div class="tr-modal" id="modal-perk" hidden>
+          <div class="modal-card perk-card-container">
+            <div class="modal-title">PERK UNLOCKED // CHOOSE ONE</div>
+            <div class="perk-grid" id="perk-grid"></div>
+          </div>
+        </div>
+
+        <!-- Game Over Modal -->
+        <div class="tr-modal" id="modal-gameover" hidden>
+          <div class="modal-card">
+            <div class="modal-title">EXTINCTION // RUN ENDED</div>
+            <div class="go-stats">
+              <div class="stat-row"><span>DISTANCE:</span><b id="go-score">0</b></div>
+              <div class="stat-row"><span>BEST COMBO:</span><b id="go-combo">0x</b></div>
+              <div class="stat-row"><span>COINS:</span><b id="go-coins">0</b></div>
+              <div class="stat-row"><span>PERKS CHOSEN:</span><b id="go-perks">0</b></div>
+              <div class="stat-row stat-highlight"><span>FINAL SCORE:</span><b id="go-final">0</b></div>
+            </div>
+            <div class="modal-actions">
+              <button class="action-btn action-btn-primary" id="btn-restart" type="button">RESTART [SPACE]</button>
+              <a class="action-btn" href="/">BACK TO ARCADE</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/games/teraform-run/game.js"></script>
+  </body>
+</html>

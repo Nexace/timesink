@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" data-accent="violet" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>HEADBUTT — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Side-view 2D physics car battler. Land a hit on the bot's exposed driver head to win. 12 vehicles, 8 enhanced arenas, Player vs Bot AI." />
+    <meta name="theme-color" content="#09030a" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/src/games/headbutt/game.css" />
+  </head>
+  <body data-page="game" data-accent="violet">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap stage-page">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">HEADBUTT // PHYSICS CAR BATTLER</h1>
+        <span class="stage-bar__meta">
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+        </span>
+      </div>
+
+      <div class="hb-screen">
+        <div class="hb-canvas-container">
+          <canvas id="hb-canvas" width="1280" height="720"></canvas>
+        </div>
+        <div class="console">
+          <span class="console__group">
+            <span class="console__label">DRIVE</span>
+            <span class="kbd">A</span><span class="kbd">D</span>
+            <span>/</span>
+            <span class="kbd">←</span><span class="kbd">→</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">JUMP</span>
+            <span class="kbd">W</span> <span class="kbd">↑</span> <span class="kbd">SPACE</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">AIR PITCH</span>
+            <span class="kbd">A</span><span class="kbd">D</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">OPPONENT</span>
+            <span class="kbd">BOT AI</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">START</span>
+            <span class="kbd">SPACE</span> <span class="kbd">ENTER</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">GARAGE</span>
+            <span class="kbd">G</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">PAUSE</span>
+            <span class="kbd">ESC</span>
+          </span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Matter.js Physics Engine (CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
+    <!-- Game Module -->
+    <script type="module" src="/src/games/headbutt/game.js"></script>
+    <!-- Session Clock -->
+    <script type="module">
+      const clockEl = document.querySelector("[data-session-clock]");
+      const started = Date.now();
+      if (clockEl && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setInterval(() => {
+          if (document.hidden) return;
+          const s = Math.floor((Date.now() - started) / 1000);
+          clockEl.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+        }, 1000);
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,503 @@
+/* ==========================================================================
+   PING AGE // DIGITAL ARCHAEOLOGY STYLESHEET
+   ========================================================================== */
+
+.pa-container {
+  max-width: min(1040px, 100%);
+  margin: var(--s-4) auto;
+}
+
+.quiz-bar {
+  width: 140px;
+  height: 10px;
+  background: #090c14;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.quiz-fill {
+  height: 100%;
+  background: var(--accent, #6366f1);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 8px var(--accent, #6366f1);
+}
+
+.pa-body {
+  position: relative;
+  min-height: 360px;
+}
+
+/* --------------------------------------------------------------------------
+   Reaction Toast Quip
+   -------------------------------------------------------------------------- */
+.pa-reaction-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 10px 14px;
+  margin-bottom: var(--s-3);
+  background: rgba(10, 15, 26, 0.95);
+  border: 1px solid var(--accent, #6366f1);
+  box-shadow: 0 0 14px rgba(99, 102, 241, 0.25);
+  animation: reactionSlide 0.2s ease-out;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs, 12px);
+}
+
+@keyframes reactionSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.reaction-tag {
+  color: #fff;
+  background: var(--accent, #6366f1);
+  padding: 2px 6px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.reaction-msg {
+  color: #e2e8f0;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Question & Options Grid
+   -------------------------------------------------------------------------- */
+.pa-question-text {
+  font-family: var(--font-display, var(--font-mono));
+  font-size: clamp(16px, 2vw, 20px);
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: var(--s-4);
+  font-weight: 600;
+}
+
+.pa-options-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.pa-opt-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: #090d16;
+  border: 1px solid #1e2638;
+  color: #cbd5e1;
+  font-family: var(--font-mono);
+  font-size: clamp(13px, 1.2vw, 15px);
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.45;
+  transition: all 0.16s ease;
+  position: relative;
+}
+
+.pa-opt-btn:hover,
+.pa-opt-btn:focus-visible {
+  border-color: var(--accent, #6366f1);
+  background: rgba(99, 102, 241, 0.12);
+  color: #ffffff;
+  transform: translateX(3px);
+  outline: none;
+}
+
+.pa-opt-btn.is-selected {
+  border-color: #fff;
+  background: rgba(99, 102, 241, 0.3);
+  color: #fff;
+  box-shadow: 0 0 12px var(--accent, #6366f1);
+}
+
+.opt-prefix {
+  color: var(--accent, #6366f1);
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Result Dossier Container
+   -------------------------------------------------------------------------- */
+.era-status-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim, #64748b);
+  letter-spacing: 0.08em;
+}
+
+.era-container {
+  padding: var(--s-5);
+  font-family: var(--font-mono);
+  transition: all 0.3s ease;
+}
+
+.era-header {
+  margin-bottom: var(--s-5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: var(--s-4);
+}
+
+.era-badges-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: 6px;
+}
+
+.era-tag {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  font-weight: 700;
+}
+
+.era-dates {
+  color: var(--dim, #94a3b8);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.era-title {
+  font-family: var(--font-display, var(--font-mono));
+  font-size: clamp(26px, 3.5vw, 36px);
+  letter-spacing: 0.05em;
+  margin: 6px 0 4px 0;
+  font-weight: 900;
+}
+
+.era-archetype {
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: #e2e8f0;
+  font-weight: 700;
+  margin-bottom: var(--s-3);
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.era-desc {
+  font-size: clamp(14px, 1.4vw, 16px);
+  line-height: 1.6;
+  color: #cbd5e1;
+  margin-top: var(--s-2);
+}
+
+/* --------------------------------------------------------------------------
+   Excavated Artifacts (Dossier Quadrant Grid)
+   -------------------------------------------------------------------------- */
+.dossier-section {
+  margin-bottom: var(--s-5);
+}
+
+.dossier-section-title {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--dim, #94a3b8);
+  margin-bottom: var(--s-3);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.dossier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--s-3);
+}
+
+.dossier-card {
+  background: rgba(6, 9, 14, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: var(--s-3) var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.2s ease;
+}
+
+.dossier-card:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.dossier-card__label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--accent, #6366f1);
+}
+
+.dossier-card__val {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e2e8f0;
+}
+
+/* --------------------------------------------------------------------------
+   Hybrid Era DNA Distribution Matrix
+   -------------------------------------------------------------------------- */
+.dna-section {
+  margin-bottom: var(--s-5);
+  background: rgba(6, 9, 14, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: var(--s-4);
+}
+
+.dna-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+
+.dna-note {
+  font-size: 11px;
+  color: var(--dim, #64748b);
+}
+
+.dna-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dna-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dna-row__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.dna-row__name {
+  font-weight: 600;
+  display: flex;
+  gap: 8px;
+}
+
+.dna-row__dates {
+  color: var(--dim, #64748b);
+  font-weight: normal;
+}
+
+.dna-row__pct {
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.dna-track {
+  width: 100%;
+  height: 8px;
+  background: #030508;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.dna-fill {
+  height: 100%;
+  transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* --------------------------------------------------------------------------
+   Badges Section
+   -------------------------------------------------------------------------- */
+.badges-section {
+  margin-bottom: var(--s-5);
+}
+
+.badges-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+
+.badge-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid #334155;
+}
+
+.badge-card.badge-tt {
+  border-color: #f59e0b;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+}
+
+.badge-card.badge-purist {
+  border-color: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+}
+
+.badge-card.badge-omnivore {
+  border-color: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+}
+
+.badge-icon {
+  font-size: 20px;
+}
+
+.badge-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.badge-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #fff;
+}
+
+.badge-desc {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* --------------------------------------------------------------------------
+   Stats & Action Bar
+   -------------------------------------------------------------------------- */
+.era-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-5);
+  margin-bottom: var(--s-5);
+  padding: var(--s-3) var(--s-4);
+  background: #05080e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.era-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 10px;
+  color: var(--dim, #64748b);
+  letter-spacing: 0.06em;
+}
+
+.stat-val {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+
+/* --------------------------------------------------------------------------
+   Era-Specific Palette Overrides
+   -------------------------------------------------------------------------- */
+.era-dialup {
+  background: #020b05;
+  border: 2px dashed #00ff66;
+  color: #00ff66;
+}
+.era-dialup .era-tag {
+  color: #00ff66;
+  border-color: #00ff66;
+}
+.era-dialup .era-title {
+  color: #ffff00;
+  text-shadow: 2px 2px #003300, 0 0 10px rgba(255, 255, 0, 0.3);
+}
+.era-dialup .dossier-card__label {
+  color: #00ff66;
+}
+
+.era-myspace {
+  background: #140316;
+  border: 2px solid #ff007f;
+  color: #ff99cc;
+}
+.era-myspace .era-tag {
+  color: #ff007f;
+  border-color: #ff007f;
+}
+.era-myspace .era-title {
+  color: #ff007f;
+  text-shadow: 0 0 12px rgba(255, 0, 127, 0.6);
+}
+.era-myspace .dossier-card__label {
+  color: #ff007f;
+}
+
+.era-meme {
+  background: #120904;
+  border: 2px solid #ff5500;
+  color: #ffeedd;
+}
+.era-meme .era-tag {
+  color: #ff5500;
+  border-color: #ff5500;
+}
+.era-meme .era-title {
+  color: #ff5500;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(255, 85, 0, 0.5);
+}
+.era-meme .dossier-card__label {
+  color: #ff5500;
+}
+
+.era-feed {
+  background: #090412;
+  border: 2px solid #9d4edd;
+  color: #e0d0f5;
+}
+.era-feed .era-tag {
+  color: #9d4edd;
+  border-color: #9d4edd;
+}
+.era-feed .era-title {
+  color: #ffffff;
+  letter-spacing: 0.12em;
+  text-shadow: 0 0 12px rgba(157, 78, 221, 0.6);
+}
+.era-feed .dossier-card__label {
+  color: #9d4edd;
+}
+
+.era-brainrot {
+  background: #050014;
+  border: 2px dotted #00f0ff;
+  color: #00f0ff;
+}
+.era-brainrot .era-tag {
+  color: #00f0ff;
+  border-color: #00f0ff;
+}
+.era-brainrot .era-title {
+  color: #ff007f;
+  text-shadow: -2px 0 #00f0ff, 2px 0 #ff007f, 0 0 14px rgba(0, 240, 255, 0.5);
+}
+.era-brainrot .dossier-card__label {
+  color: #00f0ff;
+}

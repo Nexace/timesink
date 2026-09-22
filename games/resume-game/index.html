@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en" data-accent="gold" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>THE RESUME GAME — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Escalating ATS resume builder with 28 brutal rules and a dynamic HR reaction engine." />
+    <meta name="theme-color" content="#0B0E0B" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/games/resume-game/game.css" />
+  </head>
+  <body data-page="game" data-accent="gold">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap game-screen">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">THE RESUME GAME // ATS PROTOCOL 28</h1>
+        <span class="stage-bar__meta">
+          <span>RULES PASSED: <b id="rule-count">0 / 28</b></span>
+          <span>ATS MATCH: <b id="ats-pct">0%</b></span>
+        </span>
+      </div>
+
+      <div class="resume-layout">
+        <!-- Editor Section -->
+        <section class="resume-editor-panel">
+          <div class="panel">
+            <div class="panel__head">
+              <h2 class="panel__title">CANDIDATE DOSSIER (ATS TEXT INPUT)</h2>
+              <div class="editor-actions">
+                <button type="button" class="btn-micro" id="btn-sample">TEMPLATE</button>
+                <button type="button" class="btn-micro" id="btn-clear">CLEAR</button>
+              </div>
+            </div>
+            <div class="panel__body">
+              <div id="active-timers" class="timers-container"></div>
+              <textarea
+                id="resume-input"
+                class="resume-textarea"
+                rows="14"
+                placeholder="Type your resume here to begin ATS automated screening..."
+                spellcheck="false"
+              ></textarea>
+              <div class="editor-stats">
+                <span id="char-stat">CHARS: 0</span>
+                <span id="word-stat">WORDS: 0</span>
+                <span id="vowel-stat">C/V RATIO: 0.00</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- HR Recruiter & Rules Section -->
+        <aside class="resume-meta-panel">
+          <!-- Dynamic ASCII HR Recruiter Station -->
+          <div class="panel hr-station">
+            <div class="panel__head">
+              <h2 class="panel__title">HR TALENT ACQUISITION BOT</h2>
+            </div>
+            <div class="panel__body hr-body">
+              <div class="hr-avatar">
+                <pre id="hr-face" class="hr-face">( - _ - )</pre>
+              </div>
+              <div class="hr-dialogue">
+                <p id="hr-quote">"Awaiting candidate submission. Let's see if this one gets past our automated filters..."</p>
+              </div>
+              <div class="ats-meter">
+                <div class="ats-meter-label">
+                  <span>ATS COMPLIANCE INDEX</span>
+                  <span id="ats-pct-bar">0%</span>
+                </div>
+                <div class="meter-bar">
+                  <div class="meter-fill" id="ats-fill" style="width: 0%;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Escalating Rule Checklist -->
+          <div class="panel rules-panel">
+            <div class="panel__head">
+              <h2 class="panel__title">ATS FILTER SPECIFICATIONS</h2>
+            </div>
+            <div class="panel__body">
+              <div id="rules-list" class="rules-list">
+                <!-- Injected via JavaScript -->
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Game Over / Rejection Modal -->
+      <div id="fail-overlay" class="modal-backdrop" style="display: none;">
+        <div class="modal-box fail-box">
+          <div class="modal-header">
+            <h3>APPLICATION STATUS: REJECTED</h3>
+          </div>
+          <div class="modal-body">
+            <pre class="ascii-art">
+  ___ _____ ___     ____  _____    _ _____ ____ _____ 
+ / _ \_   _/ _ \   |  _ \| ____|  / | ____/ ___|_   _|
+| | | || || | | |  | |_) |  _|    | |  _|| |     | |  
+| |_| || || |_| |  |  _ <| |___   | | |__| |___  | |  
+ \__\_\|_| \___/   |_| \_\_____|  |_|_____\____| |_|  
+            </pre>
+            <p id="fail-msg">We regret to inform you that your resume did not satisfy our algorithmic criteria.</p>
+            <button type="button" id="btn-restart" class="btn btn-primary">SUBMIT REVISED APPLICATION</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Win / Offer Letter Modal -->
+      <div id="win-overlay" class="modal-backdrop" style="display: none;">
+        <div class="modal-box win-box">
+          <div class="modal-header">
+            <h3>FORMAL JOB OFFER EXTENDED!</h3>
+          </div>
+          <div class="modal-body">
+            <pre class="ascii-art">
+ \ ( ^ ▽ ^ ) /
+OFFER LETTER: PRINCIPAL ARCHITECT & SUPREME WIZARD
+COMPENSATION: $500,000 TC + UNLIMITED PTO + KOMBUCHA ON TAP
+            </pre>
+            <p>You satisfied all 28 impossible, contradictory ATS filters without breaking a sweat!</p>
+            <div class="win-actions">
+              <button type="button" id="btn-share-result" class="btn btn-action">COPY DOSSIER SCORECARD</button>
+              <button type="button" id="btn-win-restart" class="btn btn-primary">RE-APPLY FOR PROMOTION</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/games/resume-game/main.js"></script>
+  </body>
+</html>

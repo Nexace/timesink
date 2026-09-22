@@ -3,28 +3,25 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>MARS BASE — SYS://ARCADE.NET</title>
+    <title>MARS BASE — SYS://TIMESINK.NET</title>
     <meta
       name="description"
-      content="A turn-based Mars colony experiment. Manage power, water, oxygen, ore and credits across sols, survive dust storms and meteors, and grow a self-sustaining colony of fifty."
+      content="Stranded on Mars. An open-world pixel-art survival game: gather regolith and ice, patch the hab, grow potatoes, drive the rover across a seeded red planet, and build a colony."
     />
-    <meta name="theme-color" content="#050508" />
+    <meta name="theme-color" content="#050303" />
     <meta name="color-scheme" content="dark" />
     <link rel="canonical" href="https://timesink.vercel.app/games/mars-base" />
 
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="SYS://ARCADE.NET" />
-    <meta property="og:title" content="MARS BASE — SYS://ARCADE.NET" />
-    <meta
-      property="og:description"
-      content="Build a colony one sol at a time. Oxygen is a suggestion until it isn't."
-    />
+    <meta property="og:site_name" content="SYS://TIMESINK.NET" />
+    <meta property="og:title" content="MARS BASE — SYS://TIMESINK.NET" />
+    <meta property="og:description" content="The crew left. You didn't. Science your way off a very red planet." />
     <meta property="og:url" content="https://timesink.vercel.app/games/mars-base" />
     <meta property="og:image" content="https://timesink.vercel.app/assets/mars-base-og.png" />
-    <meta property="og:image:alt" content="MARS BASE — turn-based colony experiment" />
+    <meta property="og:image:alt" content="MARS BASE — open-world pixel survival on Mars" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="MARS BASE — SYS://ARCADE.NET" />
-    <meta name="twitter:description" content="Build a colony one sol at a time. Oxygen is a suggestion until it isn't." />
+    <meta name="twitter:title" content="MARS BASE — SYS://TIMESINK.NET" />
+    <meta name="twitter:description" content="The crew left. You didn't. Science your way off a very red planet." />
     <meta name="twitter:image" content="https://timesink.vercel.app/assets/mars-base-og.png" />
     <link rel="stylesheet" href="/shared/tokens.css" />
     <link rel="stylesheet" href="/shared/base.css" />
@@ -36,88 +33,90 @@
   </head>
   <body data-page="game" data-accent="flare">
     <a class="skip-link" href="#main">Skip to content</a>
-    <main id="main" class="game wrap">
+    <main id="main" class="game wrap mb-page">
       <div class="stage-bar">
         <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
-        <h1 class="stage-bar__title">MARS BASE</h1>
+        <h1 class="stage-bar__title">MARS BASE <span class="mb-sub">// RED DUST</span></h1>
         <span class="stage-bar__meta">
-          <span>SOL <b id="sol">1</b></span>
+          <span>SOL <b id="bar-sol">1</b></span>
           <span>SESSION T+<b data-session-clock>00:00</b></span>
           <button class="hbtn" type="button" data-fullscreen-toggle>FULLSCREEN</button>
         </span>
       </div>
 
-      <div class="gamerow">
-        <span class="gamerow__pop" aria-label="Population over capacity">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.4a3.2 3.2 0 0 1 0 5.2"/><path d="M18.5 20a6 6 0 0 0-2.6-4.9"/></svg>
-          <span id="pop">2/4</span>
-        </span>
-        <span class="gamerow__badges">
-          <span id="doctrine-badge"></span>
-          <span id="mode-badge"></span>
-        </span>
-        <span class="gamerow__status" id="status-banner" role="status"></span>
+      <div class="mb-stage" id="stage">
+        <canvas id="world" class="mb-canvas" aria-label="Mars surface view" tabindex="0"></canvas>
+
+        <!-- HUD overlay -->
+        <div class="mb-hud" id="hud" hidden>
+          <section class="hud-vitals" id="hud-vitals" aria-label="Suit vitals"></section>
+          <section class="hud-objective" id="hud-objective" aria-live="polite"></section>
+
+          <section class="hud-tr" aria-label="Clock and map">
+            <div class="hud-clock">
+              <span class="hud-clock__sol">SOL <b id="hud-sol">1</b></span>
+              <span class="hud-clock__time" id="hud-time">06:00</span>
+              <span class="hud-clock__speed" id="hud-speed">1×</span>
+            </div>
+            <canvas class="hud-mini" id="hud-mini" width="128" height="128" aria-label="Minimap"></canvas>
+            <div class="hud-weather" id="hud-weather"></div>
+          </section>
+
+          <section class="hud-alerts" id="hud-alerts" aria-live="assertive"></section>
+          <section class="hud-base" id="hud-base" aria-label="Base status"></section>
+          <section class="hud-context" id="hud-context" aria-live="off"></section>
+          <nav class="hud-hotbar" id="hud-hotbar" aria-label="Hotbar"></nav>
+          <div class="hud-buttons" id="hud-buttons">
+            <button type="button" class="hbtn" data-open="inventory" title="Inventory & crafting [Tab]">INV</button>
+            <button type="button" class="hbtn" data-open="build" title="Build [B]">BUILD</button>
+            <button type="button" class="hbtn" data-open="research" title="Research [T]">RSRCH</button>
+            <button type="button" class="hbtn" data-open="map" title="Map [M]">MAP</button>
+            <button type="button" class="hbtn" data-open="journal" title="Journal [J]">LOG</button>
+            <button type="button" class="hbtn" data-open="menu" title="Menu [Esc]">MENU</button>
+          </div>
+          <div class="hud-pause" id="hud-pause" hidden>PAUSED <small>[SPACE]</small></div>
+          <div class="hud-sleep" id="hud-sleep" hidden>SLEEPING…</div>
+          <div class="hud-dead" id="hud-vignette" aria-hidden="true"></div>
+        </div>
+
+        <!-- Panels -->
+        <div class="mb-panel" id="panel" hidden role="dialog" aria-modal="false" aria-labelledby="panel-title">
+          <div class="mb-panel__frame">
+            <header class="mb-panel__head">
+              <nav class="mb-tabs" id="panel-tabs" role="tablist"></nav>
+              <h2 class="sr-only" id="panel-title">Panel</h2>
+              <button type="button" class="hbtn mb-panel__close" id="panel-close" aria-label="Close panel">[X]</button>
+            </header>
+            <div class="mb-panel__body" id="panel-body"></div>
+          </div>
+        </div>
+
+        <!-- Title / mode select -->
+        <div class="mb-title" id="title-screen">
+          <div class="mb-title__inner">
+            <p class="mb-title__kicker">HELIOS-3 // ACIDALIA PLANITIA</p>
+            <h2 class="mb-title__logo">MARS<br />BASE</h2>
+            <p class="mb-title__tag">The crew left. You didn't.</p>
+            <div class="mb-title__menu" id="title-menu"></div>
+            <div class="mb-title__fame" id="title-fame"></div>
+          </div>
+          <canvas class="mb-title__bg" id="title-bg" aria-hidden="true"></canvas>
+        </div>
       </div>
 
-      <section class="resources" id="resources" aria-label="Resources" aria-live="off"></section>
-      <p class="sr-only" id="res-summary" role="status"></p>
-
-      <div class="layout">
-        <section class="panel" aria-label="Structures">
-          <div class="panel__head"><h2 class="panel__title">STRUCTURES</h2></div>
-          <div class="buildings__list" id="buildings"></div>
-        </section>
-
-        <aside class="side">
-          <section class="panel" aria-label="Controls">
-            <div class="panel__body controls">
-              <button id="btn-advance" type="button" class="btn btn--primary controls__primary">
-                ADVANCE SOL <span class="kbd">SPACE</span>
-              </button>
-              <div class="controls__row">
-                <button id="btn-undo" type="button" class="btn">UNDO <span class="kbd">U</span></button>
-                <button id="btn-help" type="button" class="btn btn--ghost">HELP <span class="kbd">?</span></button>
-              </div>
-              <div class="controls__row controls__row--tight">
-                <button id="btn-export" type="button" class="btn btn--ghost btn--sm">EXPORT</button>
-                <button id="btn-import" type="button" class="btn btn--ghost btn--sm">IMPORT</button>
-              </div>
-              <div class="controls__daily">
-                <button id="btn-daily" type="button" class="btn btn--ghost btn--sm" style="width:100%">PLAY DAILY SOL</button>
-                <button id="btn-yesterday" type="button" class="btn btn--ghost btn--sm" style="width:100%">PLAY YESTERDAY</button>
-              </div>
-              <button id="btn-reset" type="button" class="btn btn--danger btn--sm">ABANDON COLONY</button>
-            </div>
-          </section>
-
-          <section class="panel" aria-label="Next sol preview">
-            <div class="panel__head"><h2 class="panel__title">PROJ // NEXT SOL</h2></div>
-            <div class="panel__body">
-              <div class="prow prow--head" aria-hidden="true"><span>RESOURCE</span><span>NOW</span><span>Δ/SOL</span><span>NEXT</span></div>
-              <div id="preview-rows"></div>
-              <div id="preview-notes"></div>
-              <div id="win-progress"></div>
-            </div>
-          </section>
-
-          <section class="panel" aria-label="Colony log">
-            <div class="panel__head"><h2 class="panel__title">COLONY LOG</h2></div>
-            <ul class="log__list" id="log"></ul>
-          </section>
-
-          <section class="panel" aria-label="Top operators">
-            <div class="panel__head"><h2 class="panel__title">TOP OPERATORS</h2></div>
-            <div class="hs-wrap" id="hall-of-fame"></div>
-          </section>
-        </aside>
-      </div>
-
-      <div class="console">
-        <span class="console__group"><span class="console__label">OBJECTIVE</span><span>50 COLONISTS + 10 SUSTAINED SOLS</span></span>
-        <span class="console__group"><span class="console__label">KEYS</span><span class="kbd">SPACE</span><span>ADV</span><span class="kbd">1</span><span>–</span><span class="kbd">0</span><span>BUILD</span><span class="kbd">U</span><span>UNDO</span></span>
+      <div class="console mb-console">
+        <span class="console__group"><span class="console__label">MOVE</span><span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span></span>
+        <span class="console__group"><span class="console__label">USE</span><span>L-CLICK</span></span>
+        <span class="console__group"><span class="console__label">INTERACT</span><span class="kbd">E</span><span>/ R-CLICK</span></span>
+        <span class="console__group"><span class="console__label">EAT</span><span class="kbd">Q</span></span>
+        <span class="console__group"><span class="console__label">TOOLS</span><span class="kbd">1</span>–<span class="kbd">9</span></span>
+        <span class="console__group"><span class="console__label">PANELS</span><span class="kbd">TAB</span><span class="kbd">B</span><span class="kbd">T</span><span class="kbd">M</span><span class="kbd">J</span></span>
+        <span class="console__group"><span class="console__label">ROVER</span><span class="kbd">F</span></span>
+        <span class="console__group"><span class="console__label">TIME</span><span class="kbd">SPACE</span><span class="kbd">[</span><span class="kbd">]</span></span>
+        <span class="console__group"><span class="console__label">ZOOM</span><span class="kbd">Z</span></span>
       </div>
     </main>
 
-    <script type="module" src="/games/mars-base/ui.js"></script>
+    <script type="module" src="/games/mars-base/main.js"></script>
   </body>
 </html>

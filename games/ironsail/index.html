@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en" data-accent="teal" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>IRONSAIL — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Top-down 2D naval conquest & trading RPG. Capture islands, command broadsides, trade commodities, and conquer the archipelago." />
+    <meta name="theme-color" content="#02121a" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/src/games/ironsail/game.css" />
+  </head>
+  <body data-page="game" data-accent="teal">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap stage-page">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">IRONSAIL // NAVAL CONQUEST &amp; TRADE</h1>
+        <span class="stage-bar__meta">
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+        </span>
+      </div>
+
+      <div class="is-screen">
+        <div class="is-canvas-container">
+          <!-- Live Telemetry HUD -->
+          <div class="is-hud">
+            <div class="hud-group">
+              <div class="hud-row">
+                <span class="hud-label">HULL HP:</span>
+                <div class="hud-hp-bar">
+                  <div class="hud-hp-fill" id="hud-hp-fill"></div>
+                </div>
+                <span class="hud-val" id="hud-hp-text">180 / 180</span>
+              </div>
+              <div class="hud-row">
+                <span class="hud-label">SHIP:</span>
+                <b class="hud-val" id="hud-ship-tier" style="color:#00bfa5;">TIER 1: COASTAL SLOOP</b>
+              </div>
+              <div class="hud-row">
+                <span class="hud-label">WIND:</span>
+                <span class="hud-val" id="hud-wind-dir">45° (16 KTS)</span>
+              </div>
+            </div>
+
+            <div class="hud-group">
+              <div class="hud-row">
+                <span class="hud-label">GOLD:</span>
+                <span class="hud-val" id="hud-gold" style="color:#ffd700;">250 G</span>
+                <span class="hud-label" style="margin-left:8px;">CARGO:</span>
+                <span class="hud-val" id="hud-cargo">25 / 35</span>
+              </div>
+              <div class="hud-row">
+                <span class="hud-val" id="hud-island-status">CAPTURED: [1 / 18 ISLANDS]</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Game Canvas -->
+          <canvas id="is-canvas" width="960" height="540"></canvas>
+
+          <!-- Port / Market Modal -->
+          <div class="port-modal" id="is-port-modal" style="display: none;">
+            <div class="port-dialog">
+              <div class="port-header">
+                <h2 class="port-title" id="port-modal-title">TORTUGA HAVEN — TRADING PORT</h2>
+                <div style="display:flex; gap:8px;">
+                  <button type="button" class="btn btn--sm" id="btn-repair-ship">REPAIR HULL</button>
+                  <button type="button" class="btn btn--sm" id="btn-close-port">[X] RETURN TO SEA</button>
+                </div>
+              </div>
+
+              <div class="port-body">
+                <div>
+                  <h3 class="panel__title" style="margin-bottom:8px; font-size:11px; color:#63d1c1;">COMMODITY EXCHANGE &amp; TAX VAULT</h3>
+                  <div class="market-list" id="port-market-list"></div>
+                </div>
+
+                <div>
+                  <h3 class="panel__title" style="margin-bottom:8px; font-size:11px; color:#63d1c1;">SHIPWRIGHT &amp; DOKDO UPGRADES</h3>
+                  <div class="upgrades-list" id="port-upgrades-list"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="console">
+          <span class="console__group">
+            <span class="console__label">STEER</span>
+            <span>[W][A][S][D] / ARROWS / MOUSE</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">CANNONS</span>
+            <span>AUTO-FIRE BROADSIDES (L/R) &amp; BOW</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">BOOST</span>
+            <span class="kbd">SPACE</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">PORT</span>
+            <span class="kbd">E</span>
+            <span>NEAR OWNED ISLAND</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">MAP</span>
+            <span class="kbd">M</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">PAUSE</span>
+            <span class="kbd">ESC</span>
+          </span>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/games/ironsail/game.js"></script>
+
+    <script type="module">
+      const clockEl = document.querySelector("[data-session-clock]");
+      const started = Date.now();
+      if (clockEl && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setInterval(() => {
+          if (document.hidden) return;
+          const s = Math.floor((Date.now() - started) / 1000);
+          clockEl.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+        }, 1000);
+      }
+    </script>
+  </body>
+</html>

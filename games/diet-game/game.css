@@ -1,0 +1,389 @@
+.dg-layout {
+  display: grid;
+  grid-template-columns: 1.45fr 1fr;
+  gap: var(--s-4);
+  margin-top: var(--s-3);
+}
+
+@media (max-width: 900px) {
+  .dg-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dg-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.absurdity-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--accent, #ff5c9d);
+}
+
+.meter-bar {
+  width: 100px;
+  height: 12px;
+  background: #090c14;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--accent, #ff5c9d);
+  transition: width 0.3s ease;
+}
+
+#meal-input {
+  width: 100%;
+  background: #030508;
+  border: 2px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  padding: var(--s-3);
+  resize: vertical;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+
+#meal-input:focus {
+  border-color: var(--accent, #ff5c9d);
+  box-shadow: 0 0 12px var(--accent-glow, rgba(255, 92, 157, 0.35));
+  outline: none;
+}
+
+.input-stats {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+
+.dg-plate-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-3);
+  gap: var(--s-3);
+  background: radial-gradient(circle at 50% 40%, #111726 0%, #05070d 85%);
+  border-top: 1px solid var(--border);
+}
+
+.plate-badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  transition: color 0.2s ease;
+}
+
+.plate-badge.is-active {
+  color: #00ff66;
+  text-shadow: 0 0 8px rgba(0, 255, 102, 0.4);
+}
+
+/* Dining Scene with Fork, Plate, Knife */
+.pixel-dining-scene {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  padding: 8px 0;
+  user-select: none;
+}
+
+.pixel-cutlery {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(2px 3px 0 #000000);
+  opacity: 0.9;
+  transition: transform 0.2s ease;
+}
+
+.pixel-cutlery:hover {
+  transform: translateY(-2px);
+}
+
+/* Authentic White Porcelain Pixel Plate */
+.pixel-plate {
+  width: 250px;
+  height: 250px;
+  border-radius: 50%;
+  background: #cbd5e1;
+  border: 4px solid #1e293b;
+  box-shadow:
+    0 6px 0 #020617,
+    0 12px 24px rgba(0, 0, 0, 0.8),
+    inset 0 0 0 3px #ffffff,
+    0 0 16px rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pixel-plate__rim {
+  width: 92%;
+  height: 92%;
+  border-radius: 50%;
+  background: #f8fafc;
+  border: 2px dashed #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    inset 0 3px 6px #ffffff,
+    inset 0 -3px 6px #cbd5e1;
+}
+
+.pixel-plate__inner-rim {
+  width: 80%;
+  height: 80%;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid #cbd5e1;
+  box-shadow:
+    inset 0 5px 12px rgba(71, 85, 105, 0.3),
+    inset 0 -2px 6px rgba(255, 255, 255, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Subtle gloss reflection on ceramic surface */
+.pixel-plate__inner-rim::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 18px;
+  width: 40px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  transform: rotate(-35deg);
+  pointer-events: none;
+  filter: blur(1px);
+}
+
+.pixel-plate__surface {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  align-content: center;
+  gap: 6px;
+  padding: 4px;
+  z-index: 1;
+}
+
+/* Food badges rendered on the white plate */
+.plate-food-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #090d16;
+  color: #f1f5f9;
+  border: 1px solid #334155;
+  box-shadow: 2px 2px 0 #000000;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 3px;
+  user-select: none;
+  animation: badge-pop 0.18s ease-out;
+  max-width: 110px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes badge-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.plate-food-badge.is-protein {
+  border-color: #ff3366;
+  color: #ffe4e6;
+  box-shadow: 2px 2px 0 #881337;
+  background: #1c050f;
+}
+
+.plate-food-badge.is-veg {
+  border-color: #10b981;
+  color: #d1fae5;
+  box-shadow: 2px 2px 0 #064e3b;
+  background: #03180f;
+}
+
+.plate-food-badge.is-dessert {
+  border-color: #ec4899;
+  color: #fdf2f8;
+  box-shadow: 2px 2px 0 #701a75;
+  background: #1d0618;
+}
+
+.plate-food-badge.is-fruit {
+  border-color: #f59e0b;
+  color: #fef3c7;
+  box-shadow: 2px 2px 0 #78350f;
+  background: #1c0f02;
+}
+
+.plate-food-badge.is-grain {
+  border-color: #8b5cf6;
+  color: #ede9fe;
+  box-shadow: 2px 2px 0 #4c1d95;
+  background: #110722;
+}
+
+.plate-empty {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #64748b;
+  font-weight: bold;
+  letter-spacing: 0.8px;
+  text-align: center;
+  user-select: none;
+}
+
+/* Nutritional Telemetry Strip */
+.plate-telemetry-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  width: 100%;
+  background: #06090e;
+  border: 1px solid #1e2638;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+@media (max-width: 600px) {
+  .plate-telemetry-bar {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.pt-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--dim);
+}
+
+.pt-stat b {
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.rule-card {
+  padding: 8px 12px;
+  border: 1px solid #1a2233;
+  background: #06090e;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  transition: all 0.2s ease;
+}
+
+.rule-card--pass {
+  border-color: #00ff66;
+  background: rgba(0, 255, 102, 0.08);
+  box-shadow: 0 0 8px rgba(0, 255, 102, 0.15);
+  color: #afffd0;
+}
+
+.rule-card--fail {
+  border-color: #ff5500;
+  background: rgba(255, 85, 0, 0.08);
+  box-shadow: 0 0 8px rgba(255, 85, 0, 0.15);
+  color: #ffaa80;
+}
+
+.rule-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+}
+
+.rule-card__desc {
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text);
+}
+
+.rule-card__note {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--accent, #ff5c9d);
+}
+
+.game-over-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 5, 8, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: var(--s-4);
+}
+
+.game-over-card {
+  max-width: 500px;
+  width: 100%;
+  background: #090c14;
+  border: 3px solid var(--danger, #ff3b30);
+  padding: var(--s-5);
+  text-align: center;
+  font-family: var(--font-mono);
+}
+
+.win-card {
+  border-color: var(--accent, #ff5c9d);
+}
+
+.game-over-title {
+  font-family: var(--font-display, var(--font-mono));
+  font-size: var(--fs-md);
+  color: var(--danger, #ff3b30);
+  margin-bottom: var(--s-3);
+}
+
+.game-over-msg {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--s-4);
+  line-height: 1.5;
+}

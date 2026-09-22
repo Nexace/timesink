@@ -1,0 +1,42 @@
+/* HEADBUTT — Corner-to-Corner Widescreen Arena */
+body[data-page="game"] main.wrap.stage-page {
+  max-width: 100% !important;
+  width: 100% !important;
+  padding-inline: var(--s-2, 10px) !important;
+  margin: 0 !important;
+}
+
+.hb-screen {
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.hb-canvas-container {
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: calc(100vh - 125px);
+  position: relative;
+  box-shadow: 0 0 18px var(--accent-glow, rgba(153, 51, 255, 0.4)), 0 16px 48px rgba(0, 0, 0, 0.95);
+  border: 2px solid var(--accent, #9933ff);
+  border-radius: 4px;
+  background: #090310;
+  overflow: hidden;
+}
+
+#hb-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.console {
+  width: 100%;
+  max-width: 100%;
+  margin-top: 6px;
+}

@@ -2,65 +2,72 @@ import { initShell, escapeHtml, toast, prefersReducedMotion } from "/shared/shel
 import { games, gameHref, liveGames } from "/shared/registry.js";
 import { sfx } from "/shared/sound.js";
 import { icon } from "/shared/icons.js";
+import { getBestScore } from "/shared/scores.js";
+import { motif } from "/shared/motifs.js";
 
 const ACCENTS = {
-  flare: "#ff5500",
+  flare: "#eb4412",
+  mars: "#eb4412",
+  pink: "#ff5c9d",
   cyan: "#00f0ff",
   magenta: "#ff007f",
+  teal: "#00bfa5",
   lime: "#00ff66",
-  violet: "#7b2ff7",
-  purple: "#7b2ff7",
-  amber: "#ffb700",
-  rust: "#ff5500",
+  purple: "#9933ff",
+  violet: "#9933ff",
+  amber: "#ff9900",
+  blue: "#0088ff",
+  crimson: "#ff2233",
+  gold: "#ffd700",
+  rust: "#eb4412",
+  red: "#dc2626",
+  blood: "#dc2626",
+  green: "#10b981",
+  emerald: "#10b981",
+  orange: "#f97316",
+  copper: "#f97316",
+  indigo: "#6366f1",
+  doodle: "#a3e635",
+  mint: "#a3e635",
+  phosphor: "#00ff41",
+  mono: "#f1f5f9",
+  silver: "#f1f5f9",
 };
-
-const MOTIF_ICONS = { dome: "dome", snake: "gamepad", cards: "grid", target: "target" };
 
 initShell();
 
 wireKonami();
 
-bootLog();
+initHeroScroll();
+
 renderGrid();
 wireGrid(document.getElementById("game-grid"));
-
-function bootLog() {
-  const host = document.getElementById("boot-log");
-  if (!host) return;
-  const live = liveGames().length;
-  const lines = [
-    "> SYS://ARCADE.NET BIOS v2.1",
-    "> MEM CHECK ............ 640K OK",
-    `> LOADING CABINET ...... [${live}] ONLINE`,
-    "> INSERT COIN_",
-  ];
-  if (prefersReducedMotion()) {
-    host.textContent = lines.join("\n");
-    return;
-  }
-  const full = lines.join("\n");
-  let i = 0;
-  const timer = setInterval(() => {
-    i += 3;
-    host.textContent = full.slice(0, i);
-    if (i >= full.length) clearInterval(timer);
-  }, 24);
-}
+renderScoresWall(document.getElementById("scores-grid"));
 
 function visibleGames() {
   return games;
-}
-
-function isNew(game) {
-  if (!game.added) return false;
-  const age = Date.now() - new Date(`${game.added}T00:00:00Z`).getTime();
-  return age < 30 * 24 * 3600 * 1000;
 }
 
 function renderGrid() {
   const host = document.getElementById("game-grid");
   if (!host) return;
   host.innerHTML = visibleGames().map((g, i) => renderCard(g, i)).join("");
+}
+
+function renderScoresWall(host) {
+  if (!host) return;
+  const rows = games.map((g) => {
+    const rec = getBestScore(g.slug);
+    const val = rec ? (rec.label || rec.score) : "NO RUNS";
+    const dt = rec?.date ? ` (${rec.date})` : "";
+    return `
+      <div class="score-card">
+        <span class="score-card__title">${escapeHtml(g.title)}</span>
+        <span class="score-card__val">${escapeHtml(val)}${escapeHtml(dt)}</span>
+      </div>
+    `;
+  }).join("");
+  host.innerHTML = rows;
 }
 
 function denySoon(soon) {
@@ -79,6 +86,11 @@ function wireGrid(host) {
     if (soon) {
       event.preventDefault();
       denySoon(soon);
+      return;
+    }
+    const active = event.target.closest(".card--active");
+    if (active) {
+      sfx.coin();
     }
   });
 
@@ -107,80 +119,57 @@ function renderCard(game, index) {
   const color = ACCENTS[game.accent] ?? ACCENTS.cyan;
   const tags = Array.isArray(game.tags) ? game.tags : [];
   const id = `CF-${String(index + 1).padStart(3, "0")}`;
-  const status = live
-    ? `v${escapeHtml(game.version ?? "1.0")} // ACTIVE${game.featured ? " // FLAGSHIP" : ""}`
-    : `v${escapeHtml(game.version ?? "0.1")} // STANDBY`;
-  const fresh = live && isNew(game) ? `<span class="badge card__new">NEW</span>` : "";
+  const version = game.version ?? (live ? "1.0" : "0.1");
+  const statusText = live ? `&lt; ${version} / ACTIVE BASE` : `&lt; ${version} / STANDBY`;
   const tagChips = tags.map((t) => `<span class="chip">${escapeHtml(t)}</span>`).join("");
   const fx = live ? "" : `<div class="card__radar" aria-hidden="true"></div><div class="card__noise" aria-hidden="true"></div>`;
 
-  const meta = `
-    <dl class="card__meta">
-      <div class="card__meta-row"><dt>ID</dt><dd>${id}</dd></div>
-      <div class="card__meta-row"><dt>TITLE</dt><dd>${escapeHtml(game.title)}</dd></div>
-      ${live && game.featured ? `<div class="card__meta-row"><dt>GENRE</dt><dd>${escapeHtml([game.kind, ...tags.slice(0, 2)].filter(Boolean).join(" / "))}</dd></div>` : ""}
-      <div class="card__meta-row"><dt>SUMMARY</dt><dd>${escapeHtml(game.tagline ?? "")}</dd></div>
-    </dl>`;
+  const bestRecord = getBestScore(game.slug);
+  const bestText = bestRecord ? `${escapeHtml(bestRecord.label || bestRecord.score)}` : "NO RUNS LOGGED";
+
+  const metaHtml = `
+    <div class="cartridge-specs">
+      <div class="spec-row"><span class="spec-label">ID:</span> <span class="spec-val spec-val--id">${id}</span></div>
+      <div class="spec-row"><span class="spec-label">TITLE:</span> <span class="spec-val spec-val--title">${escapeHtml(game.title)}</span></div>
+      ${live ? `<div class="spec-row"><span class="spec-label">GENRE:</span> <span class="spec-val">${escapeHtml([game.kind, ...tags.slice(0, 2)].filter(Boolean).join(" / "))}</span></div>` : ""}
+      <div class="spec-row"><span class="spec-label">SUMMARY:</span> <span class="spec-val spec-val--summary">${escapeHtml(game.tagline ?? "")}</span></div>
+      <div class="spec-row"><span class="spec-label">RECORD:</span> <span class="spec-val spec-val--accent" style="color:${color}">${bestText}</span></div>
+      <div class="cartridge-tags">${tagChips}</div>
+    </div>
+  `;
 
   const inner = `
-    <div class="card__banner"><span>${status}</span><span class="card__sigil">${icon(MOTIF_ICONS[game.motif] ?? "grid", { size: 14 })}</span>${fresh}</div>
-    <div class="card__thumb">
-      <div class="card__thumb-inner">${motif(game.motif, color)}</div>
-      ${fx}
-    </div>
-    <div class="card__body">
-      ${meta}
-      <div class="card__tags">${tagChips}</div>
-      <span class="card__cta"><span>${live ? "LAUNCH" : "IN PRODUCTION"}</span><span aria-hidden="true">&gt;&gt;</span></span>
+    <div class="cartridge-chassis">
+      <span class="cartridge-rivet tl" aria-hidden="true"></span>
+      <span class="cartridge-rivet tr" aria-hidden="true"></span>
+      <span class="cartridge-rivet bl" aria-hidden="true"></span>
+      <span class="cartridge-rivet br" aria-hidden="true"></span>
+      ${live ? `<span class="cartridge-hazard bl" aria-hidden="true"></span><span class="cartridge-hazard tr" aria-hidden="true"></span>` : ""}
+      
+      <div class="cartridge-inner">
+        <div class="cartridge-header">
+          <span class="cartridge-tab">${statusText}</span>
+          <span class="cartridge-key" aria-hidden="true"></span>
+        </div>
+
+        <div class="cartridge-screen">
+          <div class="cartridge-screen__bezel">
+            <div class="card__thumb-inner">${motif(game.motif, color)}</div>
+            ${fx}
+          </div>
+        </div>
+
+        <div class="cartridge-console">
+          ${metaHtml}
+        </div>
+      </div>
     </div>
   `;
 
   if (live) {
-    return `<a class="card" href="${gameHref(game.slug)}" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}">${inner}</a>`;
+    return `<a class="card card--industrial card--active" href="${gameHref(game.slug)}" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}" aria-label="${escapeHtml(game.title)} — launch experiment">${inner}</a>`;
   }
-  return `<div class="card card--soon" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}" data-title="${escapeHtml(game.title)}" tabindex="0" role="button" aria-disabled="true" aria-label="${escapeHtml(game.title)} — coming soon">${inner}</div>`;
-}
-
-function motif(kind, color) {
-  const open = `<svg viewBox="0 0 120 66" shape-rendering="crispEdges" aria-hidden="true">`;
-  const bg = `<rect width="120" height="66" fill="#050508"/>`;
-  const grid = `<path d="M0 11h120M0 22h120M0 33h120M0 44h120M0 55h120M12 0v66M24 0v66M36 0v66M48 0v66M60 0v66M72 0v66M84 0v66M96 0v66M108 0v66" stroke="#1e2638" stroke-width="1"/>`;
-  const close = `</svg>`;
-
-  if (kind === "snake") {
-    return `${open}${bg}${grid}
-      <rect x="24" y="33" width="11" height="11" fill="${color}"/>
-      <rect x="36" y="33" width="11" height="11" fill="${color}"/>
-      <rect x="48" y="33" width="11" height="11" fill="${color}"/>
-      <rect x="48" y="22" width="11" height="11" fill="${color}"/>
-      <rect x="60" y="22" width="11" height="11" fill="${color}"/>
-      <rect x="84" y="22" width="11" height="11" fill="#ff007f"/>
-      ${close}`;
-  }
-  if (kind === "cards") {
-    return `${open}${bg}${grid}
-      <rect x="30" y="16" width="24" height="34" fill="#10141d" stroke="${color}" stroke-width="2"/>
-      <rect x="48" y="16" width="24" height="34" fill="#10141d" stroke="#f0f4fc" stroke-width="2"/>
-      <rect x="66" y="16" width="24" height="34" fill="${color}"/>
-      <rect x="54" y="26" width="12" height="12" fill="#050508"/>
-      ${close}`;
-  }
-  if (kind === "target") {
-    return `${open}${bg}${grid}
-      <rect x="38" y="11" width="44" height="44" fill="none" stroke="${color}" stroke-width="3"/>
-      <rect x="48" y="21" width="24" height="24" fill="none" stroke="${color}" stroke-width="3"/>
-      <rect x="56" y="29" width="8" height="8" fill="#ff007f"/>
-      ${close}`;
-  }
-  return `${open}${bg}${grid}
-    <rect x="0" y="50" width="120" height="2" fill="${color}"/>
-    <rect x="10" y="44" width="4" height="6" fill="#f0f4fc"/>
-    <rect x="102" y="40" width="4" height="10" fill="#f0f4fc"/>
-    <path d="M40 50V38a20 20 0 0 1 40 0v12" fill="none" stroke="${color}" stroke-width="3"/>
-    <rect x="56" y="26" width="8" height="8" fill="${color}"/>
-    <rect x="24" y="8" width="2" height="2" fill="#f0f4fc"/>
-    <rect x="90" y="12" width="2" height="2" fill="#f0f4fc"/>
-    ${close}`;
+  return `<div class="card card--industrial card--soon" data-accent="${escapeHtml(game.accent ?? "cyan")}" style="--card-accent:${color}" data-title="${escapeHtml(game.title)}" tabindex="0" role="button" aria-disabled="true" aria-label="${escapeHtml(game.title)} — coming soon">${inner}</div>`;
 }
 
 const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
@@ -206,10 +195,80 @@ function wireKonami() {
     }
     if (progress === KONAMI.length) {
       progress = 0;
-      document.body.classList.add("konami");
+      const current = document.documentElement.dataset.phosphor;
+      document.documentElement.dataset.phosphor = current === "amber" ? "full" : "amber";
       sfx.win();
-      toast({ title: "CHEAT ACCEPTED", body: "Cabinet overdrive engaged for 10 sols of glory.", icon: "sparkle", duration: 5000 });
-      setTimeout(() => document.body.classList.remove("konami"), 10000);
+      toast({
+        title: "KONAMI PROTOCOL",
+        body: `Phosphor shifted to ${document.documentElement.dataset.phosphor === "amber" ? "AMBER" : "GREEN"}.`,
+        icon: "sparkle",
+        duration: 4000
+      });
     }
   });
 }
+
+function initHeroScroll() {
+  const scrollCue = document.querySelector("[data-scroll-cue]");
+  const gamesSection = document.getElementById("games");
+
+  if (scrollCue && gamesSection) {
+    const scrollToGames = () => {
+      try {
+        sfx.nav();
+      } catch {}
+      gamesSection.scrollIntoView({ behavior: "smooth" });
+    };
+    scrollCue.addEventListener("click", scrollToGames);
+    scrollCue.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        scrollToGames();
+      }
+    });
+  }
+
+  // Cross-browser fallback for engines without native CSS animation-timeline: scroll()
+  const hasNativeScrollTimeline =
+    typeof CSS !== "undefined" &&
+    CSS.supports &&
+    CSS.supports("(animation-timeline: scroll()) and (animation-range: 0% 100%)");
+
+  if (!hasNativeScrollTimeline && !prefersReducedMotion()) {
+    const boot = document.querySelector(".boot");
+    const bootContent = document.querySelector(".boot__content");
+    const games = document.querySelector(".games");
+    const scrollDistance = 320;
+    let ticking = false;
+
+    const onScroll = () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          const y = window.scrollY || 0;
+          const p = Math.min(1, Math.max(0, y / scrollDistance));
+          if (boot) {
+            boot.style.minHeight = `calc((100dvh - var(--header-h)) * ${1 - p} + 240px * ${p})`;
+            boot.style.paddingBottom = `calc(var(--s-8) * ${1 - p} + var(--s-2) * ${p})`;
+          }
+          if (bootContent) {
+            bootContent.style.transform = `scale(${1 - 0.08 * p}) translateY(${-10 * p}px)`;
+          }
+          if (scrollCue) {
+            scrollCue.style.opacity = String(Math.max(0, 1 - p * 2.2));
+            scrollCue.style.pointerEvents = p > 0.4 ? "none" : "auto";
+          }
+          if (games) {
+            games.style.transform = `translateY(${40 * (1 - p)}px)`;
+            games.style.opacity = String(0.85 + 0.15 * p);
+          }
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+  }
+}
+

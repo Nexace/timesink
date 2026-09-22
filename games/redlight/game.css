@@ -1,0 +1,253 @@
+.rl-layout {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 24px;
+  margin-top: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .rl-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stage-bar__meta select {
+  background: var(--surface-2);
+  color: var(--cyan);
+  border: 1px solid var(--border-bright);
+  font-family: "Share Tech Mono", monospace;
+  font-size: 13px;
+  padding: 4px 8px;
+  outline: none;
+  cursor: pointer;
+}
+
+.stage-bar__meta select:focus {
+  border-color: var(--cyan);
+}
+
+/* Center Christmas Tree Panel */
+.rl-strip-panel {
+  background: var(--surface);
+  border: 2px solid var(--accent, #ff2233);
+  box-shadow: 0 0 20px rgba(255, 34, 51, 0.15);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: min(72vh, 640px);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Track Lane visual cues */
+.rl-strip-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 4px;
+  margin-left: -2px;
+  background: repeating-linear-gradient(to bottom, #2a354c 0, #2a354c 20px, transparent 20px, transparent 40px);
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.christmas-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: #040609;
+  border: 3px solid #1a2233;
+  padding: 20px 28px;
+  border-radius: 0;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+  z-index: 1;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.tree-post {
+  font-family: "Press Start 2P", monospace;
+  font-size: 10px;
+  color: #5a6b8a;
+  width: 110px;
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+/* Bulbs / Lamps */
+.lamp {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid #161c28;
+  transition: background 0.05s ease, box-shadow 0.05s ease, border-color 0.05s ease;
+  position: relative;
+}
+
+/* Off states */
+.lamp--prestage, .lamp--stage {
+  background: #081d28;
+}
+.lamp--amber {
+  background: #2b1f06;
+}
+.lamp--green {
+  background: #062b14;
+}
+.lamp--red {
+  background: #2b0808;
+}
+
+/* Lit / On states */
+.lamp--prestage.lit, .lamp--stage.lit {
+  background: #00f0ff;
+  border-color: #a8f7ff;
+  box-shadow: 0 0 16px #00f0ff, inset 0 0 10px #ffffff;
+}
+
+.lamp--amber.lit {
+  background: #ffb700;
+  border-color: #ffe89e;
+  box-shadow: 0 0 20px #ffb700, inset 0 0 10px #ffffff;
+}
+
+.lamp--green.lit {
+  background: #00ff66;
+  border-color: #afffd0;
+  box-shadow: 0 0 24px #00ff66, inset 0 0 12px #ffffff;
+}
+
+.lamp--red.lit {
+  background: #ff3b30;
+  border-color: #ffb1ad;
+  box-shadow: 0 0 25px #ff3b30, inset 0 0 12px #ffffff;
+}
+
+/* Stage instructions */
+.stage-instructions {
+  margin-top: 24px;
+  text-align: center;
+  z-index: 1;
+}
+
+.stage-instructions h3 {
+  font-family: "Press Start 2P", monospace;
+  font-size: 14px;
+  color: var(--accent, #ff2233);
+  letter-spacing: 1px;
+  margin: 0 0 8px 0;
+  line-height: 1.5;
+}
+
+.stage-instructions p {
+  font-family: "Share Tech Mono", monospace;
+  font-size: 14px;
+  color: var(--dim);
+  margin: 0;
+}
+
+/* Right Side Panels */
+.rl-slip-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.timeslip-body {
+  padding: 12px;
+  background: #020305;
+}
+
+.timeslip-receipt {
+  background: #0f141d;
+  border: 2px dashed #2b3952;
+  padding: 16px;
+  color: #dce7f5;
+  font-family: "Share Tech Mono", monospace;
+}
+
+.ts-header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--accent, #ff2233);
+  margin-bottom: 8px;
+}
+
+.ts-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.ts-divider {
+  border: none;
+  border-top: 1px dashed #30405c;
+  margin: 12px 0;
+}
+
+.ts-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ts-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.ts-row b {
+  color: var(--cyan);
+  font-family: "Press Start 2P", monospace;
+  font-size: 11px;
+}
+
+.ts-footer {
+  text-align: center;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#ts-rank {
+  color: var(--green);
+  font-weight: bold;
+}
+
+#ts-status {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+/* Telemetry Stats */
+.rolling-avg-panel .stat-line {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-family: "Share Tech Mono", monospace;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.rolling-avg-panel .stat-line b {
+  color: var(--amber);
+  font-family: "Press Start 2P", monospace;
+  font-size: 11px;
+}

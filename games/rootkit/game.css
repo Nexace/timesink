@@ -1,0 +1,287 @@
+/* ==========================================================================
+   ROOTKIT // INTRUSION SYSTEM STYLESHEET
+   ========================================================================== */
+
+.rk-container {
+  max-width: min(1320px, 100%);
+  margin: var(--s-3) auto;
+  border: 2px solid var(--accent, #9933ff);
+  background: #06030c;
+  box-shadow: 0 0 24px rgba(153, 51, 255, 0.25);
+  display: flex;
+  flex-direction: column;
+}
+
+/* --------------------------------------------------------------------------
+   Status / Telemetry Bar
+   -------------------------------------------------------------------------- */
+.rk-status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  padding: 8px 14px;
+  background: #0f081c;
+  border-bottom: 2px solid var(--accent, #9933ff);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs, 12px);
+  color: var(--dim, #94a3b8);
+}
+
+.rk-status-left,
+.rk-status-right {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+
+.rk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  letter-spacing: 0.04em;
+}
+
+.rk-badge b {
+  color: #fff;
+}
+
+.rk-proxy-badge b {
+  color: #00f0ff;
+}
+
+.rk-clearance-badge b {
+  color: #a855f7;
+}
+
+.rk-clearance-badge.is-root b {
+  color: #ff3b30;
+  text-shadow: 0 0 8px #ff3b30;
+}
+
+.rk-timer-badge {
+  color: #ffb700;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.rk-timer-badge b {
+  color: #fff;
+}
+
+.rk-trace-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trace-track {
+  width: 140px;
+  height: 10px;
+  background: #020402;
+  border: 1px solid #334155;
+  overflow: hidden;
+}
+
+.trace-fill {
+  height: 100%;
+  background: #00ff66;
+  box-shadow: 0 0 6px #00ff66;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.trace-fill.trace-warn {
+  background: #ffb700;
+  box-shadow: 0 0 8px #ffb700;
+}
+
+.trace-fill.trace-crit {
+  background: #ff3b30;
+  box-shadow: 0 0 12px #ff3b30;
+  animation: pulse-crit 0.8s infinite alternate;
+}
+
+@keyframes pulse-crit {
+  from { opacity: 0.8; }
+  to { opacity: 1; }
+}
+
+.meta-sep {
+  color: var(--dim, #64748b);
+  margin: 0 4px;
+}
+
+/* --------------------------------------------------------------------------
+   Terminal Screen
+   -------------------------------------------------------------------------- */
+.rk-terminal {
+  height: min(65vh, 620px);
+  min-height: 440px;
+  padding: 16px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: clamp(12px, 1.1vw, 14px);
+  color: #e2e8f0;
+  line-height: 1.5;
+  background: #020204;
+  cursor: text;
+  outline: none;
+}
+
+#output-buffer {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rk-prompt-line {
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+  position: relative;
+}
+
+.rk-prompt {
+  color: var(--accent, #9933ff);
+  font-weight: 700;
+  margin-right: 8px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+#cmd-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  outline: none;
+  caret-color: var(--accent, #9933ff);
+  z-index: 2;
+  position: relative;
+}
+
+.rk-autocomplete-preview {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.28);
+  font-family: var(--font-mono);
+  font-size: inherit;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+}
+
+/* --------------------------------------------------------------------------
+   Terminal Syntax Lines
+   -------------------------------------------------------------------------- */
+.rk-line {
+  margin-bottom: 3px;
+}
+
+.rk-line--cmd {
+  color: var(--accent, #9933ff);
+  font-weight: 700;
+}
+
+.rk-line--dim {
+  color: #64748b;
+}
+
+.rk-line--err {
+  color: #ff3b30;
+  font-weight: 600;
+}
+
+.rk-line--warn {
+  color: #ffb700;
+  font-weight: 600;
+}
+
+.rk-line--success {
+  color: #00ff66;
+  font-weight: 600;
+  text-shadow: 0 0 6px rgba(0, 255, 102, 0.35);
+}
+
+.rk-line--banner {
+  color: var(--accent, #9933ff);
+  font-weight: 800;
+  text-shadow: 0 0 10px rgba(153, 51, 255, 0.6);
+  margin: 10px 0;
+  line-height: 1.25;
+}
+
+.rk-line--dump {
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 8px 12px;
+  margin: 6px 0;
+  color: #38bdf8;
+  overflow-x: auto;
+}
+
+.rk-line--glitch {
+  color: #ff007f;
+  animation: glitch-flash 0.2s steps(2);
+}
+
+@keyframes glitch-flash {
+  0% { transform: translateX(2px); opacity: 0.8; }
+  50% { transform: translateX(-2px); opacity: 1; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+/* --------------------------------------------------------------------------
+   Shortcuts Footer
+   -------------------------------------------------------------------------- */
+.rk-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  padding: 6px 14px;
+  background: #090513;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim, #64748b);
+}
+
+.rk-footer__hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rk-footer kbd {
+  background: #1e1533;
+  border: 1px solid #4a347b;
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: #c084fc;
+  font-size: 10px;
+}
+
+.rk-kw {
+  color: var(--accent, #9933ff);
+  font-weight: 700;
+}

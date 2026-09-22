@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en" data-accent="magenta" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>SWARMLINE — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Top-down auto-attack roguelite. 20-minute runs, 6 weapon & 6 passive slots, 8 weapon evolutions, and the 20m Red Death trial." />
+    <meta name="theme-color" content="#09030a" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/src/games/swarmline/game.css" />
+  </head>
+  <body data-page="game" data-accent="magenta">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap stage-page">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">SWARMLINE // AUTO-ATTACK ROGUELITE</h1>
+        <span class="stage-bar__meta">
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+        </span>
+      </div>
+
+      <div class="sl-screen">
+        <div class="sl-canvas-container">
+          <!-- Top XP Progress Bar -->
+          <div class="sl-top-bar">
+            <div class="sl-xp-fill" id="sl-xp-fill"></div>
+          </div>
+
+          <!-- Active Boss Health Bar -->
+          <div class="sl-boss-bar" id="sl-boss-bar" style="display: none;">
+            <div class="sl-boss-info">
+              <span class="sl-boss-skull">💀</span>
+              <span class="sl-boss-name" id="sl-boss-name">BOSS</span>
+              <span class="sl-boss-hp-text" id="sl-boss-hp-text">100%</span>
+            </div>
+            <div class="sl-boss-track">
+              <div class="sl-boss-fill" id="sl-boss-fill"></div>
+            </div>
+          </div>
+
+          <!-- Telemetry HUD & Inventory Rack -->
+          <div class="sl-hud">
+            <div class="hud-group">
+              <div class="hud-row">
+                <span class="hud-label">TIME:</span>
+                <span class="hud-val" id="hud-time">00:00</span>
+                <span class="hud-label" style="margin-left:8px;">LEVEL:</span>
+                <span class="hud-val hud-val--level" id="hud-level">LVL 1</span>
+                <span class="hud-label" style="margin-left:8px;">DPS:</span>
+                <span class="hud-val" id="hud-dps">0</span>
+              </div>
+              <div class="hud-row">
+                <span class="hud-label">HP:</span>
+                <span class="hud-val" id="hud-hp">120 / 120</span>
+                <span class="hud-label" style="margin-left:8px;">KILLS:</span>
+                <span class="hud-val hud-val--kills" id="hud-kills">0 KILLS</span>
+                <span class="hud-label" style="margin-left:8px;">DASH:</span>
+                <span class="hud-val hud-val--dash" id="hud-dash">READY</span>
+              </div>
+            </div>
+
+            <!-- Active Equipment Inventory Rack -->
+            <div class="sl-equip-rack" id="sl-equip-rack">
+              <div class="equip-row" id="equip-weapons" title="Equipped Weapons (Max 6)"></div>
+              <div class="equip-row" id="equip-passives" title="Equipped Passives (Max 6)"></div>
+            </div>
+          </div>
+
+          <!-- Game Canvas -->
+          <canvas id="sl-canvas" width="960" height="540"></canvas>
+
+          <!-- Level Up Modal -->
+          <div class="sl-modal" id="sl-modal" style="display: none;">
+            <div class="sl-modal-header">
+              <span class="sl-modal-badge">LEVEL UP!</span>
+              <h2 class="sl-modal-title">CHOOSE AN UPGRADE ARTIFACT</h2>
+              <span class="sl-modal-hint">Press [1], [2], or [3] on keyboard or click to select</span>
+            </div>
+            <div class="cards-container" id="cards-container"></div>
+            <div class="modal-actions">
+              <button type="button" class="btn btn--sm btn--ghost" id="btn-reroll-cards">[ REROLL CHOICES (1 REMAINING) ]</button>
+              <button type="button" class="btn btn--sm btn--ghost" id="btn-skip-card">[ SKIP (+25 HP RECOVER) ]</button>
+            </div>
+          </div>
+
+          <!-- Treasure Chest Modal -->
+          <div class="sl-modal" id="sl-chest-modal" style="display: none;">
+            <div class="sl-modal-header">
+              <span class="sl-modal-badge" style="background:#ffd700;color:#000;">★ TREASURE OPENED ★</span>
+              <h2 class="sl-modal-title" style="color:#ffd700;text-shadow:0 0 14px #ffd700;">CHEST LOOT ACQUIRED!</h2>
+            </div>
+            <div class="cards-container" id="chest-cards-container"></div>
+            <button type="button" class="btn btn--primary" id="btn-claim-chest">[ CLAIM REWARDS &amp; CONTINUE ]</button>
+          </div>
+
+          <!-- Pause Modal -->
+          <div class="sl-modal" id="sl-pause-modal" style="display: none;">
+            <h2 class="sl-modal-title">SYSTEM PAUSED</h2>
+            <div id="sl-pause-stats" class="sl-stats-grid"></div>
+            <div class="modal-actions">
+              <button type="button" class="btn btn--primary" id="btn-resume-run">[ RESUME RUN ]</button>
+              <button type="button" class="btn btn--ghost" id="btn-restart-run">[ RESTART RUN ]</button>
+              <a href="/" class="btn btn--ghost" style="color: #ff007f;">[ ESCAPE TO ARCADE ]</a>
+            </div>
+          </div>
+
+          <!-- Game Over Modal -->
+          <div class="sl-modal" id="sl-death-modal" style="display: none;">
+            <h2 class="sl-modal-title" style="color:#ff2233;text-shadow:0 0 16px #ff2233;">YOU HAVE PERISHED</h2>
+            <div id="sl-death-stats" class="sl-stats-grid"></div>
+            <div class="modal-actions">
+              <button type="button" class="btn btn--primary" id="btn-death-retry">[ NEW SURVIVAL RUN ]</button>
+              <a href="/" class="btn btn--ghost" style="color: #ff007f;">[ ESCAPE TO ARCADE ]</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="console">
+          <span class="console__group">
+            <span class="console__label">MOVE</span>
+            <span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span>
+            <span>/ ARROWS</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">DASH</span>
+            <span class="kbd">SPACE</span><span class="kbd">SHIFT</span>
+            <span>I-FRAMES (3S CD)</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">ATTACK</span>
+            <span>WEAPONS AUTO-FIRE</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">GOAL</span>
+            <span>SURVIVE SWARMS &amp; RED DEATH</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">PAUSE</span>
+            <span class="kbd">ESC</span>
+          </span>
+          <span class="console__group console__actions">
+            <button type="button" class="btn btn--xs btn--primary" id="btn-touch-dash">DASH [SPACE]</button>
+            <button type="button" class="btn btn--xs btn--ghost" id="btn-pause-toggle">PAUSE</button>
+          </span>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/games/swarmline/game.js"></script>
+
+    <script type="module">
+      const clockEl = document.querySelector("[data-session-clock]");
+      const started = Date.now();
+      if (clockEl && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setInterval(() => {
+          if (document.hidden) return;
+          const s = Math.floor((Date.now() - started) / 1000);
+          clockEl.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+        }, 1000);
+      }
+    </script>
+  </body>
+</html>

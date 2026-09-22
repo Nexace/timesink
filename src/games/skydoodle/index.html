@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en" data-accent="mint" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>SKYDOODLE — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Retro endless vertical climber with auto-bounce landing physics, gyro tilt, power-ups, monsters, and fair-spawn rules." />
+    <meta name="theme-color" content="#f8f9fa" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/src/games/skydoodle/game.css" />
+  </head>
+  <body data-page="game" data-accent="mint">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap stage-page">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">SKYDOODLE // VERTICAL CLIMBER</h1>
+        <span class="stage-bar__meta">
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+        </span>
+      </div>
+
+      <div class="sd-screen">
+        <div class="sd-canvas-container" id="sd-container">
+          <!-- Canvas Viewport -->
+          <canvas id="sd-canvas" width="480" height="720"></canvas>
+
+          <!-- In-Game HUD -->
+          <div class="sd-hud">
+            <div class="hud-box">
+              <span class="hud-label">HEIGHT</span>
+              <span class="hud-val" id="hud-score">0000 M</span>
+            </div>
+            <div class="hud-box">
+              <span class="hud-label">TIER</span>
+              <span class="hud-val hud-tier" id="hud-tier">NOTEBOOK</span>
+            </div>
+            <div class="hud-box">
+              <span class="hud-label">BEST</span>
+              <span class="hud-val" id="hud-best">0000 M</span>
+            </div>
+          </div>
+
+          <!-- Active Powerup Badges -->
+          <div class="sd-powerups-hud" id="sd-powerups-hud"></div>
+
+          <!-- Gyro Calibration Modal -->
+          <div class="sd-modal" id="modal-calibrate" hidden>
+            <div class="modal-card">
+              <div class="modal-title">📐 GYRO TILT CALIBRATION</div>
+              <p class="modal-desc">Hold your phone comfortably at your preferred playing angle, then tap SET ZERO to calibrate neutral tilt.</p>
+              <div class="tilt-preview">
+                <span class="tilt-bubble" id="tilt-bubble"></span>
+              </div>
+              <div class="modal-actions">
+                <button class="sd-btn sd-btn-primary" id="btn-set-zero" type="button">SET ZERO &amp; PLAY</button>
+                <button class="sd-btn sd-btn-secondary" id="btn-skip-gyro" type="button">USE TOUCH CONTROLS</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- iOS 13+ Permission Prompt -->
+          <div class="sd-modal" id="modal-permission" hidden>
+            <div class="modal-card">
+              <div class="modal-title">📱 MOTION SENSORS REQUIRED</div>
+              <p class="modal-desc">To tilt your phone to steer your climber, motion sensor permission is needed.</p>
+              <div class="modal-actions">
+                <button class="sd-btn sd-btn-primary" id="btn-enable-tilt" type="button">TILT CONTROL: ENABLE</button>
+                <button class="sd-btn sd-btn-secondary" id="btn-cancel-permission" type="button">PLAY WITH TOUCH</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Touch Fallback Steer Zones (Mobile) -->
+          <div class="touch-zones" id="touch-zones" aria-hidden="true">
+            <div class="touch-zone left-zone" id="touch-left"><span>◀ STEER LEFT</span></div>
+            <div class="touch-zone right-zone" id="touch-right"><span>STEER RIGHT ▶</span></div>
+          </div>
+
+          <!-- Game Over Modal -->
+          <div class="sd-modal" id="modal-gameover" hidden>
+            <div class="modal-card">
+              <div class="modal-title gameover-title">CLIMB TERMINATED</div>
+              <div class="death-reason" id="death-reason">FELL INTO THE VOID</div>
+              <div class="gameover-stats">
+                <div class="stat-row"><span>FINAL HEIGHT:</span><b id="final-score">0 M</b></div>
+                <div class="stat-row"><span>PERSONAL BEST:</span><b id="final-best">0 M</b></div>
+                <div class="stat-row"><span>MONSTERS SQUASHED:</span><b id="final-monsters">0</b></div>
+              </div>
+              <div class="modal-actions">
+                <button class="sd-btn sd-btn-primary" id="btn-restart" type="button">TRY AGAIN [SPACE]</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls Footer Reference -->
+        <div class="sd-controls-bar">
+          <span><b>[← / →]</b> or <b>[A / D]</b> Steer</span>
+          <span><b>[SPACE]</b> or <b>TAP SCREEN</b> Shoot</span>
+          <span><b>[PHONE TILT]</b> Gyro Steering</span>
+          <span><b>[ESC]</b> Pause</span>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/games/skydoodle/game.js"></script>
+  </body>
+</html>

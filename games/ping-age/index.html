@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-accent="indigo" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>PING AGE — SYS://TIMESINK.NET</title>
+    <meta name="description" content="12-question internet nostalgia quiz calculating your true digital era, archetype, and archaeological dossier." />
+    <meta name="theme-color" content="#0B0E0B" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/games/ping-age/game.css" />
+  </head>
+  <body data-page="game" data-accent="indigo">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap game-screen">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">PING AGE // DIGITAL ARCHAEOLOGY</h1>
+        <span class="stage-bar__meta">
+          <span id="quiz-progress-text">QUESTION 1 / 12</span>
+        </span>
+      </div>
+
+      <div class="pa-container">
+        <!-- Question View -->
+        <section class="pa-quiz-card panel" id="quiz-view">
+          <div class="panel__head">
+            <h2 class="panel__title" id="q-category">NETWORK ARTIFACT</h2>
+            <span class="progress-bar-wrap">
+              <div class="quiz-bar"><div class="quiz-fill" id="quiz-fill" style="width: 8%;"></div></div>
+            </span>
+          </div>
+          <div class="panel__body pa-body">
+            <!-- Reaction Toast Quip -->
+            <div class="pa-reaction-toast" id="reaction-toast" aria-live="polite" style="display: none;">
+              <span class="reaction-tag" id="reaction-tag">[PING DETECTED]</span>
+              <span class="reaction-msg" id="reaction-msg">Analyzing response...</span>
+            </div>
+
+            <h3 class="pa-question-text" id="q-text">Loading question...</h3>
+            <div class="pa-options-grid" id="options-grid"></div>
+          </div>
+        </section>
+
+        <!-- Result View -->
+        <section class="pa-result-card panel" id="result-view" style="display: none;">
+          <div class="panel__head">
+            <h2 class="panel__title">DIGITAL ARCHAEOLOGY REPORT // CLASSIFIED DOSSIER</h2>
+            <span class="era-status-badge">ARCHAEOLOGY SCAN COMPLETE</span>
+          </div>
+          <div class="panel__body era-container" id="era-container">
+            <!-- Era Classification Header -->
+            <div class="era-header">
+              <div class="era-badges-top">
+                <span class="era-tag" id="era-tag">PRIMARY DIGITAL ERA</span>
+                <span class="era-dates" id="era-dates">(1995 — 2001)</span>
+              </div>
+              <h2 class="era-title" id="era-title">DIAL-UP NATIVE</h2>
+              <div class="era-archetype" id="era-archetype">Web 1.0 Pioneer & Modem Whisperer</div>
+              <p class="era-desc" id="era-desc"></p>
+            </div>
+
+            <!-- Archaeological Dossier Cards (4 Quadrants) -->
+            <div class="dossier-section">
+              <h4 class="dossier-section-title">EXCAVATED DIGITAL ARTIFACTS</h4>
+              <div class="dossier-grid" id="dossier-grid">
+                <div class="dossier-card">
+                  <div class="dossier-card__label">🏺 HOLY RELIC</div>
+                  <div class="dossier-card__val" id="dossier-relic">—</div>
+                </div>
+                <div class="dossier-card">
+                  <div class="dossier-card__label">📡 NATURAL HABITAT</div>
+                  <div class="dossier-card__val" id="dossier-habitat">—</div>
+                </div>
+                <div class="dossier-card">
+                  <div class="dossier-card__label">💥 DEFINING TRAUMA</div>
+                  <div class="dossier-card__val" id="dossier-trauma">—</div>
+                </div>
+                <div class="dossier-card">
+                  <div class="dossier-card__label">⚡ DIGITAL SUPERPOWER</div>
+                  <div class="dossier-card__val" id="dossier-superpower">—</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Hybrid Era DNA Distribution Matrix -->
+            <div class="dna-section">
+              <div class="dna-header">
+                <h4 class="dossier-section-title">HYBRID ERA DNA // DISTRIBUTION MATRIX</h4>
+                <span class="dna-note">Calculated across 12 psychological checkpoints</span>
+              </div>
+              <div class="dna-bars" id="dna-bars"></div>
+            </div>
+
+            <!-- Special Recognition Badges -->
+            <div class="badges-section" id="badges-section" style="display: none;">
+              <h4 class="dossier-section-title">SPECIAL RECOGNITIONS</h4>
+              <div class="badges-row" id="badges-row"></div>
+            </div>
+
+            <!-- Stats & Demographics -->
+            <div class="era-stats-row">
+              <div class="era-stat">
+                <span class="stat-label">POPULATION SHARE</span>
+                <span class="stat-val" id="era-share">Calculating archive share...</span>
+              </div>
+              <div class="era-stat">
+                <span class="stat-label">ARCHIVE CLASSIFICATION</span>
+                <span class="stat-val" id="era-dominance">VERIFIED HISTORIC CITIZEN</span>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="result-actions">
+              <button type="button" class="btn btn--primary" id="btn-share-era">[ COPY DOSSIER TO CLIPBOARD ]</button>
+              <button type="button" class="btn btn--ghost" id="btn-retake">[ RETAKE ARCHAEOLOGY SCAN ]</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="/games/ping-age/main.js"></script>
+  </body>
+</html>

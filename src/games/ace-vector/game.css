@@ -1,0 +1,307 @@
+/* ACE VECTOR — 2D Energy Dogfighter Styles */
+:root {
+  --amber-glow: rgba(255, 183, 0, 0.45);
+}
+
+.av-screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  max-width: min(1440px, 100%);
+  margin: 0 auto;
+}
+
+.av-canvas-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: min(80vh, 760px);
+  background: #080a0d;
+  border: 2px solid var(--accent, #ffb700);
+  border-radius: var(--radius-md, 6px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.9), 0 0 24px var(--amber-glow);
+  overflow: hidden;
+}
+
+#av-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Flight HUD Overlay */
+.av-hud {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  pointer-events: none;
+  font-family: var(--font-display, monospace);
+  font-size: 10px;
+  color: #fff;
+  z-index: 10;
+}
+
+.hud-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(14, 11, 4, 0.85);
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 183, 0, 0.4);
+  border-radius: 4px;
+  backdrop-filter: blur(6px);
+}
+
+.hud-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-label {
+  color: #ffb700;
+  letter-spacing: 0.08em;
+}
+
+.hud-val {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.stall-warning {
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-display, monospace);
+  font-size: 18px;
+  color: #ff2222;
+  text-shadow: 0 0 16px #ff0000;
+  letter-spacing: 0.2em;
+  animation: stall-blink 0.25s infinite alternate;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.gpws-warning {
+  position: absolute;
+  top: 52%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-display, monospace);
+  font-size: 18px;
+  color: #ff9900;
+  text-shadow: 0 0 16px #ff5500;
+  letter-spacing: 0.2em;
+  animation: stall-blink 0.2s infinite alternate;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.rwr-warning {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-display, monospace);
+  font-size: 16px;
+  font-weight: 700;
+  color: #ff0055;
+  text-shadow: 0 0 18px #ff0044;
+  letter-spacing: 0.16em;
+  background: rgba(30, 0, 10, 0.88);
+  padding: 6px 14px;
+  border: 1px solid #ff0055;
+  border-radius: 4px;
+  animation: rwr-alarm 0.18s infinite alternate;
+  pointer-events: none;
+  z-index: 22;
+}
+
+@keyframes rwr-alarm {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1.02); }
+  to { opacity: 0.35; transform: translate(-50%, -50%) scale(0.98); }
+}
+
+@keyframes stall-blink {
+  from { opacity: 1; }
+  to { opacity: 0.2; }
+}
+
+/* Hangar Modal & Aircraft Cards */
+.av-hangar-modal {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 7, 12, 0.94);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 16px 20px;
+  z-index: 35;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.hangar-header {
+  text-align: center;
+}
+
+.hangar-subtitle {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+
+.hangar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: 900px;
+}
+
+.hangar-card {
+  background: rgba(14, 20, 32, 0.9);
+  border: 1px solid rgba(255, 183, 0, 0.3);
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  text-align: left;
+}
+
+.hangar-card:hover {
+  transform: translateY(-2px);
+  border-color: #ffb700;
+  box-shadow: 0 6px 20px rgba(255, 183, 0, 0.25);
+}
+
+.hangar-card--selected {
+  border-color: #00f0ff !important;
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.4) !important;
+  background: rgba(8, 28, 48, 0.95);
+}
+
+.hangar-card__badge {
+  font-family: var(--font-display, monospace);
+  font-size: 8px;
+  color: #00f0ff;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.hangar-card__title {
+  font-family: var(--font-display, monospace);
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+}
+
+.hangar-card__role {
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  color: #ffb700;
+}
+
+.hangar-card__stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 9px;
+  font-family: var(--font-mono, monospace);
+  color: #cbd5e1;
+  margin: 4px 0;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat-bar-bg {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.stat-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffb700, #00f0ff);
+  border-radius: 2px;
+}
+
+.hangar-card__desc {
+  font-size: 9px;
+  line-height: 1.35;
+  color: #94a3b8;
+  font-family: var(--font-mono, monospace);
+}
+
+.hangar-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.btn-hangar-toggle {
+  background: rgba(255, 183, 0, 0.15);
+  border: 1px solid #ffb700;
+  color: #ffb700;
+  font-family: var(--font-display, monospace);
+  font-size: 9px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.15s ease;
+}
+
+.btn-hangar-toggle:hover {
+  background: #ffb700;
+  color: #000;
+}
+
+/* Mission Select / Debrief Modal */
+.av-modal {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 4, 2, 0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  gap: 16px;
+  text-align: center;
+}
+
+.av-modal-title {
+  font-family: var(--font-display, monospace);
+  font-size: 20px;
+  color: #ffb700;
+  text-shadow: 0 0 12px rgba(255, 183, 0, 0.6);
+  letter-spacing: 0.15em;
+  margin: 0;
+}

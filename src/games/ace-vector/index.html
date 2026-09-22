@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en" data-accent="amber" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>ACE VECTOR — SYS://TIMESINK.NET</title>
+    <meta name="description" content="2D dogfighter with energy-management flight physics, aerodynamic stall, lead-pursuit cannon, IR & radar missiles, and 8-mission campaign." />
+    <meta name="theme-color" content="#080a0d" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/src/games/ace-vector/game.css" />
+  </head>
+  <body data-page="game" data-accent="amber">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap stage-page">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">ACE VECTOR // ENERGY DOGFIGHTER</h1>
+        <span class="stage-bar__meta">
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+        </span>
+      </div>
+
+      <div class="av-screen">
+        <div class="av-canvas-container">
+          <!-- Flight Telemetry HUD -->
+          <div class="av-hud">
+            <div class="hud-group">
+              <div class="hud-row">
+                <span class="hud-label">AIRSPEED:</span>
+                <span class="hud-val" id="hud-speed">380 KTS</span>
+              </div>
+              <div class="hud-row">
+                <span class="hud-label">ALTITUDE:</span>
+                <span class="hud-val" id="hud-alt">3800 FT</span>
+              </div>
+              <div class="hud-row">
+                <span class="hud-label">ZONE:</span>
+                <span class="hud-val" id="hud-strata" style="color: #00f0ff;">STRATOSPHERE</span>
+              </div>
+            </div>
+
+            <div class="hud-group">
+              <div class="hud-row">
+                <span class="hud-label">CRAFT:</span>
+                <span class="hud-val" id="hud-craft" style="color: #ffb700;">F-22A RAPTOR</span>
+                <button type="button" class="btn-hangar-toggle" id="btn-open-hangar">[H] HANGAR</button>
+              </div>
+              <div class="hud-row">
+                <span class="hud-label">FUEL:</span>
+                <span class="hud-val" id="hud-fuel">100%</span>
+                <span class="hud-label" style="margin-left:8px;">RADAR:</span>
+                <span class="hud-val" id="hud-lock-status">SEARCHING</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stall Warning Flasher -->
+          <div class="stall-warning" id="stall-warning" style="display: none;">
+            ! STALL WARNING // RECOVER NOSE DOWN !
+          </div>
+
+          <!-- Ground Proximity Warning (GPWS) -->
+          <div class="gpws-warning" id="gpws-warning" style="display: none;">
+            ! TERRAIN HAZARD // PULL UP !
+          </div>
+
+          <!-- Radar Warning Receiver (RWR) Missile Threat Alarm -->
+          <div class="rwr-warning" id="rwr-warning" style="display: none;">
+            ! MISSILE INBOUND // POP FLARES [C] !
+          </div>
+
+          <!-- Game Canvas -->
+          <canvas id="av-canvas" width="960" height="540"></canvas>
+
+          <!-- Aircraft Hangar Selection Modal -->
+          <div class="av-hangar-modal" id="av-hangar-modal" style="display: none;">
+            <div class="hangar-header">
+              <h2 class="av-modal-title">FIGHTER REQUISITION // HANGAR</h2>
+              <p class="hangar-subtitle">SELECT AIRFRAME [KEYS 1-5 OR CLICK CARD] // PRESS [H] OR ESC TO RESUME</p>
+            </div>
+            <div class="hangar-grid" id="hangar-grid">
+              <!-- Rendered dynamically by game.js -->
+            </div>
+            <div class="hangar-actions">
+              <button type="button" class="btn btn--primary" id="btn-hangar-launch">[ SCRAMBLE SORTIE ]</button>
+              <button type="button" class="btn btn--ghost" id="btn-hangar-close">[ CLOSE HANGAR ]</button>
+            </div>
+          </div>
+
+          <!-- Debrief / Game Over Modal -->
+          <div class="av-modal" id="av-debrief-modal" style="display: none;">
+            <h2 class="av-modal-title">MISSION DEBRIEFING</h2>
+            <div id="debrief-stats" style="color: #fff; font-family: monospace; display: flex; flex-direction: column; gap: 6px;"></div>
+            <button type="button" class="btn btn--primary" onclick="window.location.reload()">[ RETRY SORTIE ]</button>
+            <a href="/" class="btn btn--ghost" style="color: #ffb700;">[ ESCAPE TO ARCADE ]</a>
+          </div>
+        </div>
+
+        <div class="console">
+          <span class="console__group">
+            <span class="console__label">PITCH</span>
+            <span class="kbd">W</span><span class="kbd">S</span>
+            <span>/ MOUSE AIM</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">THROTTLE</span>
+            <span class="kbd">A</span><span>(BRAKE)</span>
+            <span class="kbd">D</span><span>(BOOST)</span>
+            <span class="kbd">SHIFT</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">CANNON</span>
+            <span class="kbd">SPACE</span>
+            <span>/ L-CLICK</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">MISSILE</span>
+            <span class="kbd">F</span>
+            <span>/ R-CLICK</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">FLARES</span>
+            <span class="kbd">C</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">HANGAR</span>
+            <span class="kbd">H</span>
+            <span class="kbd">1</span>-<span class="kbd">5</span>
+          </span>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/games/ace-vector/game.js"></script>
+
+    <script type="module">
+      const clockEl = document.querySelector("[data-session-clock]");
+      const started = Date.now();
+      if (clockEl && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setInterval(() => {
+          if (document.hidden) return;
+          const s = Math.floor((Date.now() - started) / 1000);
+          clockEl.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+        }, 1000);
+      }
+    </script>
+  </body>
+</html>

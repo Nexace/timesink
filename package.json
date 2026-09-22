@@ -8,6 +8,9 @@
     "dev": "npx --yes serve . -l 5173",
     "start": "npx --yes serve . -l 5173",
     "preview": "npx --yes serve . -l 4173",
-    "test": "node games/mars-base/engine.test.mjs && node shared/shared.test.mjs"
+    "test": "node shared/shared.test.mjs && node shared/arcade.test.mjs && node games/mars-base/tests/run.mjs && node games/ground-zero/engine.test.mjs && node games/scale-jump/engine.test.mjs && node games/diet-game/engine.test.mjs && node games/ping-age/engine.test.mjs && node games/rootkit/engine.test.mjs && node games/ghost-lap/engine.test.mjs && node games/redlight/engine.test.mjs && node games/resume-game/engine.test.mjs && node src/games/ironsail/engine.test.mjs && node src/games/ace-vector/engine.test.mjs && node src/games/swarmline/engine.test.mjs && node src/games/last-tower/engine.test.mjs && node src/games/ore-runner/engine.test.mjs && node src/games/skydoodle/engine.test.mjs && node src/games/gridlock/engine.test.mjs && node src/games/teraform-run/engine.test.mjs && node src/games/headbutt/engine.test.mjs && node src/games/ironclad/engine.test.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.11.0"
   }
 }

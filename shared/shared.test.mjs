@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createRng, rngFromSnapshot, hashSeed, dailySeedKey } from "./rng.js";
+import { createRng, rngFromSnapshot, hashSeed, dailySeedKey, isStreakActive } from "./rng.js";
 import { exportCode, importCode } from "./storage.js";
 import { fmt, fmtDelta, fmtExact, fmtCost, pct, ordinal, formatDuration, clamp } from "./format.js";
 
@@ -57,6 +57,16 @@ t("daily keys are UTC calendar days", () => {
   const d = new Date(Date.UTC(2026, 8, 17, 23, 59));
   assert.equal(dailySeedKey(d), "2026-09-17");
 });
+
+t("isStreakActive validates current, yesterday, and lapsed days", () => {
+  const now = new Date(Date.UTC(2026, 8, 20, 12, 0)); // 2026-09-20
+  assert.equal(isStreakActive("2026-09-20", now), true); // Played today
+  assert.equal(isStreakActive("2026-09-19", now), true); // Played yesterday
+  assert.equal(isStreakActive("2026-09-18", now), false); // Lapsed (2 days ago)
+  assert.equal(isStreakActive("", now), false);
+  assert.equal(isStreakActive(null, now), false);
+});
+
 
 t("export/import round-trips with whitespace", () => {
   const data = { version: 1, sol: 42, name: "héllo wörld" };

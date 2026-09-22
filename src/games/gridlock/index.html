@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en" data-accent="phosphor" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>GRIDLOCK — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Retro terminal Sudoku with unique solution generator in Web Worker, technique-tagged tiers, pencil marks, and Killer Sudoku." />
+    <meta name="theme-color" content="#030c06" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/src/games/gridlock/game.css" />
+  </head>
+  <body data-page="game" data-accent="phosphor">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap stage-page">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">GRIDLOCK // TERMINAL SUDOKU</h1>
+        <span class="stage-bar__meta">
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
+        </span>
+      </div>
+
+      <div class="gl-screen">
+        <!-- Control Bar: Mode & Tier Selection -->
+        <div class="gl-toolbar">
+          <div class="toolbar-group">
+            <span class="toolbar-label">MODE:</span>
+            <button class="mode-btn active" data-mode="endless" type="button">ENDLESS</button>
+            <button class="mode-btn" data-mode="daily" type="button">DAILY</button>
+            <button class="mode-btn" data-mode="killer" type="button">KILLER</button>
+          </div>
+
+          <div class="toolbar-group">
+            <span class="toolbar-label">TIER:</span>
+            <select id="select-tier" class="tier-select">
+              <option value="Rookie">ROOKIE (40-45 clues)</option>
+              <option value="Standard" selected>STANDARD (32-39 clues)</option>
+              <option value="Hard">HARD (28-31 clues)</option>
+              <option value="Expert">EXPERT (24-27 clues)</option>
+              <option value="Nightmare">NIGHTMARE (20-23 clues)</option>
+            </select>
+            <button class="action-btn" id="btn-new-puzzle" type="button">GENERATE [N]</button>
+          </div>
+        </div>
+
+        <div class="gl-main-layout">
+          <!-- Left / Center: 9x9 Sudoku Board Viewport -->
+          <div class="board-card">
+            <!-- Telemetry Status Bar -->
+            <div class="board-hud">
+              <div class="hud-col">
+                <span class="hud-label">TIME</span>
+                <span class="hud-val" id="hud-timer">00:00</span>
+              </div>
+              <div class="hud-col">
+                <span class="hud-label">DIFFICULTY</span>
+                <span class="hud-val hud-green" id="hud-tier-name">STANDARD</span>
+              </div>
+              <div class="hud-col">
+                <span class="hud-label">TECHNIQUE</span>
+                <span class="hud-val" id="hud-technique">SCANNING</span>
+              </div>
+              <div class="hud-col">
+                <span class="hud-label">MISTAKES</span>
+                <span class="hud-val" id="hud-mistakes">0 / 3</span>
+              </div>
+            </div>
+
+            <!-- The 9x9 Sudoku Grid -->
+            <div class="sudoku-grid-wrapper">
+              <div class="sudoku-grid" id="sudoku-grid" role="grid" aria-label="Sudoku 9x9 board"></div>
+
+              <!-- Loading Overlay -->
+              <div class="grid-loading-overlay" id="grid-loading" hidden>
+                <div class="loading-spinner"></div>
+                <span>GENERATING UNIQUE PUZZLE...</span>
+              </div>
+            </div>
+
+            <!-- Assist & Action Bar Below Grid -->
+            <div class="grid-action-bar">
+              <button class="tool-btn" id="btn-pencil" type="button" title="Toggle Pencil Mode (P)">
+                <span class="tool-icon">✎</span> PENCIL <b id="pencil-status">[OFF]</b>
+              </button>
+              <button class="tool-btn" id="btn-auto-candidates" type="button" title="Toggle Auto-Candidates">
+                <span class="tool-icon">⚡</span> AUTO-CANDS
+              </button>
+              <button class="tool-btn" id="btn-hint" type="button" title="Get Progressive Hint (-30s)">
+                <span class="tool-icon">💡</span> HINT (<span id="hint-count">3</span>)
+              </button>
+              <button class="tool-btn" id="btn-check" type="button" title="Validate Board Against Solution">
+                <span class="tool-icon">✓</span> CHECK
+              </button>
+              <button class="tool-btn" id="btn-undo" type="button" title="Undo (Ctrl+Z)">
+                <span class="tool-icon">↶</span> UNDO
+              </button>
+              <button class="tool-btn" id="btn-redo" type="button" title="Redo (Ctrl+Y)">
+                <span class="tool-icon">↷</span> REDO
+              </button>
+            </div>
+          </div>
+
+          <!-- Right: Keypad & Tactical Stats -->
+          <div class="sidebar-card">
+            <div class="sidebar-header">TERMINAL INPUT</div>
+
+            <!-- Number Keypad (1-9, Clear) -->
+            <div class="keypad-grid">
+              <button class="key-btn" data-digit="1" type="button">1</button>
+              <button class="key-btn" data-digit="2" type="button">2</button>
+              <button class="key-btn" data-digit="3" type="button">3</button>
+              <button class="key-btn" data-digit="4" type="button">4</button>
+              <button class="key-btn" data-digit="5" type="button">5</button>
+              <button class="key-btn" data-digit="6" type="button">6</button>
+              <button class="key-btn" data-digit="7" type="button">7</button>
+              <button class="key-btn" data-digit="8" type="button">8</button>
+              <button class="key-btn" data-digit="9" type="button">9</button>
+              <button class="key-btn key-btn-wide" id="key-delete" type="button">CLEAR [DEL]</button>
+            </div>
+
+            <!-- Assist Log / Hint Box -->
+            <div class="hint-display-box" id="hint-box">
+              <span class="hint-header">&gt; TERMINAL LOG:</span>
+              <div class="hint-content" id="hint-text">Select a cell to begin. Type 1-9 on keyboard or tap keypad.</div>
+            </div>
+
+            <!-- Best Records Panel -->
+            <div class="records-panel">
+              <span class="records-title">PERSONAL BESTS</span>
+              <div class="records-list" id="records-list">
+                <div class="record-row"><span>ROOKIE:</span><b id="pb-Rookie">--:--</b></div>
+                <div class="record-row"><span>STANDARD:</span><b id="pb-Standard">--:--</b></div>
+                <div class="record-row"><span>HARD:</span><b id="pb-Hard">--:--</b></div>
+                <div class="record-row"><span>EXPERT:</span><b id="pb-Expert">--:--</b></div>
+                <div class="record-row"><span>NIGHTMARE:</span><b id="pb-Nightmare">--:--</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Victory Modal -->
+        <div class="gl-modal" id="modal-victory" hidden>
+          <div class="modal-card">
+            <div class="modal-title">PUZZLE SOLVED // VICTORY</div>
+            <div class="victory-grid-flash">9x9 MATRIX COMPLETE</div>
+            <div class="victory-stats">
+              <div class="stat-row"><span>SOLVE TIME:</span><b id="vic-time">02:45</b></div>
+              <div class="stat-row"><span>DIFFICULTY:</span><b id="vic-tier">STANDARD</b></div>
+              <div class="stat-row"><span>HINTS USED:</span><b id="vic-hints">0 / 3</b></div>
+              <div class="stat-row"><span>MISTAKES:</span><b id="vic-mistakes">0</b></div>
+              <div class="stat-row"><span>FINAL SCORE:</span><b class="stat-highlight" id="vic-score">1,840 PTS</b></div>
+            </div>
+            <div class="modal-actions">
+              <button class="action-btn" id="btn-share-result" type="button">COPY SHAREABLE RESULT</button>
+              <button class="action-btn action-btn-primary" id="btn-next-puzzle" type="button">NEXT PUZZLE</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/games/gridlock/game.js"></script>
+  </body>
+</html>

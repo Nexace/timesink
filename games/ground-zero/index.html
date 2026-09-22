@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en" data-accent="lime" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>GROUND ZERO — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Nuclear blast effects simulator using Glasstone-Dolan scaling laws and Leaflet wireframe." />
+    <meta name="theme-color" content="#0B0E0B" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/games/ground-zero/game.css" />
+  </head>
+  <body data-page="game" data-accent="lime">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap game-screen">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">GROUND ZERO // THERMONUCLEAR SIMULATOR</h1>
+        <span class="stage-bar__meta">
+          <span id="target-name">TARGET: <b>NEW YORK CITY</b></span>
+        </span>
+      </div>
+
+      <div class="gz-layout">
+        <section class="gz-map-panel">
+          <div class="gz-map-container">
+            <div id="map"></div>
+            <div class="radar-sweep" id="radar-sweep" aria-hidden="true"></div>
+            <div class="target-crosshair" aria-hidden="true">
+              <svg width="48" height="48" viewBox="0 0 48 48">
+                <circle cx="24" cy="24" r="16" stroke="rgba(255, 59, 48, 0.75)" stroke-width="1.5" fill="none" stroke-dasharray="3 3"/>
+                <circle cx="24" cy="24" r="3" fill="#ff3b30"/>
+                <line x1="24" y1="2" x2="24" y2="12" stroke="#ff3b30" stroke-width="2"/>
+                <line x1="24" y1="36" x2="24" y2="46" stroke="#ff3b30" stroke-width="2"/>
+                <line x1="2" y1="24" x2="12" y2="24" stroke="#ff3b30" stroke-width="2"/>
+                <line x1="36" y1="24" x2="46" y2="24" stroke="#ff3b30" stroke-width="2"/>
+              </svg>
+            </div>
+          </div>
+          <p class="map-hint">&gt; DRAG MAP OR CLICK ANYWHERE TO AIM GROUND ZERO RETICLE</p>
+        </section>
+
+        <aside class="gz-controls-panel">
+          <div class="panel">
+            <div class="panel__head"><h2 class="panel__title">DETONATION PARAMETERS</h2></div>
+            <div class="panel__body gz-form">
+              <div class="form-row">
+                <label for="city-select">QUICK TARGET</label>
+                <div class="target-select-row">
+                  <select id="city-select">
+                    <option value="40.7128,-74.0060">New York City, USA</option>
+                    <option value="38.9072,-77.0369">Washington, D.C., USA</option>
+                    <option value="34.0522,-118.2437">Los Angeles, USA</option>
+                    <option value="41.8781,-87.6298">Chicago, USA</option>
+                    <option value="51.5074,-0.1278">London, UK</option>
+                    <option value="48.8566,2.3522">Paris, France</option>
+                    <option value="52.5200,13.4050">Berlin, Germany</option>
+                    <option value="55.7558,37.6173">Moscow, Russia</option>
+                    <option value="50.4501,30.5234">Kyiv, Ukraine</option>
+                    <option value="39.9042,116.4074">Beijing, China</option>
+                    <option value="35.6762,139.6503">Tokyo, Japan</option>
+                    <option value="34.3853,132.4553">Hiroshima, Japan</option>
+                    <option value="28.6139,77.2090">New Delhi, India</option>
+                    <option value="19.0760,72.8777">Mumbai, India</option>
+                    <option value="35.6892,51.3890">Tehran, Iran</option>
+                    <option value="32.0853,34.7818">Tel Aviv, Israel</option>
+                    <option value="-33.8688,151.2093">Sydney, Australia</option>
+                    <option value="custom">Custom Location...</option>
+                  </select>
+                  <button type="button" class="btn btn--ghost btn--sm" id="btn-surprise">SURPRISE ME</button>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <label for="preset-select">WARHEAD PRESET</label>
+                <select id="preset-select">
+                  <option value="0.02">Davy Crockett / W54 (20 t - Tactical Recoilless)</option>
+                  <option value="0.072">W48 (72 t - 155mm AFAP Nuclear Artillery)</option>
+                  <option value="0.25">SADM / W54 (250 t - Backpack Atomic Demolition)</option>
+                  <option value="15">Little Boy (15 kt - Hiroshima Gun-Type, 1945)</option>
+                  <option value="21">Fat Man (21 kt - Nagasaki Implosion, 1945)</option>
+                  <option value="50">W58 (50 kt - Polaris A-3 SLBM Tri-Warhead)</option>
+                  <option value="100" selected>W76 (100 kt - Trident II D5 SLBM MIRV)</option>
+                  <option value="150">W80 (150 kt - Tomahawk Cruise Missile TLAM-N)</option>
+                  <option value="300">W87 (300 kt - Minuteman III ICBM)</option>
+                  <option value="340">B61 Mod 11 (340 kt - Earth-Penetrating Bunker Buster)</option>
+                  <option value="475">W88 (475 kt - Trident II D5 High-Yield MIRV)</option>
+                  <option value="500">Ivy King (500 kt - Largest Pure-Fission Test, 1952)</option>
+                  <option value="800">RS-28 Sarmat / Satan II (800 kt - Heavy ICBM MIRV)</option>
+                  <option value="1000">Topol-M / DF-41 (1.0 Mt - Strategic Mobile ICBM)</option>
+                  <option value="1200">B83 (1.2 Mt - Modern Variable Gravity Bomb)</option>
+                  <option value="5000">W59 / Minuteman I (5.0 Mt - Early Megaton ICBM)</option>
+                  <option value="9000">B53 / W53 (9.0 Mt - Titan II ICBM Bunker Buster)</option>
+                  <option value="15000">Castle Bravo (15 Mt - Bikini Atoll Thermonuclear Test)</option>
+                  <option value="50000">Tsar Bomba (50 Mt - AN602 Tested Superbomb, 1961)</option>
+                  <option value="100000">Tsar Bomba Max (100 Mt - Theoretical Full Design)</option>
+                  <option value="custom">Custom Yield...</option>
+                </select>
+              </div>
+
+              <div class="form-row">
+                <div class="slider-header">
+                  <label for="yield-slider">YIELD (KILOTONS)</label>
+                  <span class="slider-val" id="yield-display">100 kt</span>
+                </div>
+                <input type="range" id="yield-slider" min="0" max="1000" value="300" step="1" />
+              </div>
+
+              <div class="form-row">
+                <label>BURST TYPE</label>
+                <div class="burst-toggle-group">
+                  <button type="button" class="btn btn--toggle is-active" id="burst-air">AIRBURST</button>
+                  <button type="button" class="btn btn--toggle" id="burst-surface">SURFACE BURST</button>
+                </div>
+              </div>
+
+              <div class="fallout-controls" id="fallout-controls" style="display: none;">
+                <div class="form-row">
+                  <label for="wind-dir">FALLOUT WIND DIRECTION: <b id="wind-dir-val">45° (NE)</b></label>
+                  <input type="range" id="wind-dir" min="0" max="360" value="45" step="5" />
+                </div>
+                <div class="form-row">
+                  <label for="wind-spd">WIND SPEED: <b id="wind-spd-val">25 km/h</b></label>
+                  <input type="range" id="wind-spd" min="5" max="100" value="25" step="5" />
+                </div>
+              </div>
+
+              <button type="button" class="btn btn--primary btn--detonate" id="btn-detonate">
+                [ DETONATE WARHEAD ]
+              </button>
+            </div>
+          </div>
+
+          <div class="panel gz-report-panel">
+            <div class="panel__head"><h2 class="panel__title">DOT-MATRIX DAMAGE REPORT</h2></div>
+            <div class="panel__body" id="damage-report">
+              <p class="report-empty">&gt; AWAITING TELEMETRY. SELECT TARGET AND INITIATE DETONATION.</p>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <footer class="gz-disclaimer">
+        <p>&gt; EDUCATIONAL PURPOSES ONLY. Physics scaling derived from Glasstone &amp; Dolan, <i>The Effects of Nuclear Weapons</i> (1977, US DoD / DoE). Public open-source blast models.</p>
+      </footer>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module" src="/games/ground-zero/main.js"></script>
+  </body>
+</html>

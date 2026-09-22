@@ -1,0 +1,117 @@
+/* ORE RUNNER — Newtonian Asteroid Miner Styles */
+:root {
+  --orange-glow: rgba(255, 119, 0, 0.45);
+}
+
+.or-screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  max-width: min(1440px, 100%);
+  margin: 0 auto;
+}
+
+.or-canvas-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: min(80vh, 760px);
+  background: #050302;
+  border: 2px solid var(--accent, #ff7700);
+  border-radius: var(--radius-md, 6px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.9), 0 0 24px var(--orange-glow);
+  overflow: hidden;
+}
+
+#or-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Telemetry HUD */
+.or-hud {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  pointer-events: none;
+  font-family: var(--font-display, monospace);
+  font-size: 10px;
+  color: #fff;
+  z-index: 10;
+}
+
+.hud-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(14, 7, 3, 0.85);
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 119, 0, 0.4);
+  border-radius: 4px;
+  backdrop-filter: blur(6px);
+}
+
+.hud-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-label {
+  color: #ffaa55;
+  letter-spacing: 0.08em;
+}
+
+.hud-val {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.hud-bar {
+  width: 100px;
+  height: 6px;
+  background: #261408;
+  border: 1px solid #ff7700;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.hud-fill {
+  height: 100%;
+  width: 100%;
+  background: #ff7700;
+  transition: width 0.15s ease;
+}
+
+/* Modal */
+.or-modal {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 4, 1, 0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  gap: 16px;
+  text-align: center;
+}
+
+.or-modal-title {
+  font-family: var(--font-display, monospace);
+  font-size: 20px;
+  color: #ff7700;
+  text-shadow: 0 0 16px #ff7700;
+  letter-spacing: 0.15em;
+  margin: 0;
+}

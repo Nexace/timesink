@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en" data-accent="purple" class="crt-on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>ROOTKIT — SYS://TIMESINK.NET</title>
+    <meta name="description" content="Authentic retro terminal intrusion system with network recon, ciphers, hex dumps, port knocking, and proxy routing." />
+    <meta name="theme-color" content="#0B0E0B" />
+    <link rel="stylesheet" href="/shared/tokens.css" />
+    <link rel="stylesheet" href="/shared/base.css" />
+    <link rel="stylesheet" href="/games/rootkit/game.css" />
+  </head>
+  <body data-page="game" data-accent="purple">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="wrap game-screen">
+      <div class="stage-bar">
+        <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
+        <h1 class="stage-bar__title">ROOTKIT // INTRUSION SYSTEM</h1>
+        <span class="stage-bar__meta">
+          <span>SUBNET: <b id="subnet-val">10.0.0.0/24</b></span>
+          <span class="meta-sep">|</span>
+          <span>HOST: <b id="host-ip">10.0.0.1</b></span>
+        </span>
+      </div>
+
+      <div class="rk-container">
+        <!-- Telemetry bar -->
+        <div class="rk-status-bar">
+          <div class="rk-status-left">
+            <span class="rk-badge">MISSION: <b id="mission-title">1. BOOTSTRAP</b></span>
+            <span class="rk-badge rk-proxy-badge">PROXIES: <b id="proxy-count">0 HOPS</b></span>
+            <span class="rk-badge rk-clearance-badge">CLEARANCE: <b id="privilege-badge">OPERATOR</b></span>
+          </div>
+          <div class="rk-status-right">
+            <span class="rk-timer-badge" id="mission-timer" style="display: none;">TIME REMAINING: <b id="timer-val">90s</b></span>
+            <span class="rk-trace-badge">
+              <span>IDS TRACE:</span> <b id="trace-val">0%</b>
+              <div class="trace-track"><div class="trace-fill" id="trace-fill" style="width: 0%;"></div></div>
+            </span>
+          </div>
+        </div>
+
+        <!-- Terminal screen -->
+        <div class="rk-terminal" id="terminal-screen" tabindex="0" role="region" aria-label="Rootkit Terminal Console">
+          <div id="output-buffer"></div>
+          <div class="rk-prompt-line">
+            <span class="rk-prompt" id="prompt-str">root@gateway:~$</span>
+            <div class="input-wrap">
+              <input type="text" id="cmd-input" autocomplete="off" spellcheck="false" autofocus aria-label="Terminal input" />
+              <span class="rk-autocomplete-preview" id="autocomplete-preview"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Terminal shortcuts footer -->
+        <div class="rk-footer">
+          <span class="rk-footer__hint"><kbd>Tab</kbd> Autocomplete</span>
+          <span class="rk-footer__hint"><kbd>&uarr;/&darr;</kbd> History</span>
+          <span class="rk-footer__hint"><kbd>Ctrl+L</kbd> Clear</span>
+          <span class="rk-footer__hint">Type <span class="rk-kw">help</span> for full command matrix</span>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/games/rootkit/main.js"></script>
+  </body>
+</html>

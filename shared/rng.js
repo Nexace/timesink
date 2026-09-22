@@ -106,3 +106,13 @@ export function dailySeedKey(date = new Date()) {
   const d = String(date.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
+
+export function isStreakActive(lastDailyKey, now = new Date()) {
+  if (!lastDailyKey) return false;
+  const today = dailySeedKey(now);
+  const yesterdayDate = new Date(now.getTime());
+  yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+  const yesterday = dailySeedKey(yesterdayDate);
+  return lastDailyKey === today || lastDailyKey === yesterday;
+}
+

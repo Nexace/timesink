@@ -1,6 +1,6 @@
 // Ghost Lap — pure race simulation (no DOM). Tracks at real-length scale, arcade car physics,
 // AI drivers, lap/sector timing, track limits, DRS, ERS, slipstream and race classification.
-import { fitCircuit, cornerRadii } from "./circuits.js";
+import { fitCircuit, cornerRadii, resampleClosed } from "./circuits.js";
 
 export const PX_PER_M = 3.3; // world pixels per real metre of circuit length
 export const TRACK_WIDTH = 128;
@@ -123,6 +123,106 @@ function pathLength(path) {
   return L;
 }
 
+/**
+ * The road is drawn much wider than a real one relative to the layout, so hairpin legs and parallel
+ * sections (Zandvoort, Jeddah, Monaco, Baku…) can end up on top of each other. Push any two stretches
+ * of road that run side by side apart until there's a strip of grass between them, spreading each
+ * push smoothly along the track so the shape stays true. Real crossings (Suzuka's bridge) meet at a
+ * steep angle and are left alone.
+ */
+function separateSections(path, need, step) {
+  let pts = path.map((p) => [p[0], p[1]]);
+  const n = pts.length;
+  const minGap = Math.ceil((need * 2.5) / step);
+  const cell = need;
+  for (let iter = 0; iter < 120; iter++) {
+    const grid = new Map();
+    pts.forEach((p, i) => {
+      const k = Math.floor(p[0] / cell) * 65536 + Math.floor(p[1] / cell);
+      const list = grid.get(k);
+      if (list) list.push(i);
+      else grid.set(k, [i]);
+    });
+    const tan = pts.map((_, i) => {
+      const a = pts[(i - 2 + n) % n];
+      const b = pts[(i + 2) % n];
+      const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      return [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
+    });
+    const disp = pts.map(() => [0, 0]);
+    let hits = 0;
+    for (let i = 0; i < n; i++) {
+      const p = pts[i];
+      const cx = Math.floor(p[0] / cell);
+      const cy = Math.floor(p[1] / cell);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (const j of grid.get((cx + dx) * 65536 + cy + dy) || []) {
+            if (j <= i) continue;
+            const gap = Math.min(j - i, n - (j - i));
+            if (gap < minGap) continue;
+            if (Math.abs(tan[i][0] * tan[j][0] + tan[i][1] * tan[j][1]) < 0.5) continue;
+            const vx = p[0] - pts[j][0];
+            const vy = p[1] - pts[j][1];
+            const d = Math.hypot(vx, vy) || 1;
+            if (d >= need) continue;
+            hits++;
+            const f = ((need - d) / d) * 0.5;
+            disp[i][0] += vx * f;
+            disp[i][1] += vy * f;
+            disp[j][0] -= vx * f;
+            disp[j][1] -= vy * f;
+          }
+        }
+      }
+    }
+    if (!hits) break;
+    // Spread each push along the road so corners bend rather than kink
+    let sm = disp;
+    for (let pass = 0; pass < 3; pass++) {
+      const R = 10;
+      sm = sm.map((_, i) => {
+        let x = 0;
+        let y = 0;
+        for (let k = -R; k <= R; k++) {
+          const q = sm[(i + k + n) % n];
+          x += q[0];
+          y += q[1];
+        }
+        return [x / (2 * R + 1), y / (2 * R + 1)];
+      });
+    }
+    // The blur dilutes a push; scale it back so the worst overlap still moves by about its full depth
+    let peakRaw = 0;
+    let peakSm = 0;
+    for (let i = 0; i < n; i++) {
+      peakRaw = Math.max(peakRaw, Math.hypot(disp[i][0], disp[i][1]));
+      peakSm = Math.max(peakSm, Math.hypot(sm[i][0], sm[i][1]));
+    }
+    const gain = peakSm > 0 ? Math.min(6, (peakRaw / peakSm) * 0.35) : 0;
+    pts = pts.map((p, i) => [p[0] + sm[i][0] * gain, p[1] + sm[i][1] * gain]);
+  }
+  // Pushing can pinch a corner tighter than the real one: ease any that fall under the tightest
+  // radius the unmodified layouts use (~48 px) back out, locally
+  pts = resampleClosed(pts, step);
+  for (let iter = 0; iter < 200; iter++) {
+    const r = cornerRadii(pts, 4);
+    let tight = 0;
+    const m = pts.length;
+    pts = pts.map((p, i) => {
+      let worst = Infinity;
+      for (let k = -4; k <= 4; k++) worst = Math.min(worst, r[(i + k + m) % m]);
+      if (worst >= 48) return p;
+      tight++;
+      const a = pts[(i - 2 + m) % m];
+      const b = pts[(i + 2) % m];
+      return [p[0] + ((a[0] + b[0]) / 2 - p[0]) * 0.4, p[1] + ((a[1] + b[1]) / 2 - p[1]) * 0.4];
+    });
+    if (!tight) break;
+  }
+  return resampleClosed(pts, step);
+}
+
 /** Build a raceable world track from a circuit definition { key, name, pts, lengthM, theme, night }. */
 export function buildTrack(def) {
   const probe = fitCircuit(def.pts, 1760, 800, 0, STEP);
@@ -130,7 +230,7 @@ export function buildTrack(def) {
   const margin = 520;
   const W = Math.round(1760 * k + margin * 2);
   const H = Math.round(800 * k + margin * 2);
-  const path = fitCircuit(def.pts, W, H, margin, STEP);
+  const path = separateSections(fitCircuit(def.pts, W, H, margin, STEP), TRACK_WIDTH + 64, STEP);
   const n = path.length;
   const w = TRACK_WIDTH;
 
@@ -198,7 +298,9 @@ export function buildTrack(def) {
   // Reference speed profile along the racing line at full grip (drives the line guide and DRS zones)
   const vmax = profileFor({ n, lineRadii, lineDs }, 1);
 
-  // DRS: the longest flat-out runs (up to two) with detection points before them
+  // DRS: as many zones as the real circuit has. Every real layout has one on the pit straight, so the
+  // flat-out run through (or leading onto) the start line always gets one; the rest go to the longest
+  // remaining flat-out runs. Detection sits ~420 m before each activation point.
   const flat = Array.from(vmax, (v) => v >= CAR.top * 0.985);
   const runs = [];
   let start = flat.indexOf(false);
@@ -215,10 +317,22 @@ export function buildTrack(def) {
     }
   }
   if (cur) runs.push(cur);
-  const drs = runs
-    .filter((r) => r.len * STEP > 900)
-    .sort((a, b) => b.len - a.len)
-    .slice(0, 2)
+  const wanted = def.drs ?? 2;
+  const long = runs.filter((r) => r.len * STEP > 1000);
+  // Distance (in points) from the end of a run forward to the start line: 0 if the run crosses it
+  const toLine = (r) => {
+    const end = r.from + r.len;
+    return end >= n ? 0 : n - end;
+  };
+  // (Silverstone is the odd one out: its zones are Wellington and Hangar, not the pit straight)
+  const main = def.drsMain === false ? null : long.slice().sort((a, b) => toLine(a) - toLine(b))[0];
+  const chosen = main ? [main] : [];
+  for (const r of long.slice().sort((a, b) => b.len - a.len)) {
+    if (chosen.length >= wanted) break;
+    if (!chosen.includes(r)) chosen.push(r);
+  }
+  const drs = chosen
+    .sort((a, b) => a.from - b.from)
     .map((r) => {
       const from = (r.from + 12) % n;
       const to = (r.from + r.len - 6) % n;

@@ -62,7 +62,7 @@ function getTrack(key) {
   }
   const meta = CAL[key] || CAL.monza;
   const c = CIRCUITS[meta.key];
-  const track = buildTrack({ key: meta.key, name: `${meta.name} — ${meta.country}`, pts: c.pts, lengthM: c.lengthM, theme: meta.theme, night: meta.night });
+  const track = buildTrack({ key: meta.key, name: `${meta.name} — ${meta.country}`, pts: c.pts, lengthM: c.lengthM, drs: c.drs, drsMain: c.drsMain, theme: meta.theme, night: meta.night });
   const entry = { meta, track, world: createWorld(track), minimap: createMinimap(track, 250) };
   trackCache.set(key, entry);
   // Worlds hold their own tile caches; keep only a couple around
@@ -93,7 +93,7 @@ if (!CAL[prefs.track]) prefs.track = "monza";
 if (!DIFFICULTY[prefs.difficulty]) prefs.difficulty = "medium";
 let records = load(RECORDS_KEY, { races: 0, gpWins: {}, podiums: 0, duels: {}, bestLaps: {} });
 
-const ghostKey = (track) => `timesink:ghost-lap:v3:${track}`;
+const ghostKey = (track) => `timesink:ghost-lap:v4:${track}`;
 function loadGhost(track) {
   try {
     const raw = localStorage.getItem(ghostKey(track));

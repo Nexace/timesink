@@ -1,0 +1,9 @@
+# Local-only files: never part of the public site
+.env*
+.claude
+.test-screenshots
+.verify-headbutt
+scratch
+graphify-out
+node_modules
+scripts

@@ -1,289 +1,346 @@
-.gl-layout {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
-  margin-top: var(--s-3);
+/* Race stage uses nearly the full window width */
+main.wrap.game-screen {
+  --game-content-w: min(1880px, calc(100vw - 24px));
 }
 
-.gl-canvas-card {
-  background: #04060a;
+.gl-sub {
+  color: var(--dim);
+  font-size: 0.7em;
+}
+
+.gl-stage {
+  position: relative;
+  width: min(100%, calc(max(560px, 100vh - 190px) * 2.2));
+  margin: var(--s-2) auto 0;
+  aspect-ratio: 2.2 / 1;
+  background: #05070b;
   border: 2px solid var(--accent, #0088ff);
-  padding: var(--s-3);
-  box-shadow: 0 0 16px rgba(0, 136, 255, 0.2);
-}
-
-.gl-hud {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: var(--s-2);
-  padding-bottom: var(--s-3);
-  border-bottom: 1px solid #1a2233;
-  margin-bottom: var(--s-3);
-}
-
-@media (max-width: 760px) {
-  .gl-hud {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-.hud-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.hud-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--dim);
-  letter-spacing: 0.05em;
-}
-
-.hud-val {
-  font-family: var(--font-mono);
-  font-size: var(--fs-md);
-  color: #fff;
-  font-weight: bold;
-}
-
-.hud-speed {
-  color: var(--accent, #0088ff);
-  font-family: var(--font-display, var(--font-mono));
-  font-size: var(--fs-sm);
-}
-
-.hud-brake-status {
-  font-family: var(--font-display, var(--font-mono));
-  font-size: 11px;
-  color: var(--dim);
-  transition: all 0.15s ease;
-}
-
-.hud-brake-status.status--braking {
-  color: #ff2233;
-  text-shadow: 0 0 10px #ff2233, 0 0 20px rgba(255, 34, 51, 0.6);
-  animation: brake-glow 0.3s ease-in-out infinite alternate;
-}
-
-.hud-brake-status.status--reverse {
-  color: #ffb700;
-  text-shadow: 0 0 8px #ffb700;
-}
-
-.hud-brake-status.status--drift {
-  color: #00f0ff;
-  text-shadow: 0 0 10px #00f0ff;
-}
-
-@keyframes brake-glow {
-  from { opacity: 0.85; }
-  to { opacity: 1; text-shadow: 0 0 14px #ff2233, 0 0 25px #ff2233; }
-}
-
-.delta-ahead {
-  color: var(--green, #00ff66);
-}
-
-.delta-behind {
-  color: var(--danger, #ff3b30);
-}
-
-.gl-canvas-wrap {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  background: #000;
-  border: 1px solid #141b2a;
+  box-shadow: 0 0 0 2px #000, 0 0 30px rgba(0, 136, 255, 0.18);
+  overflow: hidden;
 }
 
 #race-canvas {
+  display: block;
   width: 100%;
-  max-width: min(1320px, 100%);
-  max-height: min(78vh, 760px);
+  height: 100%;
+  image-rendering: auto;
+  background: #05070b;
+  outline: none;
+}
+
+/* ---------- Menus (title, setup, pause, results) ---------- */
+.gl-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 16px;
+  background: radial-gradient(ellipse at center, rgba(3, 6, 12, 0.35) 0%, rgba(3, 6, 12, 0.82) 75%);
+}
+.gl-overlay[hidden] {
+  display: none;
+}
+
+.gl-kicker {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 8px;
+  letter-spacing: 0.2em;
+  color: #8fb4ff;
+}
+
+.gl-heading {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(16px, 2.2vw, 24px);
+  color: #fff;
+}
+.gl-heading.is-win {
+  color: #ffd400;
+  text-shadow: 3px 3px 0 #6b4a00;
+}
+
+.gl-title {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.gl-title__logo {
+  margin: 4px 0;
+  font-family: var(--font-display);
+  font-size: clamp(40px, 7vw, 84px);
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: #00b4ff;
+  text-shadow: 4px 4px 0 #003a66, 8px 8px 0 #000;
+}
+.gl-title__tag {
+  margin: 0 0 8px;
+  font-family: var(--font-body);
+  font-size: 24px;
+  color: #e8ecf4;
+}
+.gl-title__stats {
+  margin: 8px 0 0;
+  font-family: var(--font-body);
+  font-size: 18px;
+  color: #8a96ad;
+}
+
+.gl-menu {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  background: rgba(6, 9, 16, 0.92);
+  border: 1px solid rgba(0, 170, 255, 0.4);
+  box-shadow: 0 0 0 2px #000, 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+.gl-menu--small {
+  width: min(380px, 100%);
+  text-align: center;
+}
+.gl-menu--wide {
+  width: min(860px, 100%);
+}
+.gl-menu--setup {
+  width: min(1180px, 100%);
+  max-height: 100%;
+}
+
+.gl-menu__list {
+  display: grid;
+  gap: 6px;
+  width: min(360px, 100%);
+  justify-self: center;
+}
+.gl-menu__list .btn {
+  width: 100%;
+  justify-content: space-between;
+  background: rgba(8, 12, 22, 0.9);
+}
+.gl-menu__list .btn small,
+.gl-menu__row .btn small {
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--dim);
+}
+.gl-menu__list .btn--primary {
+  background: var(--accent, #0088ff);
+  border-color: var(--accent, #0088ff);
+  color: #04101c;
+}
+.gl-menu__list .btn--primary small {
+  color: rgba(4, 16, 28, 0.75);
+}
+.gl-menu__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.gl-note {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 18px;
+  color: #a9b4c8;
+}
+
+.gl-setup__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: center;
+}
+
+.gl-tracks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 8px;
+  max-height: min(46vh, 420px);
+  overflow: auto;
+  padding: 2px;
+}
+.gl-track {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  text-align: left;
+  color: #e8ecf4;
+  background: #0b1120;
+  border: 1px solid #1d2a44;
+  cursor: pointer;
+}
+.gl-track img {
+  width: 100%;
   height: auto;
-  aspect-ratio: 800 / 500;
-  image-rendering: pixelated;
-  background: #020306;
+  background: #07101d;
+}
+.gl-track b {
+  font-family: var(--font-display);
+  font-size: 8px;
+  line-height: 1.5;
+}
+.gl-track small {
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: #8a96ad;
+}
+.gl-track__round {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-family: var(--font-display);
+  font-size: 7px;
+  color: #ffd400;
+}
+.gl-track:hover,
+.gl-track:focus-visible {
+  border-color: #3a7bd5;
+}
+.gl-track.is-on {
+  border-color: var(--accent, #0088ff);
+  box-shadow: inset 0 0 0 2px var(--accent, #0088ff);
+  background: #0d1a33;
+}
+
+.gl-setup__opts {
+  display: grid;
+  gap: 8px;
+}
+.gl-opt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.gl-opt > span {
+  min-width: 84px;
+  font-family: var(--font-display);
+  font-size: 8px;
+  color: #8fb4ff;
+}
+.gl-chip {
+  padding: 6px 10px;
+  font-family: var(--font-display);
+  font-size: 8px;
+  color: #c9d2e3;
+  background: #0b1120;
+  border: 1px solid #1d2a44;
+  cursor: pointer;
+}
+.gl-chip.is-on {
+  color: #04101c;
+  background: var(--accent, #0088ff);
+  border-color: var(--accent, #0088ff);
+}
+
+.gl-res {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-body);
+  font-size: 20px;
+  color: #e8ecf4;
+}
+.gl-res th {
+  padding: 4px 8px;
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: 7px;
+  color: #6c7a96;
+  border-bottom: 1px solid #1d2a44;
+}
+.gl-res td {
+  padding: 3px 8px;
+  border-bottom: 1px solid rgba(29, 42, 68, 0.5);
+}
+.gl-res td i {
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  margin-right: 8px;
+  vertical-align: -2px;
+}
+.gl-res td small {
+  color: #6c7a96;
+}
+.gl-res tr.is-you td {
+  background: rgba(0, 136, 255, 0.2);
+}
+.gl-res__fl {
+  color: #b44dff;
+}
+
+/* ---------- Touch controls ---------- */
+.gl-touch {
+  display: none;
+}
+@media (pointer: coarse) {
+  .gl-touch {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 4;
+    display: flex;
+    justify-content: space-between;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .gl-touch__side {
+    display: flex;
+    gap: 8px;
+  }
+  .gl-touch button {
+    width: 64px;
+    height: 64px;
+    font-family: var(--font-display);
+    font-size: 10px;
+    color: #fff;
+    background: rgba(8, 12, 22, 0.55);
+    border: 1px solid rgba(0, 170, 255, 0.5);
+    border-radius: 50%;
+    pointer-events: auto;
+    touch-action: none;
+  }
 }
 
 .gl-controls-hint {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-around;
-  gap: var(--s-2);
-  margin-top: var(--s-3);
+  justify-content: center;
+  gap: var(--s-2) var(--s-4);
+  margin-top: var(--s-2);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--dim);
 }
-
-.gl-controls-hint span {
-  padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.03);
+.gl-controls-hint kbd {
+  padding: 1px 6px;
+  color: #e8ecf4;
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid #1e2638;
   border-radius: 3px;
+  font-family: inherit;
 }
 
-/* Track Editor & Guide */
-.gl-editor-aside {
-  margin-top: var(--s-2);
-}
-
-.editor-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
-}
-
-.guide-toggle-btn {
-  font-size: 10px;
-  padding: 3px 8px;
-  color: var(--cyan);
-  border-color: rgba(0, 240, 255, 0.4);
-}
-
-.editor-status-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-3);
-  background: rgba(11, 16, 26, 0.8);
-  border: 1px solid #1f2a40;
-  border-radius: 4px;
-}
-
-.editor-points-badge {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--amber);
-  font-weight: bold;
-}
-
-.editor-track-status {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--dim);
-}
-
-.track-guide {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
-  padding: var(--s-3);
-  background: rgba(5, 10, 18, 0.9);
-  border: 1px solid var(--border-cyan);
-  border-radius: 4px;
-  box-shadow: 0 0 16px rgba(0, 240, 255, 0.1);
-  animation: guide-slide 0.25s ease-out;
-}
-
-@keyframes guide-slide {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.track-guide__header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  border-bottom: 1px solid #1a2538;
-  padding-bottom: var(--s-2);
-}
-
-.guide-title {
-  font-family: var(--font-marquee);
-  font-size: 11px;
-  color: var(--cyan);
-  text-shadow: 0 0 8px var(--cyan);
-}
-
-.guide-sub {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--dim);
-  letter-spacing: 0.05em;
-}
-
-.guide-steps-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--s-3);
-}
-
-@media (max-width: 680px) {
-  .guide-steps-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 760px) {
+  .gl-stage {
+    aspect-ratio: 16 / 10;
+  }
+  /* The race canvas is 2.2:1; keep it in proportion inside the taller stage instead of squashing it */
+  #race-canvas {
+    object-fit: contain;
+  }
+  .gl-tracks {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   }
 }
 
-.guide-step {
-  display: flex;
-  gap: var(--s-2);
-  padding: var(--s-2);
-  background: rgba(14, 20, 32, 0.6);
-  border: 1px solid #1a2436;
-  border-radius: 4px;
-}
-
-.step-num {
-  font-family: var(--font-marquee);
-  font-size: 14px;
-  color: var(--accent);
-  text-shadow: 0 0 8px var(--accent);
-  flex-shrink: 0;
-  line-height: 1.2;
-}
-
-.step-content h4 {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--cream);
-  margin-bottom: 4px;
-  letter-spacing: 0.04em;
-}
-
-.step-content p {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--dim);
-  line-height: 1.45;
-  margin: 0;
-}
-
-.guide-tip {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2);
-  background: rgba(255, 183, 0, 0.08);
-  border: 1px solid rgba(255, 183, 0, 0.3);
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--cream);
-}
-
-.tip-badge {
-  background: var(--amber);
-  color: #050508;
-  font-family: var(--font-display);
-  font-size: 9px;
-  padding: 2px 5px;
-  border-radius: 2px;
-  font-weight: bold;
-  flex-shrink: 0;
-}
-
-.editor-btn-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-2);
-}
-
-/* Controls Modal */
+/* ---------- Controls & settings modal ---------- */
 .gl-modal {
   position: fixed;
   inset: 0;
@@ -480,36 +537,53 @@
   border-top: 1px solid #172132;
 }
 
-#track-select {
-  background: #050a14;
-  color: #00f0ff;
-  border: 2px solid var(--accent, #0088ff);
-  border-radius: 4px;
-  font-family: var(--font-mono, "Share Tech Mono", monospace);
-  font-size: 14px;
-  font-weight: bold;
-  letter-spacing: 0.04em;
-  padding: 6px 14px;
-  min-width: 240px;
-  max-width: 320px;
-  box-shadow: 0 0 14px rgba(0, 136, 255, 0.35);
-  outline: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
+.slider-note {
+  margin: 4px 0 0;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.2;
+  color: #8a95a8;
 }
 
-#track-select:hover,
-#track-select:focus {
-  border-color: #00f0ff;
-  box-shadow: 0 0 18px rgba(0, 240, 255, 0.6);
-}
-
-@media (max-width: 640px) {
-  #track-select {
-    font-size: 12px;
-    padding: 4px 10px;
-    min-width: 170px;
-    max-width: 200px;
+/* Phones: a taller stage leaves room for the menus and the touch pad around the race view */
+@media (max-width: 500px) {
+  .gl-stage {
+    aspect-ratio: 4 / 5;
+  }
+  .gl-title__logo {
+    font-size: 34px;
+  }
+  .gl-title__tag {
+    font-size: 17px;
+  }
+  .gl-title__stats {
+    font-size: 14px;
+  }
+  .gl-menu {
+    gap: 8px;
+    padding: 12px;
+  }
+  .gl-touch__side {
+    gap: 5px;
+  }
+  .gl-touch button {
+    width: 50px;
+    height: 50px;
+    font-size: 8px;
   }
 }
 
+/* Overlay panels never outgrow the stage (they scroll inside it instead) */
+.gl-overlay > * {
+  max-width: 100%;
+  min-width: 0;
+}
+@media (max-width: 500px) {
+  .gl-overlay {
+    padding: 8px;
+  }
+  .gl-menu__list .btn {
+    white-space: normal;
+    gap: 6px;
+  }
+}

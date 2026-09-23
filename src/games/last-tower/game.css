@@ -18,9 +18,10 @@
 
 .lt-canvas-container {
   position: relative;
-  width: 100%;
+  /* Width follows the height cap so the 16:9 canvas is never stretched on short windows */
+  width: min(100%, calc(min(80vh, 760px) * 16 / 9));
+  margin-inline: auto;
   aspect-ratio: 16 / 9;
-  max-height: min(80vh, 760px);
   background: #020a05;
   border: 2px solid var(--accent, #00e676);
   border-radius: var(--radius-md, 6px);
@@ -75,9 +76,32 @@
   letter-spacing: 0.08em;
 }
 
+.hud-val,
+.hud-label {
+  white-space: nowrap;
+}
+
 .hud-val {
   color: #ffffff;
   font-weight: 700;
+}
+
+/* Narrow canvases: tighter HUD cards so they don't wrap over the play field */
+@media (max-width: 760px) {
+  .lt-hud {
+    font-size: 8px;
+    top: 6px;
+    left: 6px;
+    right: 6px;
+  }
+
+  .hud-group {
+    padding: 4px 6px;
+  }
+
+  .hud-row {
+    gap: 4px;
+  }
 }
 
 /* Commander Abilities Overlay (In Canvas HUD) */
@@ -127,6 +151,7 @@
 
 /* Speed Toggle */
 .speed-toggle-badge {
+  white-space: nowrap;
   background: #061c0d;
   border: 1px solid #00e676;
   color: #00e676;
@@ -178,7 +203,8 @@
   align-items: center;
   gap: 3px;
   transition: all 0.15s ease;
-  flex: 1;
+  /* Grow to share the row, but never shrink below the label: the bar scrolls instead */
+  flex: 1 0 auto;
   min-width: 95px;
   white-space: nowrap;
 }
@@ -264,4 +290,22 @@
   text-shadow: 0 0 16px #00e676;
   letter-spacing: 0.15em;
   margin: 0;
+}
+
+/* Towers the treasury can't afford right now */
+.tower-btn.is-poor {
+  opacity: 0.5;
+}
+.tower-btn.is-poor .tower-cost {
+  color: #ff5a6e;
+}
+
+/* Phones: shrink the whole HUD to fit the canvas instead of letting it spill past the edge */
+@media (max-width: 600px) {
+  .lt-hud {
+    right: auto;
+    width: calc((100% - 12px) / 0.62);
+    transform: scale(0.62);
+    transform-origin: top left;
+  }
 }

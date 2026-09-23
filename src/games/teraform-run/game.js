@@ -8,19 +8,21 @@ import { initShell } from "/shared/shell.js";
 import { createGameLoop, createInputManager, clamp, lerp } from "/src/core/engine.js";
 import { playTone, playLaser, playExplosion } from "/src/core/audio.js";
 import { saveGameScore, loadGameScore } from "/src/core/save.js";
+import { createParticles, starfield, vignette, scanlines, glow, shade, rgba, tinted } from "/src/core/gfx.js";
+import { buildRunnerArt, BIOME_ART } from "./art.js";
 
 initShell({ crumb: "Teraform Run" });
 
 // ─── Constants ───
 const CANVAS_W = 1440;
-const CANVAS_H = 520;
+const CANVAS_H = 700;
 const GROUND_Y = CANVAS_H - 80;
 const GRAVITY = 2800;
 const JUMP_VEL = -850;
 const SHORT_HOP_MULT = 0.55;
 const FAST_FALL_MULT = 3;
 const BASE_SPEED = 300;
-const SPEED_RAMP = 0.5; // px/s per second
+const SPEED_RAMP = 3; // px/s per second (base → max in ~5 minutes)
 const MAX_SPEED = 1200;
 const NEAR_MISS_PX = 18;
 const PERK_INTERVAL = 500;
@@ -43,7 +45,7 @@ const NIGHT_FG = "#7fdbca";
 const PERKS = [
   { id: "ironLegs",    icon: "🦿", name: "IRON LEGS",    desc: "+15% jump height" },
   { id: "phaseShift",  icon: "👻", name: "PHASE SHIFT",  desc: "2s invincible after near-miss" },
-  { id: "magnetBoots", icon: "🧲", name: "MAGNET BOOTS", desc: "20% wider ground" },
+  { id: "magnetBoots", icon: "🧲", name: "MAGNET BOOTS", desc: "Pulls nearby coins to you" },
   { id: "doubleCoins", icon: "🪙", name: "DOUBLE COINS", desc: "Coins worth 2x" },
   { id: "slowMo",      icon: "⏳", name: "SLOW-MO",      desc: "0.7x speed for 10s" },
   { id: "featherfall", icon: "🪶", name: "FEATHERFALL",  desc: "-30% gravity" },
@@ -123,8 +125,8 @@ function getObstacleBoxes(obs) {
         { x: obs.x + 14, y: obs.y + 8, w: 20, h: 14 },   // body
         { x: obs.x, y: obs.y, w: 16, h: 10 },             // left wing
         { x: obs.x + 32, y: obs.y, w: 16, h: 10 },        // right wing
-        { x: obs.x + 34, y: obs.y + 10, w: 14, h: 6 },    // beak
-        { x: obs.x + 2, y: obs.y + 14, w: 12, h: 8 },     // tail
+        { x: obs.x, y: obs.y + 10, w: 14, h: 6 },         // beak (flies beak-first, to the left)
+        { x: obs.x + 34, y: obs.y + 14, w: 12, h: 8 },    // tail
       ];
     default:
       return [{ x: obs.x, y: obs.y, w: obs.w || 20, h: obs.h || 40 }];
@@ -281,7 +283,17 @@ function getEffectiveSpeed() {
 
 // ─── Input Handling ───
 const keys = {};
+let perkChoices = [];
 window.addEventListener("keydown", (e) => {
+  if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // Pick a perk with 1 / 2 / 3.
+  if (state === STATES.PERK_SELECT && /^Digit[123]$/.test(e.code)) {
+    const perk = perkChoices[Number(e.code.slice(5)) - 1];
+    if (perk) selectPerk(perk);
+    return;
+  }
+  if (typeof loop !== "undefined" && loop.isPaused() && e.code !== "Escape") return;
   if (state === STATES.GAME_OVER && (e.code === "Space" || e.code === "Enter")) {
     e.preventDefault();
     restartGame();
@@ -412,21 +424,27 @@ function restartGame() {
 function showPerkModal() {
   state = STATES.PERK_SELECT;
   // Pick 3 random perks
-  const shuffled = [...PERKS].sort(() => Math.random() - 0.5);
+  // Offer perks the runner doesn't already have (one-shot perks can repeat).
+  const repeatable = new Set(["slowMo", "thickSkin"]);
+  const pool = PERKS.filter((p) => repeatable.has(p.id) || !hasPerk(p.id));
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
   const choices = shuffled.slice(0, 3);
+  perkChoices = choices;
 
   perkGrid.innerHTML = "";
-  for (const perk of choices) {
-    const card = document.createElement("div");
+  choices.forEach((perk, idx) => {
+    const card = document.createElement("button");
+    card.type = "button";
     card.className = "perk-card";
     card.innerHTML = `
+      <span class="perk-key">[${idx + 1}]</span>
       <span class="perk-icon">${perk.icon}</span>
       <span class="perk-name">${perk.name}</span>
       <span class="perk-desc">${perk.desc}</span>
     `;
     card.addEventListener("click", () => selectPerk(perk));
     perkGrid.appendChild(card);
-  }
+  });
   modalPerk.hidden = false;
   playTone(600, 0.08, "square", 0.12);
   setTimeout(() => playTone(800, 0.08, "square", 0.12), 80);
@@ -434,6 +452,7 @@ function showPerkModal() {
 }
 
 function selectPerk(perk) {
+  if (state !== STATES.PERK_SELECT) return;
   activePerks[perk.id] = true;
   perksChosen.push(perk.name);
   modalPerk.hidden = true;
@@ -464,7 +483,7 @@ function triggerDeath() {
   // Save score
   if (score > hiScore) {
     hiScore = score;
-    saveGameScore("teraform-run", score, "PTS");
+    saveGameScore("teraform-run", score, `${score.toLocaleString()} PTS`);
   }
 
   // Save coins
@@ -592,21 +611,17 @@ function update(dt) {
     dino.vy += effGravity * fallMult * dt;
     dino.y += dino.vy * dt;
 
-    // Widen ground for magnet boots
-    let groundLevel = GROUND_Y - dino.h;
-    if (hasPerk("magnetBoots")) groundLevel += 10;
 
     if (dino.y >= GROUND_Y - dino.h) {
+      // Slam effect (check before the landing resets velocity / fast-fall)
+      if (fastFalling || dino.vy > 900) {
+        spawnParticles(dino.x + dino.w / 2, GROUND_Y, 6, "#aaa");
+        playTone(80, 0.15, "sine", 0.12);
+      }
       dino.y = GROUND_Y - dino.h;
       dino.vy = 0;
       dino.grounded = true;
       fastFalling = false;
-
-      // Slam effect
-      if (fastFalling || dino.vy > 400) {
-        spawnParticles(dino.x + dino.w / 2, GROUND_Y, 6, "#aaa");
-        playTone(80, 0.15, "sine", 0.12);
-      }
 
       // Re-apply duck if held
       if (ducking) {
@@ -644,9 +659,10 @@ function update(dt) {
   }
 
   // ── Spawn obstacles ──
-  const minGap = lerp(300, 180, (effSpeed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED));
+  // Gaps scale with speed so there's always time to land and jump again (~0.6s airtime).
+  const minGap = effSpeed * 0.72 + 90;
   spawnTimer += effSpeed * dt;
-  if (spawnTimer > minGap + Math.random() * 200) {
+  if (spawnTimer > minGap + Math.random() * effSpeed * 0.6) {
     spawnTimer = 0;
     spawnObstacle();
   }
@@ -709,6 +725,15 @@ function update(dt) {
     const c = coins[i];
     c.x -= effSpeed * dt;
     c.bobPhase += dt * 4;
+    if (hasPerk("magnetBoots")) {
+      const dx = dino.x + dino.w / 2 - (c.x + c.w / 2);
+      const dy = dino.y + dino.h / 2 - (c.y + c.h / 2);
+      const d = Math.hypot(dx, dy);
+      if (d < 220 && d > 1) {
+        c.x += (dx / d) * 520 * dt;
+        c.y += (dy / d) * 520 * dt;
+      }
+    }
 
     if (c.x + c.w < -10) {
       coins.splice(i, 1);
@@ -750,105 +775,225 @@ function update(dt) {
 }
 
 // ─── Render ───
+const rart = buildRunnerArt();
+const fx = createParticles(500);
+const starLayer = starfield(CANVAS_W, GROUND_Y, { count: 160, seed: 21 });
+let shownBiome = 0;
+let fadeFromBiome = -1;
+let fadeT = 1;
+let deathFlash = 0;
+let wasGameOver = false;
+
+function drawWrapped(img, offset, y = 0) {
+  const w = img.width;
+  const x = -(((offset % w) + w) % w);
+  ctx.drawImage(img, Math.floor(x), y);
+  ctx.drawImage(img, Math.floor(x + w), y);
+  if (x + w * 2 < CANVAS_W) ctx.drawImage(img, Math.floor(x + w * 2), y);
+}
+
+function drawSky(bi, t) {
+  const B = BIOME_ART[bi];
+  const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+  g.addColorStop(0, B.skyTop);
+  g.addColorStop(1, B.skyBot);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, CANVAS_W, GROUND_Y);
+
+  // Sun / celestial body (slow parallax so it drifts)
+  const sx = 1080 - ((distancePx || 0) * 0.01) % 200;
+  const sy = B.key === "desert" ? 250 : 150;
+  if (B.key === "cyber") {
+    // Synthwave sun: gradient disc with horizontal cut-outs
+    const r = 110;
+    const sg = ctx.createLinearGradient(0, sy - r, 0, sy + r);
+    sg.addColorStop(0, "#ffe66d");
+    sg.addColorStop(0.5, "#ff4dd8");
+    sg.addColorStop(1, "#7a1fff");
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(sx, sy + 60, r, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = sg;
+    ctx.fillRect(sx - r, sy + 60 - r, r * 2, r * 2);
+    ctx.fillStyle = B.skyBot;
+    for (let i = 0; i < 7; i++) ctx.fillRect(sx - r, sy + 60 + i * 16 + (t * 12) % 16, r * 2, 3 + i);
+    ctx.restore();
+  } else if (B.key === "void") {
+    // Ringed planet
+    ctx.fillStyle = "#3a2566";
+    ctx.beginPath();
+    ctx.arc(sx, sy, 60, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#5a3aa8";
+    ctx.beginPath();
+    ctx.arc(sx - 14, sy - 14, 46, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(224,204,255,0.7)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, 100, 22, -0.3, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    const r = B.key === "desert" ? 70 : B.key === "volcanic" ? 80 : 45;
+    const halo = ctx.createRadialGradient(sx, sy, r * 0.6, sx, sy, r * 3.2);
+    halo.addColorStop(0, rgba(B.sun, 0.55));
+    halo.addColorStop(1, rgba(B.sun, 0));
+    ctx.fillStyle = halo;
+    ctx.fillRect(sx - r * 3.2, sy - r * 3.2, r * 6.4, r * 6.4);
+    ctx.fillStyle = B.sun;
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawClouds(bi) {
+  const B = BIOME_ART[bi];
+  if (B.key === "void") return;
+  for (const c of clouds) {
+    const x = Math.round(c.x);
+    const y = Math.round(c.y);
+    ctx.fillStyle = shade(B.cloud, -0.12);
+    ctx.fillRect(x + 4, y + c.h * 0.55, c.w - 8, c.h * 0.45);
+    ctx.fillStyle = B.cloud;
+    ctx.beginPath();
+    ctx.ellipse(x + c.w * 0.3, y + c.h * 0.55, c.w * 0.26, c.h * 0.45, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + c.w * 0.55, y + c.h * 0.35, c.w * 0.3, c.h * 0.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + c.w * 0.8, y + c.h * 0.6, c.w * 0.2, c.h * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = rgba("#ffffff", B.key === "volcanic" || B.key === "cyber" ? 0.05 : 0.45);
+    ctx.fillRect(x + c.w * 0.4, y + c.h * 0.02, c.w * 0.25, 3);
+  }
+}
+
+function drawScenery(bi, t) {
+  const A = rart.biomes[bi];
+  const d = distancePx || 0;
+  drawSky(bi, t);
+  drawClouds(bi);
+  // Scenery strips are authored standing on a 440px ground line; seat them on this stage's ground
+  const lift = GROUND_Y - A.far.height;
+  drawWrapped(A.far, d * 0.08, lift);
+  drawWrapped(A.mid, d * 0.25, lift);
+  drawWrapped(A.near, d * 0.6, lift);
+  // Textured ground strip
+  const gx = -((d % A.ground.width) + A.ground.width) % A.ground.width;
+  for (let x = gx; x < CANVAS_W; x += A.ground.width) ctx.drawImage(A.ground, Math.floor(x), GROUND_Y);
+}
+
+function spawnWeather(bi, dt) {
+  const kind = BIOME_ART[bi].weather;
+  if (!kind || state !== STATES.RUNNING) return;
+  const rate = { snow: 60, embers: 30, leaves: 8, rain: 90, motes: 20 }[kind] * dt;
+  let n = Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
+  while (n-- > 0) {
+    const x = Math.random() * (CANVAS_W + 300);
+    if (kind === "snow") fx.spawn({ x, y: -5, vx: -60 - Math.random() * 60, vy: 40 + Math.random() * 40, life: 8, size: 2 + Math.random() * 2, color: "#ffffff", drag: 1, alpha: 0.9 });
+    else if (kind === "embers") fx.spawn({ x, y: GROUND_Y + 10, vx: -80 - Math.random() * 60, vy: -60 - Math.random() * 80, life: 3, size: 2, color: "#ffb347", color2: "#ff3b1f", drag: 1 });
+    else if (kind === "leaves") fx.spawn({ x, y: -5, vx: -120, vy: 50, life: 8, size: 4, color: Math.random() < 0.5 ? "#5cbf3f" : "#ffcc4d", kind: "shard", vr: 3, drag: 1 });
+    else if (kind === "rain") fx.spawn({ x, y: -5, vx: -260, vy: 700, life: 1.2, size: 2, color: Math.random() < 0.7 ? "#00ffcc" : "#ff4dd8", kind: "spark", drag: 1, alpha: 0.55 });
+    else if (kind === "motes") fx.spawn({ x, y: Math.random() * GROUND_Y, vx: -40, vy: -10, life: 4, size: 3, color: "#c9a6ff", kind: "glow", drag: 1, alpha: 0.6 });
+  }
+}
+
 function render(dt, { paused }) {
-  const biome = BIOMES[biomeIndex];
+  const t = performance.now() / 1000;
+  const live = !paused && state === STATES.RUNNING;
+  if (live) fx.update(Math.min(dt, 0.05));
+  else if (state === STATES.GAME_OVER && !paused) fx.update(Math.min(dt, 0.05));
 
-  // Sky
-  ctx.fillStyle = nightMode ? NIGHT_SKY : biome.skyCol;
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  // Biome cross-fade
+  if (biomeIndex !== shownBiome) {
+    fadeFromBiome = shownBiome;
+    shownBiome = biomeIndex;
+    fadeT = 0;
+  }
+  if (fadeT < 1 && !paused) fadeT = Math.min(1, fadeT + dt / 1.2);
 
-  // Stars (night only)
-  if (nightMode) {
-    for (const s of stars) {
-      const alpha = 0.4 + Math.sin(s.blink) * 0.4;
-      ctx.fillStyle = `rgba(200,220,255,${alpha})`;
-      ctx.fillRect(s.x, s.y, s.size, s.size);
-    }
+  ctx.imageSmoothingEnabled = false;
+  if (fadeT < 1 && fadeFromBiome >= 0) {
+    drawScenery(fadeFromBiome, t);
+    ctx.globalAlpha = fadeT;
+    drawScenery(shownBiome, t);
+    ctx.globalAlpha = 1;
+  } else {
+    drawScenery(shownBiome, t);
   }
 
-  // Clouds
-  ctx.fillStyle = nightMode ? "#112244" : biome.cloudCol;
-  for (const c of clouds) {
+  // Night: deep-blue grade, stars and a moon
+  if (nightMode) {
+    ctx.fillStyle = "rgba(6, 8, 38, 0.58)";
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(starLayer, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#f4f1dc";
     ctx.beginPath();
-    ctx.ellipse(c.x + c.w / 2, c.y + c.h / 2, c.w / 2, c.h / 2, 0, 0, Math.PI * 2);
+    ctx.arc(300, 90, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(6, 8, 38, 0.9)";
+    ctx.beginPath();
+    ctx.arc(312, 82, 24, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Ground
-  const groundCol = nightMode ? "#0e1030" : biome.groundCol;
-  ctx.fillStyle = groundCol;
-  ctx.fillRect(0, GROUND_Y, CANVAS_W, CANVAS_H - GROUND_Y);
+  if (live) spawnWeather(shownBiome, Math.min(dt, 0.05));
 
-  // Ground line
-  ctx.strokeStyle = nightMode ? NIGHT_FG : biome.obstCol;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, GROUND_Y);
-  ctx.lineTo(CANVAS_W, GROUND_Y);
-  ctx.stroke();
+  const A = rart.biomes[shownBiome];
+  const B = BIOME_ART[shownBiome];
 
-  // Ground texture (dashes)
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = nightMode ? "rgba(127,219,202,0.3)" : "rgba(0,0,0,0.15)";
-  for (let gx = -groundOffset; gx < CANVAS_W; gx += 24) {
-    const len = 4 + Math.sin(gx * 0.3) * 3;
-    ctx.beginPath();
-    ctx.moveTo(gx, GROUND_Y + 8 + Math.sin(gx * 0.1) * 4);
-    ctx.lineTo(gx + len, GROUND_Y + 8 + Math.sin(gx * 0.1) * 4);
-    ctx.stroke();
-  }
+  // Obstacles (sprites sit on the ground line; drop shadows on the dirt)
+  for (const obs of obstacles) drawObstacle(obs, A, B, t);
 
-  // Obstacles
-  const obsColor = nightMode ? NIGHT_FG : biome.obstCol;
-  for (const obs of obstacles) {
-    drawObstacle(obs, obsColor);
-  }
-
-  // Coins
+  // Coins: spinning disc
   for (const c of coins) {
     const coinY = c.y + Math.sin(c.bobPhase) * 6;
-    ctx.fillStyle = nightMode ? "#ffcc44" : "#daa520";
-    ctx.fillRect(c.x + 2, coinY + 2, 12, 12);
-    ctx.strokeStyle = nightMode ? "#ffee88" : "#b8860b";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(c.x + 2, coinY + 2, 12, 12);
-    // Dollar sign
-    ctx.fillStyle = nightMode ? "#0a0a2e" : "#fff";
-    ctx.font = "8px monospace";
-    ctx.textAlign = "center";
-    ctx.fillText("$", c.x + 8, coinY + 12);
+    const spin = Math.abs(Math.cos(c.bobPhase * 1.5));
+    const w = Math.max(2, Math.round(A.coin.width * spin));
+    glow(ctx, c.x + 8, coinY + 8, 16, B.coin, 0.35);
+    ctx.drawImage(A.coin, Math.round(c.x + 8 - w / 2), Math.round(coinY), w, A.coin.height);
   }
 
   // Dino
-  if (state !== STATES.IDLE || true) {
-    drawDino(obsColor);
-  }
+  drawDino(A, t);
 
-  // Shield indicator
+  // Shield bubble
   if (shieldActive) {
-    ctx.strokeStyle = "rgba(0,255,204,0.5)";
+    const cx = dino.x + dino.w / 2;
+    const cy = dino.y + dino.h / 2;
+    ctx.strokeStyle = `rgba(0,255,204,${0.5 + Math.sin(t * 6) * 0.2})`;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(dino.x + dino.w / 2, dino.y + dino.h / 2, 30, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 34, 0, Math.PI * 2);
     ctx.stroke();
+    glow(ctx, cx, cy, 40, "#00ffcc", 0.18);
   }
+  if (phaseShiftTimer > 0) glow(ctx, dino.x + dino.w / 2, dino.y + dino.h / 2, 46, "#7df9ff", 0.3 + Math.sin(t * 20) * 0.1);
 
-  // Phase shift indicator
-  if (phaseShiftTimer > 0) {
-    ctx.globalAlpha = 0.4 + Math.sin(performance.now() * 0.01) * 0.2;
-    ctx.strokeStyle = "#00ffcc";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(dino.x - 4, dino.y - 4, dino.w + 8, dino.h + 8);
-    ctx.globalAlpha = 1;
-  }
-
-  // Particles
+  // Legacy particle list (coin pickups, slams) + new FX
   for (const p of particles) {
     ctx.globalAlpha = clamp(p.life / 0.3, 0, 1);
     ctx.fillStyle = p.color;
-    ctx.fillRect(p.x, p.y, p.size, p.size);
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), Math.round(p.size), Math.round(p.size));
   }
   ctx.globalAlpha = 1;
+  fx.draw(ctx);
+
+  // Death flash
+  if (state === STATES.GAME_OVER && !wasGameOver) {
+    deathFlash = 1;
+    fx.burst(dino.x + 22, dino.y + 24, { count: 30, speed: 260, life: 0.8, size: 4, color: "#4caf50", color2: "#2e7d32", gravity: 700, kind: "pixel" });
+  }
+  wasGameOver = state === STATES.GAME_OVER;
+  if (deathFlash > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${deathFlash * 0.6})`;
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    deathFlash = Math.max(0, deathFlash - dt * 3);
+  }
+
+  vignette(ctx, CANVAS_W, CANVAS_H, nightMode || B.key === "void" || B.key === "volcanic" || B.key === "cyber" ? 0.55 : 0.3);
+  scanlines(ctx, CANVAS_W, CANVAS_H, 0.05);
 
   // Paused overlay
   if (paused && state === STATES.RUNNING) {
@@ -862,112 +1007,63 @@ function render(dt, { paused }) {
     ctx.font = '10px "Press Start 2P", monospace';
     ctx.fillStyle = "#8a97b1";
     ctx.fillText("PRESS ESC TO RESUME", CANVAS_W / 2, CANVAS_H / 2 + 28);
+    ctx.textBaseline = "alphabetic";
   }
 }
 
 // ─── Draw Helpers ───
-function drawDino(color) {
-  ctx.fillStyle = color;
+function drawDino(A, t) {
+  const D = rart.dino;
+  let img;
+  if (dino.ducking) img = dino.legFrame < 2 ? D.duckA : D.duckB;
+  else if (!dino.grounded) img = D.jump;
+  else img = dino.legFrame < 2 ? D.runA : D.runB;
 
-  if (dino.ducking) {
-    // Ducking dino: wider and shorter (60x28)
-    const x = dino.x, y = dino.y;
-    // Body
-    ctx.fillRect(x + 4, y + 4, 48, 16);
-    // Head
-    ctx.fillRect(x + 40, y, 16, 12);
-    // Eye
-    ctx.fillStyle = nightMode ? NIGHT_SKY : "#fafafa";
-    ctx.fillRect(x + 50, y + 2, 4, 4);
-    ctx.fillStyle = color;
-    // Legs
-    ctx.fillRect(x + 10, y + 20, 6, 8);
-    ctx.fillRect(x + 28, y + 20, 6, 8);
-  } else {
-    // Standing dino: 44x48
-    const x = dino.x, y = dino.y;
-    // Head
-    ctx.fillRect(x + 12, y, 28, 14);
-    // Eye
-    ctx.fillStyle = nightMode ? NIGHT_SKY : "#fafafa";
-    ctx.fillRect(x + 32, y + 3, 5, 5);
-    ctx.fillStyle = color;
-    // Body
-    ctx.fillRect(x + 6, y + 14, 32, 20);
-    // Tail
-    ctx.fillRect(x, y + 16, 8, 8);
-    // Arms
-    ctx.fillRect(x + 32, y + 20, 10, 4);
-    // Legs (animated)
-    if (dino.grounded) {
-      if (dino.legFrame < 2) {
-        ctx.fillRect(x + 10, y + 34, 8, 14);
-        ctx.fillRect(x + 24, y + 34, 8, 10);
-      } else {
-        ctx.fillRect(x + 10, y + 34, 8, 10);
-        ctx.fillRect(x + 24, y + 34, 8, 14);
-      }
-    } else {
-      // In air: legs together
-      ctx.fillRect(x + 12, y + 34, 8, 12);
-      ctx.fillRect(x + 22, y + 34, 8, 12);
-    }
+  // Ground shadow shrinks with height
+  const air = Math.max(0, GROUND_Y - (dino.y + dino.h));
+  const k = Math.max(0.35, 1 - air / 220);
+  ctx.fillStyle = `rgba(0,0,0,${0.3 * k})`;
+  ctx.beginPath();
+  ctx.ellipse(dino.x + dino.w / 2, GROUND_Y + 3, (dino.w / 2) * k, 5 * k, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Running dust
+  if (state === STATES.RUNNING && dino.grounded && Math.random() < 0.35) {
+    fx.spawn({ x: dino.x + 6, y: GROUND_Y - 2, vx: -120 - Math.random() * 80, vy: -20 - Math.random() * 30, life: 0.4, size: 3, grow: 10, color: shade(BIOME_ART[shownBiome].groundTop, -0.1), kind: "smoke", alpha: 0.6 });
   }
+
+  const dead = state === STATES.GAME_OVER;
+  ctx.save();
+  if (dead) {
+    ctx.translate(dino.x + dino.w / 2, dino.y + dino.h / 2);
+    ctx.rotate(0.25);
+    ctx.translate(-(dino.x + dino.w / 2), -(dino.y + dino.h / 2));
+  }
+  ctx.drawImage(dead ? tinted(img, "#b3261e") : img, Math.round(dino.x), Math.round(dino.y));
+  ctx.restore();
 }
 
-function drawObstacle(obs, color) {
-  ctx.fillStyle = color;
-
-  switch (obs.type) {
-    case "cactusSmall": {
-      const x = obs.x, y = obs.y;
-      // Trunk
-      ctx.fillRect(x + 6, y, 8, 30);
-      // Left arm
-      ctx.fillRect(x, y + 8, 8, 4);
-      ctx.fillRect(x, y + 8, 4, 12);
-      // Right arm
-      ctx.fillRect(x + 14, y + 6, 8, 4);
-      ctx.fillRect(x + 18, y + 6, 4, 14);
-      break;
-    }
-    case "cactusTall": {
-      const x = obs.x, y = obs.y;
-      // Crown
-      ctx.fillRect(x + 2, y, 16, 6);
-      // Trunk
-      ctx.fillRect(x + 5, y + 6, 10, 38);
-      // Base
-      ctx.fillRect(x + 2, y + 42, 16, 8);
-      break;
-    }
-    case "cactusTriple": {
-      const x = obs.x, y = obs.y;
-      // Three cacti
-      ctx.fillRect(x + 2, y + 8, 8, 27);
-      ctx.fillRect(x - 2, y + 16, 6, 4);
-      ctx.fillRect(x + 20, y + 2, 8, 33);
-      ctx.fillRect(x + 16, y + 10, 6, 4);
-      ctx.fillRect(x + 38, y + 10, 8, 25);
-      ctx.fillRect(x + 44, y + 18, 6, 4);
-      break;
-    }
-    case "ptero": {
-      const x = obs.x, y = obs.y;
-      const wingY = Math.sin(performance.now() * 0.008) * 6;
-      // Body
-      ctx.fillRect(x + 16, y + 10, 16, 10);
-      // Head/beak
-      ctx.fillRect(x + 32, y + 12, 14, 5);
-      // Left wing
-      ctx.fillRect(x + 2, y + wingY, 14, 8);
-      // Right wing
-      ctx.fillRect(x + 32, y + wingY, 14, 8);
-      // Tail
-      ctx.fillRect(x + 4, y + 16, 10, 5);
-      break;
-    }
+function drawObstacle(obs, A, B, t) {
+  if (obs.type === "ptero") {
+    const frame = A.ptero[Math.floor(t * 8) % 2];
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.beginPath();
+    ctx.ellipse(obs.x + 24, GROUND_Y + 3, 18, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.drawImage(frame, Math.round(obs.x), Math.round(obs.y));
+    if (B.key === "cyber" || B.key === "volcanic") glow(ctx, obs.x + 6, obs.y + 14, 14, B.ptero.b, 0.4);
+    return;
   }
+  const img = A.obstacles[obs.type];
+  if (!img) return;
+  const x = Math.round(obs.x + (obs.w - img.width) / 2);
+  const y = GROUND_Y + 3 - img.height;
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.beginPath();
+  ctx.ellipse(obs.x + obs.w / 2, GROUND_Y + 3, obs.w * 0.6, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (B.obstacle.family === "crystal") glow(ctx, obs.x + obs.w / 2, y + img.height * 0.4, img.height * 0.9, B.obstacle.h, 0.18 + Math.sin(t * 3 + obs.x * 0.01) * 0.06);
+  ctx.drawImage(img, x, y);
 }
 
 // ─── Session Clock ───
@@ -983,11 +1079,25 @@ setInterval(() => {
 // ─── Game Loop ───
 initGame();
 
+// Debug handle for automated visual checks (jump to a biome / toggle night)
+window.__teraform = {
+  get state() { return state; },
+  warp(biome, night = false) {
+    distancePx = biome * 10000 + 10;
+    score = Math.floor(distancePx / 10);
+    nextPerkScore = score + 100000;
+    nextNightToggle = score + 100000;
+    nightMode = night;
+    if (dino) { dino.vy = 0; }
+  }
+};
+
 const loop = createGameLoop({
   update,
   render,
-  canvas,
+  canvas: null, // the game draws its own pause overlay
   targetFps: 60,
+
   onPause: (p) => {
     if (state === STATES.RUNNING && p) {
       // Paused

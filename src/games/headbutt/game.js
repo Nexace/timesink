@@ -1,2741 +1,1279 @@
 /* ================================================================
- *  HEADBUTT — Physics Car Battler
- *  SYS://TIMESINK.NET  |  Accent: violet
- *  Land a hit on the opponent's exposed driver head to win.
- *  12 vehicles · 12 arenas · Player vs Bot AI · Best-of-9 matches
+ *  HEADBUTT — Drive Ahead-style physics car battler
+ *  Two cars, one small arena: touch the other driver's helmet with your car to win the round.
+ *  First to 5. Bots from Easy to Insane, or a friend on the same keyboard.
  * ================================================================ */
-
-import { initShell, toast } from "/shared/shell.js";
-import { createGameLoop, createInputManager, clamp, lerp, dist } from "/src/core/engine.js";
-import { playExplosion, playHit, playTone, sfx, setEngineHum } from "/src/core/audio.js";
+import { initShell, escapeHtml } from "/shared/shell.js";
+import { sfx } from "/shared/sound.js";
+import { playExplosion, playHit, playTone, setEngineHum } from "/src/core/audio.js";
 import { saveGameScore, saveSlot, loadSlot } from "/src/core/save.js";
+import { vignette, glow, createParticles } from "/src/core/gfx.js";
+import {
+  CARS,
+  CAR_KEYS,
+  ARENAS,
+  ARENA_KEYS,
+  BOTS,
+  BOT_KEYS,
+  ROUND_SECONDS,
+  WINS_NEEDED,
+  BOOST_COOLDOWN,
+  contactOutcome,
+  hazardOutcome,
+  resolveRound,
+  matchWinner,
+  mirrorCar
+} from "./data.js";
+import { domeSegments } from "./maps.js";
+import * as art from "./art.js";
 
 initShell({ crumb: "Headbutt" });
 
-/* ── Matter.js aliases ─────────────────────────────────────────── */
-const { Engine, World, Bodies, Body, Composite, Constraint, Events, Vector, Query } = Matter;
+const { Engine, Composite, Bodies, Body, Constraint, Events, Vertices, Query } = Matter;
 
-/* ── Canvas ────────────────────────────────────────────────────── */
 const canvas = document.getElementById("hb-canvas");
 const ctx = canvas.getContext("2d");
-const W = 1280, H = 720;
-canvas.width = W; canvas.height = H;
-ctx.imageSmoothingEnabled = false;
+const W = art.W;
+const H = art.H;
+canvas.width = W;
+canvas.height = H;
+const overlay = document.getElementById("hb-overlay");
+const STEP_MS = 1000 / 120;
+const BASE_MS = 1000 / 60; // Matter velocities are per 16.7 ms
+const WATER_DENSITY = 0.0055;
 
-/* ── Input ─────────────────────────────────────────────────────── */
-const input = createInputManager({ canvas });
+// ─────────────────────────── persistence ───────────────────────────
+const prefs = Object.assign({ car: "hotrod", foeCar: "random", arena: "stadium", bot: "normal", mode: "bot" }, loadSlot("headbutt-prefs") || {});
+if (!CARS[prefs.car]) prefs.car = "hotrod";
+if (prefs.foeCar !== "random" && !CARS[prefs.foeCar]) prefs.foeCar = "random";
+if (prefs.arena !== "random" && !ARENAS[prefs.arena]) prefs.arena = "stadium";
+if (!BOTS[prefs.bot]) prefs.bot = "normal";
+const record = Object.assign({ wins: 0, losses: 0, headshots: 0 }, loadSlot("headbutt-record") || {});
+const savePrefs = () => saveSlot("headbutt-prefs", prefs);
 
-/* ── Constants ─────────────────────────────────────────────────── */
-const ROUND_TIME       = 60;
-const WINS_NEEDED      = 5;
-const COUNTDOWN_SECS   = 3;
-const PHYSICS_DT       = 1000 / 60;
-const HEAD_RADIUS      = 8;
-const ARENA_FLOOR_Y    = H - 65;
+// ─────────────────────────── input ───────────────────────────
+const keys = new Set();
+window.addEventListener("keydown", (e) => {
+  if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(e.code) && game.screen !== "garage") e.preventDefault();
+  keys.add(e.code);
+  if (e.code === "Escape" && ["countdown", "play", "ko"].includes(game.screen)) togglePause();
+  else if (e.code === "Escape" && game.screen === "paused") togglePause();
+  if ((e.code === "Enter" || e.code === "Space") && game.screen === "garage" && !e.repeat && document.activeElement?.tagName !== "BUTTON") startMatch();
+});
+window.addEventListener("keyup", (e) => keys.delete(e.code));
+window.addEventListener("blur", () => keys.clear());
+const down = (...codes) => codes.some((c) => keys.has(c));
 
-/* ── Game states (Direct Garage, Player vs Bot) ─────────────────── */
-const S = { GARAGE: 0, COUNTDOWN: 1, PLAYING: 2, ROUND_END: 3, MATCH_END: 4 };
+// Touch: left half = back, right half = forward, two-finger tap = boost
+const touch = { l: false, r: false, boost: false };
+canvas.addEventListener("pointerdown", (e) => {
+  if (game.screen !== "play" && game.screen !== "countdown") return;
+  const rect = canvas.getBoundingClientRect();
+  if (e.clientX - rect.left < rect.width / 2) touch.l = true;
+  else touch.r = true;
+  if (touch.l && touch.r) touch.boost = true;
+});
+const clearTouch = () => Object.assign(touch, { l: false, r: false, boost: false });
+canvas.addEventListener("pointerup", clearTouch);
+canvas.addEventListener("pointercancel", clearTouch);
 
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 2: 12 VEHICLE DEFINITIONS (All Unlocked)
- * ═══════════════════════════════════════════════════════════════ */
-const VEHICLES = {
-  goKart: {
-    name: "Go-Kart", mass: 1.2, wheelFriction: 0.8, restitution: 0.25,
-    chassisW: 55, chassisH: 16, wheelRadius: 10, wheelBase: 40,
-    headX: 8, headY: -18, driveForce: 0.0034, maxSpeed: 9.2, color: "#ff4444", color2: "#cc2222",
-  },
-  bmx: {
-    name: "BMX Bike", mass: 0.8, wheelFriction: 0.85, restitution: 0.2,
-    chassisW: 40, chassisH: 10, wheelRadius: 12, wheelBase: 30,
-    headX: 2, headY: -24, driveForce: 0.0026, maxSpeed: 8.8, color: "#ffaa00", color2: "#cc8800",
-  },
-  muscleCar: {
-    name: "Muscle Car", mass: 3.0, wheelFriction: 0.9, restitution: 0.2,
-    chassisW: 80, chassisH: 22, wheelRadius: 14, wheelBase: 56,
-    headX: 10, headY: -20, driveForce: 0.0068, maxSpeed: 10.2, color: "#3366ff", color2: "#2244cc",
-  },
-  ambulance: {
-    name: "Ambulance", mass: 4.0, wheelFriction: 0.85, restitution: 0.15,
-    chassisW: 85, chassisH: 32, wheelRadius: 13, wheelBase: 58,
-    headX: -12, headY: -24, driveForce: 0.0082, maxSpeed: 8.2, color: "#ffffff", color2: "#dd3333",
-  },
-  offRoader: {
-    name: "Off-Roader", mass: 3.5, wheelFriction: 1.2, restitution: 0.2,
-    chassisW: 75, chassisH: 24, wheelRadius: 16, wheelBase: 52,
-    headX: 6, headY: -22, driveForce: 0.0090, maxSpeed: 9.5, color: "#44aa44", color2: "#226622",
-  },
-  rallyCar: {
-    name: "Rally Car", mass: 2.8, wheelFriction: 0.75, restitution: 0.25,
-    chassisW: 72, chassisH: 18, wheelRadius: 12, wheelBase: 50,
-    headX: 8, headY: -19, driveForce: 0.0065, maxSpeed: 10.8, color: "#ff6600", color2: "#cc4400",
-  },
-  formulaCar: {
-    name: "Formula Car", mass: 1.8, wheelFriction: 0.95, restitution: 0.1,
-    chassisW: 90, chassisH: 14, wheelRadius: 11, wheelBase: 64,
-    headX: -8, headY: -18, driveForce: 0.0062, maxSpeed: 12.0, color: "#cc00cc", color2: "#990099",
-  },
-  monsterTruck: {
-    name: "Monster Truck", mass: 6.0, wheelFriction: 1.0, restitution: 0.3,
-    chassisW: 70, chassisH: 26, wheelRadius: 24, wheelBase: 48,
-    headX: 4, headY: -26, driveForce: 0.0135, maxSpeed: 8.8, color: "#ffcc00", color2: "#aa8800",
-  },
-  garbageTruck: {
-    name: "Garbage Truck", mass: 7.0, wheelFriction: 0.85, restitution: 0.1,
-    chassisW: 95, chassisH: 34, wheelRadius: 14, wheelBase: 66,
-    headX: -20, headY: -26, driveForce: 0.0145, maxSpeed: 7.2, color: "#669933", color2: "#446622",
-  },
-  tank: {
-    name: "Tank", mass: 10.0, wheelFriction: 1.1, restitution: 0.05,
-    chassisW: 88, chassisH: 24, wheelRadius: 14, wheelBase: 62,
-    headX: 0, headY: -26, driveForce: 0.0200, maxSpeed: 6.8, color: "#556b2f", color2: "#3b4a1f",
-  },
-  eggMobile: {
-    name: "Egg Mobile", mass: 1.5, wheelFriction: 0.7, restitution: 0.85,
-    chassisW: 44, chassisH: 30, wheelRadius: 10, wheelBase: 32,
-    headX: 0, headY: -26, driveForce: 0.0038, maxSpeed: 9.0, color: "#ffeedd", color2: "#ddccaa",
-  },
-  sawbot: {
-    name: "Sawbot", mass: 3.0, wheelFriction: 0.85, restitution: 0.2,
-    chassisW: 60, chassisH: 20, wheelRadius: 12, wheelBase: 42,
-    headX: -6, headY: -20, driveForce: 0.0068, maxSpeed: 9.2, color: "#888888", color2: "#555555",
-    hasBlades: true,
-  },
-};
-const VEHICLE_KEYS = Object.keys(VEHICLES);
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 3: 8 ENHANCED ARENAS
- * ═══════════════════════════════════════════════════════════════ */
-const ARENAS = {
-  theBump: {
-    name: "Cyber Stadium", bg: "#130826", accent: "#9933ff",
-    desc: "Curved quarter-pipe walls, launch ramps & elevated cyber girder",
-    create(w) {
-      const b = [];
-      /* main floor across full width */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y + 20, W + 40, 40, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* left corner solid fill & banked curve — NO GAPS BEHIND */
-      b.push(Bodies.rectangle(25, ARENA_FLOOR_Y - 95, 52, 90, { isStatic: true, label: "terrain", friction: 0.8 }));
-      b.push(Bodies.rectangle(65, ARENA_FLOOR_Y - 65, 130, 18, { isStatic: true, label: "terrain", friction: 0.75, angle: -0.55 }));
-      b.push(Bodies.rectangle(150, ARENA_FLOOR_Y - 22, 100, 16, { isStatic: true, label: "terrain", friction: 0.75, angle: -0.22 }));
-      /* right corner solid fill & banked curve */
-      b.push(Bodies.rectangle(W - 25, ARENA_FLOOR_Y - 95, 52, 90, { isStatic: true, label: "terrain", friction: 0.8 }));
-      b.push(Bodies.rectangle(W - 65, ARENA_FLOOR_Y - 65, 130, 18, { isStatic: true, label: "terrain", friction: 0.75, angle: 0.55 }));
-      b.push(Bodies.rectangle(W - 150, ARENA_FLOOR_Y - 22, 100, 16, { isStatic: true, label: "terrain", friction: 0.75, angle: 0.22 }));
-      /* center combat launch pyramid — driveable from BOTH sides */
-      b.push(Bodies.rectangle(W / 2 - 85, ARENA_FLOOR_Y - 24, 150, 18, { isStatic: true, label: "terrain", friction: 0.75, angle: -0.26 }));
-      b.push(Bodies.rectangle(W / 2 + 85, ARENA_FLOOR_Y - 24, 150, 18, { isStatic: true, label: "terrain", friction: 0.75, angle: 0.26 }));
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 42, 60, 18, { isStatic: true, label: "terrain", friction: 0.75 }));
-      /* elevated cyber girder crest */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 155, 280, 16, { isStatic: true, label: "terrain", friction: 0.8 }));
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      b.forEach(bd => World.add(w, bd));
-      return { bodies: b, spawns: [{ x: 240, y: ARENA_FLOOR_Y - 60 }, { x: W - 240, y: ARENA_FLOOR_Y - 60 }], hazards: [], bumpers: [] };
-    }
-  },
-  sawmill: {
-    name: "Hazard Foundry", bg: "#1a0f08", accent: "#ff6600",
-    desc: "Industrial gantries, pneumatic steam vent & moving buzzsaws",
-    create(w) {
-      const b = [];
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y + 20, W + 40, 40, { isStatic: true, label: "terrain", friction: 0.9 }));
-      /* left gantry: flush outer ramp, platform, AND INNER DRIVE RAMP */
-      b.push(Bodies.rectangle(20, ARENA_FLOOR_Y - 80, 45, 90, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(85, ARENA_FLOOR_Y - 45, 140, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.45 }));
-      b.push(Bodies.rectangle(210, ARENA_FLOOR_Y - 80, 160, 16, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(330, ARENA_FLOOR_Y - 42, 110, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.52 }));
-      /* right gantry: flush outer ramp, platform, AND INNER DRIVE RAMP */
-      b.push(Bodies.rectangle(W - 20, ARENA_FLOOR_Y - 80, 45, 90, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W - 85, ARENA_FLOOR_Y - 45, 140, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.45 }));
-      b.push(Bodies.rectangle(W - 210, ARENA_FLOOR_Y - 80, 160, 16, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W - 330, ARENA_FLOOR_Y - 42, 110, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.52 }));
-      /* central upper crane catwalk */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 165, 260, 16, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      /* 2 moving saw blades */
-      const saw1 = Bodies.circle(280, ARENA_FLOOR_Y - 12, 18, { isStatic: true, label: "hazard_saw" });
-      const saw2 = Bodies.circle(W - 280, ARENA_FLOOR_Y - 12, 18, { isStatic: true, label: "hazard_saw" });
-      b.push(saw1, saw2);
-      b.forEach(bd => World.add(w, bd));
-      const hazards = [
-        { type: "saw", body: saw1, baseX: 280, range: 160, speed: 2.0, t: 0 },
-        { type: "saw", body: saw2, baseX: W - 280, range: 160, speed: 2.4, t: Math.PI },
-        { type: "steam", x: W / 2, y: ARENA_FLOOR_Y, timer: 0, active: false }
-      ];
-      return { bodies: b, spawns: [{ x: 210, y: ARENA_FLOOR_Y - 110 }, { x: W - 210, y: ARENA_FLOOR_Y - 110 }], hazards };
-    }
-  },
-  volcano: {
-    name: "Magma Caverns", bg: "#240602", accent: "#ff3300",
-    desc: "Basalt ledges, moving magma lift & floating stones over boiling lava",
-    create(w) {
-      const b = [];
-      /* left basalt plateau with beveled transition ramp to high ledge */
-      b.push(Bodies.rectangle(170, ARENA_FLOOR_Y - 14, 320, 36, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(105, ARENA_FLOOR_Y - 48, 110, 18, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.42 }));
-      b.push(Bodies.rectangle(55, ARENA_FLOOR_Y - 75, 110, 20, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* right basalt plateau with beveled transition ramp */
-      b.push(Bodies.rectangle(W - 170, ARENA_FLOOR_Y - 14, 320, 36, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W - 105, ARENA_FLOOR_Y - 48, 110, 18, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.42 }));
-      b.push(Bodies.rectangle(W - 55, ARENA_FLOOR_Y - 75, 110, 20, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* floating stepping stone platforms over lava */
-      b.push(Bodies.rectangle(W / 2 - 145, ARENA_FLOOR_Y - 35, 75, 18, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W / 2 + 145, ARENA_FLOOR_Y - 35, 75, 18, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* central moving basalt lift pillar */
-      const pillar = Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 45, 130, 22, { isStatic: true, label: "terrain", friction: 0.9 });
-      b.push(pillar);
-      /* lethal bubbling magma pit below */
-      const lava = Bodies.rectangle(W / 2, H + 15, W, 40, { isStatic: true, label: "hazard_lava", isSensor: true });
-      b.push(lava);
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      b.forEach(bd => World.add(w, bd));
-      const hazards = [
-        { type: "pillar", body: pillar, baseY: ARENA_FLOOR_Y - 45, range: 75, speed: 1.5, t: 0 },
-        { type: "lava_burst", timer: 0 }
-      ];
-      return { bodies: b, spawns: [{ x: 190, y: ARENA_FLOOR_Y - 60 }, { x: W - 190, y: ARENA_FLOOR_Y - 60 }], hazards };
-    }
-  },
-  ovalTrack: {
-    name: "Super Speedway", bg: "#09140c", accent: "#00ff66",
-    desc: "High-speed banked bowl with neon turbo boost pads & crossover speed bridge",
-    create(w) {
-      const b = [];
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y + 20, W + 40, 40, { isStatic: true, label: "terrain", friction: 0.9 }));
-      /* multi-banked curves on left corner */
-      b.push(Bodies.rectangle(55, ARENA_FLOOR_Y - 75, 130, 20, { isStatic: true, label: "terrain", friction: 0.8, angle: -0.62 }));
-      b.push(Bodies.rectangle(140, ARENA_FLOOR_Y - 28, 90, 18, { isStatic: true, label: "terrain", friction: 0.8, angle: -0.28 }));
-      /* multi-banked curves on right corner */
-      b.push(Bodies.rectangle(W - 55, ARENA_FLOOR_Y - 75, 130, 20, { isStatic: true, label: "terrain", friction: 0.8, angle: 0.62 }));
-      b.push(Bodies.rectangle(W - 140, ARENA_FLOOR_Y - 28, 90, 18, { isStatic: true, label: "terrain", friction: 0.8, angle: 0.28 }));
-      /* center crossover speed bridge with double-sided approach ramps */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 105, 240, 16, { isStatic: true, label: "terrain", friction: 0.9 }));
-      b.push(Bodies.rectangle(W / 2 - 165, ARENA_FLOOR_Y - 55, 120, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.42 }));
-      b.push(Bodies.rectangle(W / 2 + 165, ARENA_FLOOR_Y - 55, 120, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.42 }));
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      b.forEach(bd => World.add(w, bd));
-      const boostPads = [
-        { x: 280, y: ARENA_FLOOR_Y, w: 75, dir: 1 },
-        { x: W - 280, y: ARENA_FLOOR_Y, w: 75, dir: -1 },
-      ];
-      return { bodies: b, spawns: [{ x: 250, y: ARENA_FLOOR_Y - 50 }, { x: W - 250, y: ARENA_FLOOR_Y - 50 }], hazards: [], boostPads, bumpers: [] };
-    }
-  },
-  scaffolding: {
-    name: "Skyline High-Rise", bg: "#0d0f1c", accent: "#ffbb00",
-    desc: "Multi-tier steel girders, ground access ramps & swinging wrecking ball",
-    create(w) {
-      const b = [];
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y + 20, W + 40, 40, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* diagonal access ramps connecting ground to 1st tier girders */
-      b.push(Bodies.rectangle(85, ARENA_FLOOR_Y - 45, 140, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.48 }));
-      b.push(Bodies.rectangle(230, ARENA_FLOOR_Y - 88, 200, 16, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W - 85, ARENA_FLOOR_Y - 45, 140, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.48 }));
-      b.push(Bodies.rectangle(W - 230, ARENA_FLOOR_Y - 88, 200, 16, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* center top girder */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 175, 300, 16, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* swinging wrecking ball pendulum */
-      const anchor = Bodies.circle(W / 2, 40, 12, { isStatic: true, label: "terrain" });
-      const ball = Bodies.circle(W / 2 + 120, 195, 26, { label: "wrecking_ball", density: 0.025, friction: 0.5, restitution: 0.45 });
-      const cable = Constraint.create({ bodyA: anchor, bodyB: ball, length: 170, stiffness: 0.95 });
-      b.push(anchor, ball);
-      World.add(w, [anchor, ball, cable]);
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      b.slice(3).forEach(bd => World.add(w, bd));
-      return { bodies: b, spawns: [{ x: 230, y: ARENA_FLOOR_Y - 120 }, { x: W - 230, y: ARENA_FLOOR_Y - 120 }], hazards: [], wreckingBall: ball, anchor };
-    }
-  },
-  pirateShip: {
-    name: "Seasaw Galleon", bg: "#090d22", accent: "#00bfa5",
-    desc: "Continuous wooden gun deck with tilting seesaw & companionway ramps",
-    create(w) {
-      const b = [];
-      /* continuous lower wooden hull floor */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y + 12, W - 80, 24, { isStatic: true, label: "terrain", friction: 0.9 }));
-      /* dynamic seesaw deck */
-      const plank = Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 28, 540, 20, { label: "terrain", friction: 0.95, density: 0.004 });
-      const pivot = Bodies.circle(W / 2, ARENA_FLOOR_Y - 8, 12, { isStatic: true, label: "terrain" });
-      const joint = Constraint.create({ bodyA: pivot, bodyB: plank, pointA: { x: 0, y: 0 }, pointB: { x: 0, y: 8 }, length: 0, stiffness: 0.85 });
-      b.push(plank, pivot);
-      World.add(w, [plank, pivot, joint]);
-      /* stopper blocks */
-      const stopL = Bodies.rectangle(W / 2 - 230, ARENA_FLOOR_Y + 6, 50, 22, { isStatic: true, label: "terrain", friction: 0.9 });
-      const stopR = Bodies.rectangle(W / 2 + 230, ARENA_FLOOR_Y + 6, 50, 22, { isStatic: true, label: "terrain", friction: 0.9 });
-      b.push(stopL, stopR);
-      World.add(w, [stopL, stopR]);
-      /* outer bow and stern decks with companionway ramps down to lower deck */
-      b.push(Bodies.rectangle(80, ARENA_FLOOR_Y - 70, 140, 18, { isStatic: true, label: "terrain", friction: 0.9 }));
-      b.push(Bodies.rectangle(170, ARENA_FLOOR_Y - 34, 75, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.48 }));
-      b.push(Bodies.rectangle(W - 80, ARENA_FLOOR_Y - 70, 140, 18, { isStatic: true, label: "terrain", friction: 0.9 }));
-      b.push(Bodies.rectangle(W - 170, ARENA_FLOOR_Y - 34, 75, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.48 }));
-      /* ocean hazard pit below hull */
-      const ocean = Bodies.rectangle(W / 2, H + 25, W, 30, { isStatic: true, label: "hazard_pit", isSensor: true });
-      b.push(ocean);
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      b.slice(4).forEach(bd => World.add(w, bd));
-      return { bodies: b, spawns: [{ x: W / 2 - 160, y: ARENA_FLOOR_Y - 70 }, { x: W / 2 + 160, y: ARENA_FLOOR_Y - 70 }], hazards: [], seesaw: plank };
-    }
-  },
-  winterCliff: {
-    name: "Aurora Glaciers", bg: "#081528", accent: "#00f0ff",
-    desc: "Frosted glacier with Aurora Borealis, high-grip snow banks & smooth ice ramps",
-    create(w) {
-      const b = [];
-      /* ice floor with moderate drift friction */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y + 20, W + 40, 40, { isStatic: true, label: "terrain", friction: 0.08 }));
-      /* left corner solid snow bank & smooth curved ice ramp */
-      b.push(Bodies.rectangle(25, ARENA_FLOOR_Y - 95, 52, 90, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(70, ARENA_FLOOR_Y - 58, 130, 18, { isStatic: true, label: "terrain", friction: 0.15, angle: -0.48 }));
-      b.push(Bodies.rectangle(150, ARENA_FLOOR_Y - 20, 100, 16, { isStatic: true, label: "terrain", friction: 0.18, angle: -0.2 }));
-      /* right corner solid snow bank & smooth curved ice ramp */
-      b.push(Bodies.rectangle(W - 25, ARENA_FLOOR_Y - 95, 52, 90, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W - 70, ARENA_FLOOR_Y - 58, 130, 18, { isStatic: true, label: "terrain", friction: 0.15, angle: 0.48 }));
-      b.push(Bodies.rectangle(W - 150, ARENA_FLOOR_Y - 20, 100, 16, { isStatic: true, label: "terrain", friction: 0.18, angle: 0.2 }));
-      /* center double-sided ice jump hill */
-      b.push(Bodies.rectangle(W / 2 - 80, ARENA_FLOOR_Y - 26, 140, 16, { isStatic: true, label: "terrain", friction: 0.12, angle: -0.26 }));
-      b.push(Bodies.rectangle(W / 2 + 80, ARENA_FLOOR_Y - 26, 140, 16, { isStatic: true, label: "terrain", friction: 0.12, angle: 0.26 }));
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 42, 60, 16, { isStatic: true, label: "terrain", friction: 0.2 }));
-      /* overhead frozen arch */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 150, 240, 16, { isStatic: true, label: "terrain", friction: 0.1 }));
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      b.forEach(bd => World.add(w, bd));
-      return { bodies: b, spawns: [{ x: 230, y: ARENA_FLOOR_Y - 60 }, { x: W - 230, y: ARENA_FLOOR_Y - 60 }], hazards: [] };
-    }
-  },
-  chaosBarn: {
-    name: "Demolition Derby", bg: "#1a1107", accent: "#ffaa00",
-    desc: "Double-sided hay jump pyramids, high-impulse TNT barrels & hay loft platform",
-    create(w) {
-      const b = [];
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y + 20, W + 40, 40, { isStatic: true, label: "terrain", friction: 0.9 }));
-      /* corner hay bales filling walls so cars never get wedged */
-      b.push(Bodies.rectangle(30, ARENA_FLOOR_Y - 35, 60, 70, { isStatic: true, label: "terrain", friction: 0.9 }));
-      b.push(Bodies.rectangle(W - 30, ARENA_FLOOR_Y - 35, 60, 70, { isStatic: true, label: "terrain", friction: 0.9 }));
-      /* LEFT DOUBLE-SIDED HAY PYRAMID RAMP (Driveable both ways!) */
-      b.push(Bodies.rectangle(115, ARENA_FLOOR_Y - 24, 110, 18, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.32 }));
-      b.push(Bodies.rectangle(170, ARENA_FLOOR_Y - 40, 40, 18, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(225, ARENA_FLOOR_Y - 24, 110, 18, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.32 }));
-      /* RIGHT DOUBLE-SIDED HAY PYRAMID RAMP (Driveable both ways!) */
-      b.push(Bodies.rectangle(W - 225, ARENA_FLOOR_Y - 24, 110, 18, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.32 }));
-      b.push(Bodies.rectangle(W - 170, ARENA_FLOOR_Y - 40, 40, 18, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W - 115, ARENA_FLOOR_Y - 24, 110, 18, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.32 }));
-      /* overhead hay loft platform */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 110, 240, 18, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      /* 3 explosive TNT barrels */
-      const barrels = [];
-      const bXs = [W / 2 - 130, W / 2, W / 2 + 130];
-      for (const bx of bXs) {
-        const barrel = Bodies.rectangle(bx, ARENA_FLOOR_Y - 16, 24, 32, { isStatic: true, label: "barrel", friction: 0.9 });
-        b.push(barrel);
-        barrels.push({ body: barrel, alive: true, x: bx });
-      }
-      b.forEach(bd => World.add(w, bd));
-      return { bodies: b, spawns: [{ x: 200, y: ARENA_FLOOR_Y - 70 }, { x: W - 200, y: ARENA_FLOOR_Y - 70 }], hazards: [{ type: "barrels", barrels }], bumpers: [] };
-    }
-  },
-  duneSaws: {
-    name: "Dune Saws", bg: "#181106", accent: "#e0b040",
-    desc: "Undulating double camel-hump sand dunes, lower steel trusses & dual wall buzzsaws",
-    create(w) {
-      const b = [];
-      /* main sub-floor underneath dunes */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y + 20, W + 40, 40, { isStatic: true, label: "terrain", friction: 0.9 }));
-      /* corner fill blocks flush with walls so cars never get wedged */
-      b.push(Bodies.rectangle(25, ARENA_FLOOR_Y - 80, 52, 120, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W - 25, ARENA_FLOOR_Y - 80, 52, 120, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* LEFT CAMEL DUNE: climb ramp, crest, and descent to center */
-      b.push(Bodies.rectangle(120, ARENA_FLOOR_Y - 44, 150, 24, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.42 }));
-      b.push(Bodies.rectangle(230, ARENA_FLOOR_Y - 76, 110, 24, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(340, ARENA_FLOOR_Y - 44, 140, 24, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.40 }));
-      /* CENTRAL VALLEY TROUGH */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 14, 90, 22, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* RIGHT CAMEL DUNE: ascent from center, crest, and descent to right wall */
-      b.push(Bodies.rectangle(W - 340, ARENA_FLOOR_Y - 44, 140, 24, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.40 }));
-      b.push(Bodies.rectangle(W - 230, ARENA_FLOOR_Y - 76, 110, 24, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W - 120, ARENA_FLOOR_Y - 44, 150, 24, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.42 }));
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      /* dual giant wall-mounted rotating buzzsaws */
-      const sawL = Bodies.circle(65, ARENA_FLOOR_Y - 135, 34, { isStatic: true, label: "hazard_saw" });
-      const sawR = Bodies.circle(W - 65, ARENA_FLOOR_Y - 135, 34, { isStatic: true, label: "hazard_saw" });
-      b.push(sawL, sawR);
-      b.forEach(bd => World.add(w, bd));
-      const hazards = [
-        { type: "wall_saw", body: sawL, x: 65, y: ARENA_FLOOR_Y - 135, radius: 34, dir: 1 },
-        { type: "wall_saw", body: sawR, x: W - 65, y: ARENA_FLOOR_Y - 135, radius: 34, dir: -1 },
-      ];
-      return { bodies: b, spawns: [{ x: 230, y: ARENA_FLOOR_Y - 110 }, { x: W - 230, y: ARENA_FLOOR_Y - 110 }], hazards, bumpers: [] };
-    }
-  },
-  hydroDeck: {
-    name: "Hydro Facility", bg: "#06121a", accent: "#00e5ff",
-    desc: "Arched steel overpass catwalk, suspended pylon bridge & cyan water hazard pool",
-    create(w) {
-      const b = [];
-      /* lethal water pool across the bottom chasm */
-      const water = Bodies.rectangle(W / 2, H + 18, W + 40, 36, { isStatic: true, label: "hazard_water", isSensor: true });
-      b.push(water);
-      /* outer landing docks with beveled safety edges */
-      b.push(Bodies.rectangle(75, ARENA_FLOOR_Y - 60, 150, 20, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W - 75, ARENA_FLOOR_Y - 60, 150, 20, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* lower suspended steel bridge deck spanning above water */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 25, 460, 20, { isStatic: true, label: "terrain", friction: 0.85 }));
-      /* diagonal pylon support struts connecting docks to lower deck */
-      b.push(Bodies.rectangle(195, ARENA_FLOOR_Y + 5, 140, 18, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.32 }));
-      b.push(Bodies.rectangle(W - 195, ARENA_FLOOR_Y + 5, 140, 18, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.32 }));
-      /* upper arched catwalk overpass spanning upper center */
-      b.push(Bodies.rectangle(W / 2 - 170, ARENA_FLOOR_Y - 115, 130, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: -0.35 }));
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 145, 230, 16, { isStatic: true, label: "terrain", friction: 0.85 }));
-      b.push(Bodies.rectangle(W / 2 + 170, ARENA_FLOOR_Y - 115, 130, 16, { isStatic: true, label: "terrain", friction: 0.85, angle: 0.35 }));
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      b.forEach(bd => World.add(w, bd));
-      return { bodies: b, spawns: [{ x: 90, y: ARENA_FLOOR_Y - 95 }, { x: W - 90, y: ARENA_FLOOR_Y - 95 }], hazards: [{ type: "water_pool" }], bumpers: [] };
-    }
-  },
-  colosseum: {
-    name: "The Thunderdome", bg: "#16131c", accent: "#ffd700",
-    desc: "Enclosed cobblestone oval bowl with 360° centrifugal wall-riding physics",
-    create(w) {
-      const b = [];
-      /* main bottom stone floor */
-      b.push(Bodies.rectangle(W / 2, ARENA_FLOOR_Y + 20, 520, 40, { isStatic: true, label: "terrain", friction: 0.95 }));
-      /* left curved banking sectors into vertical wall */
-      b.push(Bodies.rectangle(200, ARENA_FLOOR_Y - 20, 130, 24, { isStatic: true, label: "terrain", friction: 0.95, angle: -0.35 }));
-      b.push(Bodies.rectangle(120, ARENA_FLOOR_Y - 68, 120, 24, { isStatic: true, label: "terrain", friction: 0.95, angle: -0.75 }));
-      b.push(Bodies.rectangle(65, ARENA_FLOOR_Y - 145, 24, 120, { isStatic: true, label: "terrain", friction: 0.95 }));
-      b.push(Bodies.rectangle(110, ARENA_FLOOR_Y - 220, 110, 24, { isStatic: true, label: "terrain", friction: 0.95, angle: 0.65 }));
-      /* right curved banking sectors into vertical wall */
-      b.push(Bodies.rectangle(W - 200, ARENA_FLOOR_Y - 20, 130, 24, { isStatic: true, label: "terrain", friction: 0.95, angle: 0.35 }));
-      b.push(Bodies.rectangle(W - 120, ARENA_FLOOR_Y - 68, 120, 24, { isStatic: true, label: "terrain", friction: 0.95, angle: 0.75 }));
-      b.push(Bodies.rectangle(W - 65, ARENA_FLOOR_Y - 145, 24, 120, { isStatic: true, label: "terrain", friction: 0.95 }));
-      b.push(Bodies.rectangle(W - 110, ARENA_FLOOR_Y - 220, 110, 24, { isStatic: true, label: "terrain", friction: 0.95, angle: -0.65 }));
-      /* arched stone ceiling */
-      b.push(Bodies.rectangle(W / 2, 70, 680, 26, { isStatic: true, label: "terrain", friction: 0.9 }));
-      /* walls */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      b.forEach(bd => World.add(w, bd));
-      return { bodies: b, spawns: [{ x: 270, y: ARENA_FLOOR_Y - 50 }, { x: W - 270, y: ARENA_FLOOR_Y - 50 }], hazards: [], bumpers: [] };
-    }
-  },
-  catacombs: {
-    name: "Bone Catacombs", bg: "#0a140d", accent: "#55bb55",
-    desc: "Mossy stone fortress, central bone bridge over boiling lava & swinging skeleton pendulum",
-    create(w) {
-      const b = [];
-      /* left cliff fortress with bowl depression */
-      b.push(Bodies.rectangle(80, ARENA_FLOOR_Y - 70, 150, 30, { isStatic: true, label: "terrain", friction: 0.9 }));
-      b.push(Bodies.rectangle(175, ARENA_FLOOR_Y - 45, 110, 22, { isStatic: true, label: "terrain", friction: 0.9, angle: 0.36 }));
-      b.push(Bodies.rectangle(260, ARENA_FLOOR_Y - 20, 80, 26, { isStatic: true, label: "terrain", friction: 0.9 }));
-      /* right cliff fortress with bowl depression */
-      b.push(Bodies.rectangle(W - 80, ARENA_FLOOR_Y - 70, 150, 30, { isStatic: true, label: "terrain", friction: 0.9 }));
-      b.push(Bodies.rectangle(W - 175, ARENA_FLOOR_Y - 45, 110, 22, { isStatic: true, label: "terrain", friction: 0.9, angle: -0.36 }));
-      b.push(Bodies.rectangle(W - 260, ARENA_FLOOR_Y - 20, 80, 26, { isStatic: true, label: "terrain", friction: 0.9 }));
-      /* deep boiling lava chasm below */
-      const lava = Bodies.rectangle(W / 2, H + 18, 480, 36, { isStatic: true, label: "hazard_lava", isSensor: true });
-      b.push(lava);
-      /* central ivory bone suspension bridge across the chasm */
-      const bone1 = Bodies.rectangle(W / 2 - 100, ARENA_FLOOR_Y - 16, 110, 14, { isStatic: true, label: "bone_bridge", friction: 0.85, angle: 0.10 });
-      const bone2 = Bodies.rectangle(W / 2, ARENA_FLOOR_Y - 10, 100, 14, { isStatic: true, label: "bone_bridge", friction: 0.85 });
-      const bone3 = Bodies.rectangle(W / 2 + 100, ARENA_FLOOR_Y - 16, 110, 14, { isStatic: true, label: "bone_bridge", friction: 0.85, angle: -0.10 });
-      b.push(bone1, bone2, bone3);
-      /* swinging skeleton pendulum from ceiling */
-      const anchor = Bodies.circle(W / 2, 40, 10, { isStatic: true, label: "terrain" });
-      const skull = Bodies.circle(W / 2 + 80, 185, 20, { label: "skeleton_bob", density: 0.02, friction: 0.5, restitution: 0.4 });
-      const chain = Constraint.create({ bodyA: anchor, bodyB: skull, length: 155, stiffness: 0.95 });
-      b.push(anchor, skull);
-      World.add(w, [anchor, skull, chain]);
-      /* walls & ceiling */
-      b.push(Bodies.rectangle(-10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W + 10, H / 2, 20, H + 100, { isStatic: true, label: "wall" }));
-      b.push(Bodies.rectangle(W / 2, -10, W + 40, 20, { isStatic: true, label: "wall" }));
-      b.slice(8).forEach(bd => World.add(w, bd));
-      const hazards = [
-        { type: "skeleton", anchor, bob: skull }
-      ];
-      return { bodies: b, spawns: [{ x: 120, y: ARENA_FLOOR_Y - 105 }, { x: W - 120, y: ARENA_FLOOR_Y - 105 }], hazards, skeletonBob: skull, anchor, bumpers: [] };
-    }
-  },
-};
-const ARENA_KEYS = Object.keys(ARENAS);
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 4: SAVE & STATS
- * ═══════════════════════════════════════════════════════════════ */
-function getProgress() {
-  return loadSlot("headbutt-progress") || { wins: 0, bestStreak: 0 };
+function humanInput(idx) {
+  if (game.cfg.mode === "friend") {
+    if (idx === 0) return { throttle: (down("KeyD") ? 1 : 0) - (down("KeyA") ? 1 : 0), boost: down("KeyW") };
+    // Right-hand player drives toward the left: ← is "forward"
+    return { throttle: (down("ArrowLeft") ? 1 : 0) - (down("ArrowRight") ? 1 : 0), boost: down("ArrowUp") };
+  }
+  const throttle = (down("KeyD", "ArrowRight") || touch.r ? 1 : 0) - (down("KeyA", "ArrowLeft") || touch.l ? 1 : 0);
+  return { throttle, boost: down("KeyW", "ArrowUp", "Space") || touch.boost };
 }
-function setProgress(p) { saveSlot("headbutt-progress", p); }
 
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 5: GAME STATE
- * ═══════════════════════════════════════════════════════════════ */
-let mEngine, mWorld;
-let state = {
-  screen: S.GARAGE,           /* starts directly in garage */
-  aiDifficulty: 1,            /* 0=rookie, 1=veteran, 2=champion */
-  /* selections */
-  selP1: 0, selP2: 2, selArena: 0,
-  /* match stats */
+// ─────────────────────────── game state ───────────────────────────
+const fx = createParticles(900);
+const game = {
+  screen: "garage",
+  cfg: null,
   scores: [0, 0],
-  round: 0,
-  streak: 0,
-  /* vehicles & arena */
-  vehicles: [null, null],
-  arena: null,
-  roundTimer: ROUND_TIME,
-  suddenDeath: false,
-  countdownTimer: 0,
-  roundEndTimer: 0,
-  matchEndTimer: 0,
-  roundWinner: -1,
-  matchWinner: -1,
-  /* physics accumulator */
-  physicsAccum: 0,
-  /* visual effects */
-  particles: [],
-  weatherParticles: [],
-  screenShake: { x: 0, y: 0, intensity: 0 },
+  round: 1,
+  timer: ROUND_SECONDS,
+  overtime: false,
+  engine: null,
+  cars: [],
+  statics: [],
+  hazards: [],
+  seesaw: null,
+  crusher: null,
+  lavaRise: null,
+  liquid: null,
+  rising: false,
+  kin: [],
+  saws: [],
+  props: [],
+  floaters: [],
+  meteors: [],
+  meteorClock: 0,
+  simT: 0,
+  helmet: null,
+  knockouts: [],
+  result: null,
+  koClock: 0,
+  countdown: 0,
+  shake: 0,
+  cam: { x: W / 2, y: H / 2, z: 1 },
+  arenaArt: null,
+  excite: 0,
+  frame: 0,
+  stats: { headshots: [0, 0] }
 };
 
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 6: VEHICLE PHYSICS ASSEMBLY
- * ═══════════════════════════════════════════════════════════════ */
-function initPhysics() {
-  mEngine = Engine.create({
-    gravity: { x: 0, y: 1.15 },
-    positionIterations: 8,
-    velocityIterations: 8,
-  });
-  mWorld = mEngine.world;
-  Events.on(mEngine, "collisionStart", onCollision);
-}
-
-function clearPhysics() {
-  if (mEngine) {
-    Events.off(mEngine, "collisionStart", onCollision);
-    World.clear(mWorld, false);
-    Engine.clear(mEngine);
+// ─────────────────────────── world building ───────────────────────────
+function shapeBody(shape, opts) {
+  if (shape.rect) {
+    const [cx, cy, w, h] = shape.rect;
+    return Bodies.rectangle(cx, cy, w, h, { ...opts, angle: shape.angle || 0 });
   }
-  mEngine = null;
-  mWorld = null;
+  const pts = shape.poly.map(([x, y]) => ({ x, y }));
+  const c = Vertices.centre(pts);
+  const b = Bodies.fromVertices(c.x, c.y, [pts], opts);
+  // fromVertices recentres on the area centroid; put it back exactly where it was authored
+  const bc = Vertices.centre(b.vertices);
+  Body.setPosition(b, { x: b.position.x + (c.x - bc.x), y: b.position.y + (c.y - bc.y) });
+  return b;
 }
 
-function createVehicle(typeKey, spawnX, spawnY, playerIdx) {
-  const def = VEHICLES[typeKey];
+function createCar(idx, key, spawn, arena) {
+  const base = CARS[key];
+  const facing = idx === 0 ? 1 : -1;
+  const def = facing === 1 ? base : mirrorCar(base);
   const group = Body.nextGroup(true);
-  const cFilter = { group };
-
-  const density = def.mass / (def.chassisW * def.chassisH * 1.5);
-
-  const chassis = Bodies.rectangle(spawnX, spawnY, def.chassisW, def.chassisH, {
-    label: `p${playerIdx + 1}_chassis`,
-    collisionFilter: cFilter,
-    friction: 0.6,
-    frictionAir: 0.012,
-    restitution: def.restitution,
-    density,
+  const filter = { group };
+  const x0 = spawn.x;
+  const y0 = spawn.y;
+  const parts = def.parts.map((p) => {
+    const shp = p.rect ? { rect: [x0 + p.rect[0], y0 + p.rect[1], p.rect[2], p.rect[3]] } : { poly: p.poly.map(([x, y]) => [x0 + x, y0 + y]) };
+    return shapeBody(shp, { label: `p${idx}_body`, density: def.density, collisionFilter: filter, chamfer: p.rect ? { radius: 4 } : undefined });
   });
-
-  const rearWheel = Bodies.circle(
-    spawnX - def.wheelBase / 2, spawnY + def.chassisH / 2 + def.wheelRadius * 0.15,
-    def.wheelRadius, {
-      label: `p${playerIdx + 1}_rwheel`,
-      collisionFilter: cFilter,
-      friction: def.wheelFriction,
-      frictionAir: 0.01,
-      restitution: 0.15,
-      density: 0.003,
-    }
-  );
-
-  const frontWheel = Bodies.circle(
-    spawnX + def.wheelBase / 2, spawnY + def.chassisH / 2 + def.wheelRadius * 0.15,
-    def.wheelRadius, {
-      label: `p${playerIdx + 1}_fwheel`,
-      collisionFilter: cFilter,
-      friction: def.wheelFriction,
-      frictionAir: 0.01,
-      restitution: 0.15,
-      density: 0.003,
-    }
-  );
-
-  const headBody = Bodies.circle(
-    spawnX + def.headX, spawnY + def.headY,
-    HEAD_RADIUS, {
-      label: `p${playerIdx + 1}_head`,
-      collisionFilter: cFilter,
-      density: 0.0004,
-      restitution: 0.1,
-      friction: 0.3,
-    }
-  );
-
-  /* Axle suspension springs with damping */
-  const rearAxle = Constraint.create({
-    bodyA: chassis, bodyB: rearWheel,
-    pointA: { x: -def.wheelBase / 2, y: def.chassisH / 2 },
-    length: def.wheelRadius * 0.2, stiffness: 0.82, damping: 0.14,
-  });
-  const frontAxle = Constraint.create({
-    bodyA: chassis, bodyB: frontWheel,
-    pointA: { x: def.wheelBase / 2, y: def.chassisH / 2 },
-    length: def.wheelRadius * 0.2, stiffness: 0.82, damping: 0.14,
-  });
-
-  /* Head rigid pin */
-  const headPin = Constraint.create({
-    bodyA: chassis, bodyB: headBody,
-    pointA: { x: def.headX, y: def.headY },
-    length: 0, stiffness: 1, damping: 0,
-  });
-
-  const comp = Composite.create();
-  Composite.add(comp, [chassis, rearWheel, frontWheel, headBody, rearAxle, frontAxle, headPin]);
-
-  /* Sawbot special blade */
-  let bladeBody = null;
-  if (def.hasBlades) {
-    bladeBody = Bodies.circle(spawnX, spawnY + def.headY + 4, 14, {
-      label: `p${playerIdx + 1}_blade`,
-      collisionFilter: cFilter,
-      density: 0.0003, restitution: 0.1,
+  const head = Bodies.circle(x0 + def.head.x, y0 + def.head.y, def.head.r, { label: `p${idx}_head`, density: 0.0006, collisionFilter: filter });
+  const body = Body.create({ parts: [...parts, head], collisionFilter: filter, friction: 0.4, frictionAir: 0.008, restitution: 0.12 });
+  const com = { x: body.position.x, y: body.position.y };
+  const wheels = [];
+  const axles = [];
+  for (const w of def.wheels) {
+    const wheel = Bodies.circle(x0 + w.x, y0 + w.y, w.r, {
+      label: `p${idx}_wheel`,
+      density: def.density * 0.7,
+      friction: arena.friction,
+      frictionStatic: arena.friction * 1.4,
+      restitution: 0.08,
+      collisionFilter: filter
     });
-    const bladePin = Constraint.create({
-      bodyA: chassis, bodyB: bladeBody,
-      pointA: { x: 0, y: -def.chassisH / 2 - 8 },
-      length: 0, stiffness: 1, damping: 0,
-    });
-    Composite.add(comp, [bladeBody, bladePin]);
+    wheel.lastTouch = -99;
+    wheels.push(wheel);
+    axles.push(
+      Constraint.create({ bodyA: body, pointA: { x: x0 + w.x - com.x, y: y0 + w.y - com.y }, bodyB: wheel, pointB: { x: 0, y: 0 }, stiffness: 0.32, damping: 0.16, length: 0 })
+    );
   }
-
-  World.add(mWorld, comp);
-
   return {
-    composite: comp, chassis, rearWheel, frontWheel, headBody, bladeBody,
-    typeKey, playerIdx, facing: playerIdx === 0 ? 1 : -1,
-    throttle: 0, targetThrottle: 0,
-    grounded: true,
-    jumpCooldown: 0, airTime: 0, stuckTimer: 0,
+    idx,
+    key,
+    base,
+    def,
+    facing,
+    body,
+    head,
+    wheels,
+    axles,
+    origin: { x: x0 - com.x, y: y0 - com.y },
+    boostCd: 0,
+    boostFx: 0,
+    input: { throttle: 0, boost: false },
+    headless: false,
+    color: idx === 0 ? "#00d8ff" : "#ff3b5c",
+    ai: null
   };
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 7: COLLISION & COMBAT
- * ═══════════════════════════════════════════════════════════════ */
-function isUpsideDown(angle) {
-  const norm = ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-  return norm > Math.PI / 2 && norm < 3 * Math.PI / 2;
+function buildRound() {
+  const arena = ARENAS[game.cfg.arena];
+  const engine = Engine.create({ positionIterations: 10, velocityIterations: 8, constraintIterations: 4 });
+  engine.gravity.y = arena.gravity;
+  const world = engine.world;
+  game.engine = engine;
+  game.statics = [];
+  game.hazards = [];
+  game.seesaw = null;
+  game.crusher = null;
+  game.lavaRise = null;
+  game.helmet = null;
+  game.knockouts = [];
+  game.overtime = false;
+  game.timer = ROUND_SECONDS;
+  game.liquid = arena.liquid ? { ...arena.liquid } : null;
+  game.rising = false;
+  game.kin = [];
+  game.saws = [];
+  game.props = [];
+  game.floaters = [];
+  game.meteors = [];
+  game.meteorClock = 1.5;
+  game.simT = 0;
+  buildFeatures(arena, world);
+
+  for (const s of arena.solids) {
+    const b = shapeBody(s, { isStatic: true, label: "world", friction: s.ice ? 0.02 : arena.friction });
+    b.shape = s;
+    game.statics.push(b);
+  }
+  for (const h of arena.hazards || []) {
+    const [cx, cy, w, hh] = h.rect;
+    const b = Bodies.rectangle(cx, cy, w, hh, { isStatic: true, isSensor: true, label: "hazard" });
+    b.kind = h.kind;
+    b.rect = [cx, cy, w, hh];
+    game.hazards.push(b);
+    if (h.kind === "lava") game.lavaRise = b;
+  }
+  if (arena.seesaw) {
+    const s = arena.seesaw;
+    const plank = Bodies.rectangle(s.x, s.y, s.w, s.h, { label: "world", density: 0.004, friction: arena.friction, frictionAir: 0.02, chamfer: { radius: 4 } });
+    const pin = Constraint.create({ pointA: { x: s.x, y: s.y }, bodyB: plank, pointB: { x: 0, y: 0 }, stiffness: 1, length: 0 });
+    game.seesaw = { plank, pin, w: s.w, h: s.h };
+  }
+  // Invisible walls and ceiling keep the fight on screen
+  const walls = [
+    Bodies.rectangle(-40, H / 2, 80, H * 3, { isStatic: true, label: "world" }),
+    Bodies.rectangle(W + 40, H / 2, 80, H * 3, { isStatic: true, label: "world" }),
+    Bodies.rectangle(W / 2, -140, W * 2, 80, { isStatic: true, label: "world" })
+  ];
+
+  const botCar = game.cfg.foeCar;
+  game.cars = [createCar(0, game.cfg.car, arena.spawns[0], arena), createCar(1, botCar, arena.spawns[1], arena)];
+  if (game.cfg.mode === "bot") game.cars[1].ai = { level: BOTS[game.cfg.bot], next: 0, throttle: 0, boost: false };
+  for (const c of game.cars) Composite.add(world, [c.body, ...c.wheels, ...c.axles]);
+  Composite.add(world, [...game.statics, ...game.hazards, ...walls]);
+  if (game.seesaw) Composite.add(world, [game.seesaw.plank, game.seesaw.pin]);
+
+  const onPairs = (evt) => {
+    for (const pair of evt.pairs) {
+      const a = pair.bodyA.label;
+      const b = pair.bodyB.label;
+      if (a === "meteor" && b !== "meteor") pair.bodyA.hit = true;
+      if (b === "meteor" && a !== "meteor") pair.bodyB.hit = true;
+      if (a.endsWith("_wheel")) pair.bodyA.lastTouch = game.frame;
+      if (b.endsWith("_wheel")) pair.bodyB.lastTouch = game.frame;
+      if (game.screen !== "play") continue;
+      const ko = contactOutcome(a, b) || hazardOutcome(a, b);
+      if (ko) {
+        const other = ko.loser === 0 ? 1 : 0;
+        const hitAt = pair.collision?.supports?.[0] || game.cars[ko.loser].head.position;
+        game.knockouts.push({ ...ko, x: hitAt.x, y: hitAt.y, by: ko.by, hitter: other, cow: !!(pair.bodyA.cow || pair.bodyB.cow) });
+      }
+    }
+  };
+  Events.on(engine, "collisionStart", onPairs);
+  Events.on(engine, "collisionActive", onPairs);
 }
 
-function onCollision(event) {
-  if (state.screen !== S.PLAYING) return;
-  for (const pair of event.pairs) {
-    const a = pair.bodyA.label, b = pair.bodyB.label;
-    /* Head-hit check */
-    const hit = checkHeadHit(a, b);
-    if (hit) { endRound(hit.winner); return; }
-    /* Blade check */
-    const blade = checkBladeHit(a, b);
-    if (blade) { endRound(blade.winner); return; }
-    /* Hazard check */
-    const haz = checkHazardHit(a, b);
-    if (haz) { endRound(1 - haz.loser); return; }
-    /* Barrel impact */
-    checkBarrelHit(pair);
-    /* Bumper kinetic deflection */
-    checkBumperHit(pair);
+// Moving parts are "kinematic": huge mass, no spin inertia, gravity cancelled, and steered onto an
+// exact path every step with a matching velocity so cars riding them are carried along.
+function makeKinematic(b) {
+  Body.setMass(b, 5000);
+  Body.setInertia(b, Infinity);
+  b.frictionAir = 0;
+  return b;
+}
+function steerKinematic(b, x, y, angle) {
+  const vs = BASE_MS / STEP_MS;
+  const vx = (x - b.position.x) * vs;
+  const vy = (y - b.position.y) * vs;
+  const va = (angle - b.angle) * vs;
+  Body.setPosition(b, { x, y });
+  Body.setAngle(b, angle);
+  Body.setVelocity(b, { x: vx, y: vy });
+  Body.setAngularVelocity(b, va);
+  const g = game.engine.gravity;
+  Body.applyForce(b, b.position, { x: 0, y: -b.mass * g.y * g.scale });
+}
+
+function buildFeatures(arena, world) {
+  const add = (...b) => Composite.add(world, b);
+  for (const s of arena.saws || []) {
+    const b = Bodies.circle(s.x, s.y, s.r, { isStatic: true, label: "saw" });
+    b.sawR = s.r;
+    b.spin = 9;
+    game.saws.push(b);
+    add(b);
+  }
+  for (const pr of arena.props || []) {
+    const b = shapeBody({ rect: pr.rect }, { label: "world", density: pr.density || 0.003, friction: arena.friction, chamfer: { radius: 2 } });
+    b.shape = { rect: pr.rect, deco: pr.deco };
+    game.props.push(b);
+    add(b);
+  }
+  for (const f of arena.floaters || []) {
+    const [cx, cy, w, h] = f.rect;
+    const opts = { label: "world", density: 0.0012, friction: f.deco === "ice" ? 0.12 : arena.friction, frictionAir: 0.01 };
+    let b;
+    if (f.deco === "barbell") {
+      const bar = Bodies.rectangle(cx, cy, w, h, opts);
+      bar.deco = "barbell";
+      const plates = [-1, 1].map((sgn) => {
+        const pl = Bodies.rectangle(cx + sgn * (w / 2 - 24), cy, 34, 96, opts);
+        pl.deco = "plate";
+        return pl;
+      });
+      b = Body.create({ parts: [bar, ...plates], label: "world", friction: arena.friction, frictionAir: 0.01 });
+    } else {
+      b = Bodies.rectangle(cx, cy, w, h, opts);
+      b.deco = f.deco;
+    }
+    b.fw = w;
+    b.fh = h;
+    game.floaters.push(b);
+    add(b);
+  }
+  if (arena.rotor) {
+    const r = arena.rotor;
+    const b = makeKinematic(Bodies.rectangle(r.x, r.y, r.w, r.h, { label: "world", friction: arena.friction, chamfer: { radius: 6 } }));
+    b.deco = "rotor";
+    game.kin.push({ body: b, path: (t) => [r.x, r.y, r.speed * t] });
+    add(b);
+  }
+  if (arena.pendulum) {
+    const pd = arena.pendulum;
+    const b = makeKinematic(Bodies.circle(pd.x, pd.y + pd.len, pd.r, { label: "saw" }));
+    b.sawR = pd.r;
+    b.pivot = pd;
+    game.kin.push({
+      body: b,
+      path: (t) => {
+        const th = pd.amp * Math.sin((t * Math.PI * 2) / pd.period);
+        return [pd.x + Math.sin(th) * pd.len, pd.y + Math.cos(th) * pd.len, t * 9];
+      }
+    });
+    add(b);
+  }
+  if (arena.dome) {
+    const d = arena.dome;
+    const parts = domeSegments(d).map((sg) => {
+      const part = Bodies.rectangle(d.x + sg.x, d.y + sg.y, sg.len, sg.thick, { angle: sg.angle, label: "world" });
+      part.deco = "cage";
+      return part;
+    });
+    const cage = makeKinematic(Body.create({ parts, label: "world", friction: arena.friction }));
+    Body.setPosition(cage, { x: d.x, y: d.y });
+    cage.isDome = true;
+    game.kin.push({ body: cage, path: (t) => [d.x, d.y, d.speed * t] });
+    add(cage);
+    if (d.saw) {
+      const rs = d.R * (1 + d.k) * 0.72;
+      const saw = makeKinematic(Bodies.circle(d.x + rs, d.y, 42, { label: "saw" }));
+      saw.sawR = 42;
+      game.kin.push({ body: saw, path: (t) => [d.x + Math.cos(d.speed * t) * rs, d.y + Math.sin(d.speed * t) * rs, t * 10] });
+      add(saw);
+    }
   }
 }
 
-function checkHeadHit(a, b) {
-  if (a === "p1_head" && b.startsWith("p2_") && b !== "p2_head") return { loser: 0, winner: 1 };
-  if (a === "p2_head" && b.startsWith("p1_") && b !== "p1_head") return { loser: 1, winner: 0 };
-  if (b === "p1_head" && a.startsWith("p2_") && a !== "p2_head") return { loser: 0, winner: 1 };
-  if (b === "p2_head" && a.startsWith("p1_") && a !== "p1_head") return { loser: 1, winner: 0 };
-  return null;
-}
-
-function checkBladeHit(a, b) {
-  if (a.endsWith("_blade") && b.startsWith("p") && !b.endsWith("_blade")) {
-    const pWinner = parseInt(a[1]) - 1;
-    const pHit = parseInt(b[1]) - 1;
-    if (pWinner !== pHit) return { winner: pWinner };
+// Per-step world features: moving parts, buoyancy, water drag, meteors
+function stepFeatures(dt) {
+  game.simT += dt;
+  const t = game.simT;
+  for (const k of game.kin) {
+    const [x, y, a] = k.path(t);
+    steerKinematic(k.body, x, y, a);
   }
-  if (b.endsWith("_blade") && a.startsWith("p") && !a.endsWith("_blade")) {
-    const pWinner = parseInt(b[1]) - 1;
-    const pHit = parseInt(a[1]) - 1;
-    if (pWinner !== pHit) return { winner: pWinner };
-  }
-  return null;
-}
-
-function checkHazardHit(a, b) {
-  const hazards = ["hazard_saw", "hazard_lava", "hazard_pit", "hazard_water"];
-  if (hazards.includes(a) && (b.startsWith("p1_") || b.startsWith("p2_"))) {
-    return { loser: b.startsWith("p1_") ? 0 : 1 };
-  }
-  if (hazards.includes(b) && (a.startsWith("p1_") || a.startsWith("p2_"))) {
-    return { loser: a.startsWith("p1_") ? 0 : 1 };
-  }
-  return null;
-}
-
-function checkBarrelHit(pair) {
-  const a = pair.bodyA, b = pair.bodyB;
-  let barrel = null, other = null;
-  if (a.label === "barrel") { barrel = a; other = b; }
-  else if (b.label === "barrel") { barrel = b; other = a; }
-  if (!barrel || !other.label.startsWith("p")) return;
-
-  if (state.arena && state.arena.hazards) {
-    for (const h of state.arena.hazards) {
-      if (h.type === "barrels") {
-        for (const br of h.barrels) {
-          if (br.body === barrel && br.alive) {
-            br.alive = false;
-            World.remove(mWorld, barrel);
-            const force = 0.06;
-            const dx = other.position.x - barrel.position.x;
-            const dy = other.position.y - barrel.position.y;
-            const len = Math.max(1, Math.hypot(dx, dy));
-            Body.applyForce(other, other.position, { x: (dx / len) * force, y: (dy / len) * force - 0.03 });
-            spawnExplosion(barrel.position.x, barrel.position.y);
-            shakeScreen(14);
-            playExplosion();
-          }
+  const L = game.liquid;
+  if (L) {
+    const g = game.engine.gravity;
+    for (const f of game.floaters) {
+      // Four sample points along the plank: each carries a quarter of the buoyancy, so load tips it
+      let wet = false;
+      const c = Math.cos(f.angle);
+      const sn = Math.sin(f.angle);
+      for (let i = 0; i < 4; i++) {
+        const u = (-0.375 + i * 0.25) * f.fw;
+        const px = f.position.x + c * u;
+        const py = f.position.y + sn * u;
+        const bottom = py + (f.fh / 2) * Math.abs(c);
+        const sub = Math.max(0, Math.min(1, (bottom - L.y) / f.fh));
+        if (sub > 0) {
+          wet = true;
+          Body.applyForce(f, { x: px, y: py }, { x: 0, y: -(sub * (f.area / 4) * WATER_DENSITY * g.y * g.scale) });
         }
       }
-    }
-  }
-}
-
-function checkBumperHit(pair) {
-  const a = pair.bodyA, b = pair.bodyB;
-  let bumper = null, other = null;
-  if (a.label === "bumper") { bumper = a; other = b; }
-  else if (b.label === "bumper") { bumper = b; other = a; }
-  if (!bumper || !other.label.startsWith("p")) return;
-
-  const dx = other.position.x - bumper.position.x;
-  const dy = other.position.y - bumper.position.y;
-  const len = Math.max(1, Math.hypot(dx, dy));
-  const pushForce = 0.045;
-  Body.applyForce(other, other.position, {
-    x: (dx / len) * pushForce,
-    y: (dy / len) * pushForce - 0.018
-  });
-  spawnSparks(other.position.x, other.position.y, 8, "#00f0ff");
-  playTone(720, 0.09, "square");
-  shakeScreen(7);
-}
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 8: VEHICLE JUMP & MOBILITY MECHANICS
- * ═══════════════════════════════════════════════════════════════ */
-export function jumpVehicle(veh) {
-  if (!veh || veh.jumpCooldown > 0) return false;
-  const def = VEHICLES[veh.typeKey];
-  const ch = veh.chassis;
-  const rw = veh.rearWheel;
-  const fw = veh.frontWheel;
-
-  const grounded = isVehicleGrounded(veh) || (veh.airTime || 0) < 0.15; // 150ms coyote time
-  const upsideDown = isUpsideDown(ch.angle);
-
-  // Can jump if grounded, or if upside-down for recovery
-  if (!grounded && !upsideDown && (veh.airTime || 0) > 0.35) {
-    return false;
-  }
-
-  veh.jumpCooldown = 0.32; // 320ms cooldown
-
-  const jumpMagnitude = -0.024 * def.mass;
-
-  if (upsideDown) {
-    /* Inverted recovery hop: upward pop + auto-righting rotational torque */
-    Body.applyForce(ch, ch.position, { x: 0, y: jumpMagnitude * 0.95 });
-    ch.torque += (veh.facing || 1) * 0.048 * def.mass;
-  } else {
-    /* Standard upward leap scaled to vehicle weight */
-    const sinA = Math.sin(ch.angle);
-    Body.applyForce(ch, ch.position, {
-      x: sinA * 0.18 * Math.abs(jumpMagnitude),
-      y: jumpMagnitude
-    });
-    Body.applyForce(rw, rw.position, { x: 0, y: jumpMagnitude * 0.35 });
-    Body.applyForce(fw, fw.position, { x: 0, y: jumpMagnitude * 0.35 });
-
-    /* Forward momentum leap if driving */
-    if (Math.abs(veh.throttle) > 0.1) {
-      const hopX = Math.sign(veh.throttle) * Math.abs(jumpMagnitude) * 0.28;
-      Body.applyForce(ch, ch.position, { x: hopX, y: 0 });
-    }
-  }
-
-  /* Audio and visual feedback */
-  playTone(300, 0.06, "triangle");
-  setTimeout(() => playTone(540, 0.08, "triangle"), 40);
-
-  spawnSparks(rw.position.x, rw.position.y + 4, 3, "#ffaa44");
-  spawnSparks(fw.position.x, fw.position.y + 4, 3, "#ffaa44");
-  shakeScreen(3);
-  return true;
-}
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 9: BOT AI (3 Tiers with Tactical Jumping)
- * ═══════════════════════════════════════════════════════════════ */
-let aiTimer = 0;
-let aiTargetThrottle = 0;
-
-function updateAI(dt) {
-  const difficulty = state.aiDifficulty;
-  const me = state.vehicles[1];
-  const opp = state.vehicles[0];
-  if (!me || !opp) return;
-
-  const meCh = me.chassis;
-  const oppCh = opp.chassis;
-  const dx = oppCh.position.x - meCh.position.x;
-  const dy = oppCh.position.y - meCh.position.y;
-
-  aiTimer -= dt;
-  if (aiTimer <= 0) {
-    if (difficulty === 0) {
-      /* Rookie: steady drive toward player with casual pauses */
-      aiTimer = 0.35 + Math.random() * 0.4;
-      aiTargetThrottle = dx > 0 ? 0.75 : -0.75;
-      if (Math.random() < 0.2) aiTargetThrottle = 0;
-      if (Math.random() < 0.08) jumpVehicle(me);
-    } else if (difficulty === 1) {
-      /* Veteran: accelerates toward player, retreats if player is airborne dive-bombing */
-      aiTimer = 0.15 + Math.random() * 0.25;
-      if (dy < -40 && Math.abs(dx) < 120) {
-        aiTargetThrottle = dx > 0 ? -0.85 : 0.85; /* dodge under falling player */
-      } else {
-        aiTargetThrottle = dx > 0 ? 0.95 : -0.95;
-      }
-      /* Tactical jump when opponent is above or close */
-      if (Math.random() < 0.14 && (dy < -25 || Math.abs(dx) < 140)) {
-        jumpVehicle(me);
-      }
-    } else {
-      /* Champion: aims directly for exposed head, executes mid-air flips & dive-bombs */
-      aiTimer = 0.08 + Math.random() * 0.15;
-      const headDx = opp.headBody.position.x - meCh.position.x;
-      aiTargetThrottle = headDx > 0 ? 1 : -1;
-
-      /* Champion leap attack */
-      if (opp.headBody.position.y < meCh.position.y || Math.abs(dx) < 130) {
-        if (Math.random() < 0.28) jumpVehicle(me);
+      if (wet) {
+        Body.setVelocity(f, { x: f.velocity.x * 0.985, y: f.velocity.y * 0.94 });
+        Body.setAngularVelocity(f, f.angularVelocity * 0.95);
       }
     }
-  }
-
-  /* AI stuck escape recovery: if bot is blocked against terrain, hop out! */
-  if (Math.abs(meCh.velocity.x) < 0.35 && Math.abs(aiTargetThrottle) > 0.4) {
-    me.stuckTimer = (me.stuckTimer || 0) + dt;
-    if (me.stuckTimer > 0.35) {
-      jumpVehicle(me);
-      me.stuckTimer = 0;
+    for (const b of [...game.cars.flatMap((c) => [c.body, ...c.wheels]), ...game.props]) {
+      if (b.position.y > L.y) Body.setVelocity(b, { x: b.velocity.x * 0.985, y: b.velocity.y * 0.975 });
     }
-  } else {
-    me.stuckTimer = 0;
   }
-
-  /* Smooth throttle transition for bot */
-  me.throttle = lerp(me.throttle, aiTargetThrottle, dt * 5.5);
-  applyVehiclePhysics(me, me.throttle);
+  // Meteors (and the odd flaming cow) in a flooding sudden death
+  const arena = ARENAS[game.cfg.arena];
+  if (game.rising && arena.meteors !== false && arena.overtime === "flood") {
+    game.meteorClock -= dt;
+    if (game.meteorClock <= 0) {
+      game.meteorClock = 0.7 + Math.random() * 0.9;
+      const cow = Math.random() < 0.08;
+      const x = 120 + Math.random() * (W - 240);
+      const m = cow ? Bodies.rectangle(x, -40, 46, 28, { label: "meteor", density: 0.002 }) : Bodies.circle(x, -40, 15, { label: "meteor", density: 0.003 });
+      m.cow = cow;
+      m.mr = cow ? 24 : 15;
+      Body.setVelocity(m, { x: (Math.random() - 0.5) * 5, y: 5 });
+      Body.setAngularVelocity(m, (Math.random() - 0.5) * 0.3);
+      game.meteors.push(m);
+      Composite.add(game.engine.world, m);
+    }
+  }
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 10: SMOOTH VEHICLE CONTROLS & PHYSICS
- * ═══════════════════════════════════════════════════════════════ */
-function isVehicleGrounded(veh) {
-  if (!state.arena || !state.arena.bodies) {
-    return veh.rearWheel.position.y >= ARENA_FLOOR_Y - 20 || veh.frontWheel.position.y >= ARENA_FLOOR_Y - 20;
+// After the physics step: burst meteors that hit something, sink the ones that missed
+function settleMeteors() {
+  for (let i = game.meteors.length - 1; i >= 0; i--) {
+    const m = game.meteors[i];
+    const inWater = game.liquid && m.position.y > game.liquid.y;
+    if (m.hit || inWater || m.position.y > H + 100) {
+      Composite.remove(game.engine.world, m);
+      game.meteors.splice(i, 1);
+      const { x, y } = m.position;
+      if (inWater && !m.hit) {
+        fx.burst(x, game.liquid.y, { count: 14, speed: 160, life: 0.6, size: 3, color: "#cfefff", kind: "pixel", drag: 0.95 });
+        continue;
+      }
+      fx.burst(x, y, { count: 22, speed: 240, life: 0.7, size: 4, color: "#ffd23f", color2: "#ff5a1f", kind: "spark", drag: 0.94 });
+      fx.spawn({ x, y, life: 0.5, size: 40, grow: 40, color: "#6a6a72", kind: "smoke", alpha: 0.6 });
+      game.shake = Math.max(game.shake, 6);
+      playExplosion({ duration: 0.3, lowpass: m.cow ? 900 : 500 });
+      if (m.cow) playTone(140, 0.4, "sawtooth", 0.1);
+    }
   }
-  const terrains = state.arena.bodies.filter(b => b.label === "terrain" || b.label === "bumper" || b.label === "barrel");
-  if (terrains.length === 0) return true;
-  const rwHits = Query.collides(veh.rearWheel, terrains);
-  if (rwHits.length > 0) return true;
-  const fwHits = Query.collides(veh.frontWheel, terrains);
-  if (fwHits.length > 0) return true;
-  const chHits = Query.collides(veh.chassis, terrains);
-  if (chHits.length > 0) return true;
+}
+
+// Is there ground (or anything solid) between (x, y) and the liquid surface?
+function groundBelow(x, y, limit) {
+  const solids = [...game.statics, ...game.props, ...game.floaters, ...game.kin.map((k) => k.body)];
+  for (let py = y; py < limit; py += 18) if (Query.point(solids, { x, y: py }).length) return true;
   return false;
 }
 
-function applyVehiclePhysics(veh, throttleInput) {
-  const def = VEHICLES[veh.typeKey];
-  const ch = veh.chassis;
-  const rw = veh.rearWheel;
-  const fw = veh.frontWheel;
-
-  if (veh.jumpCooldown > 0) veh.jumpCooldown -= PHYSICS_DT / 1000;
-
-  const inverted = isUpsideDown(ch.angle);
-  const effectiveThrottle = inverted ? -throttleInput : throttleInput;
-
-  /* Progressive non-linear throttle response for organic control feel */
-  const progressiveThrottle = Math.sign(effectiveThrottle) * Math.pow(Math.abs(effectiveThrottle), 1.25);
-
-  /* Precise collision-query grounding detection & coyote time tracking */
-  const grounded = isVehicleGrounded(veh);
-  veh.grounded = grounded;
+// ─────────────────────────── bot AI ───────────────────────────
+function normAngle(a) {
+  a %= Math.PI * 2;
+  if (a > Math.PI) a -= Math.PI * 2;
+  if (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+function botThink(car, foe, dt) {
+  const ai = car.ai;
+  const L = ai.level;
+  ai.next -= dt;
+  if (ai.next > 0) return;
+  ai.next = L.reaction * (0.7 + Math.random() * 0.6);
+  const me = car.body.position;
+  const foeHead = foe.head.position;
+  const dx = foeHead.x - me.x;
+  const grounded = car.wheels.some((w) => game.frame - w.lastTouch < 4);
+  const angle = normAngle(car.body.angle);
+  const toward = Math.sign(dx) || 1;
+  // "forward" for this car points along facing when upright
+  let throttle = toward * car.facing * L.aggression;
   if (grounded) {
-    veh.airTime = 0;
-  } else {
-    veh.airTime = (veh.airTime || 0) + (PHYSICS_DT / 1000);
-  }
-
-  if (Math.abs(progressiveThrottle) > 0.02) {
-    if (grounded) {
-      /* Drive force oriented along the vehicle chassis tangent */
-      const baseForce = def.driveForce * progressiveThrottle;
-      const cosA = Math.cos(ch.angle);
-      const sinA = Math.sin(ch.angle);
-      Body.applyForce(ch, ch.position, { x: cosA * baseForce, y: sinA * baseForce });
-
-      /* Natural physical torque applied to wheels */
-      const driveTorque = progressiveThrottle * (def.mass * 0.016);
-      rw.torque += driveTorque;
-      fw.torque += driveTorque * 0.7;
-
-      /* Rolling traction spin assistance */
-      const targetSpin = progressiveThrottle * (def.maxSpeed * 0.022);
-      Body.setAngularVelocity(rw, lerp(rw.angularVelocity, targetSpin, 0.08));
-      Body.setAngularVelocity(fw, lerp(fw.angularVelocity, targetSpin, 0.08));
-    } else {
-      /* Mid-air attitude stabilization / intentional aerial flips */
-      const airTorque = 0.0019 * progressiveThrottle * def.mass;
-      ch.torque += airTorque;
+    if (Math.abs(angle) > 2.2) {
+      // On the roof: rock back and forth to roll over
+      throttle = Math.sin(game.frame * 0.05) > 0 ? 1 : -1;
+    } else if (Math.abs(dx) < 110 && foeHead.y < me.y - 40) {
+      // Foe is above us: back off to line up a proper run at them
+      throttle = -toward * car.facing;
+    }
+    // Gaps (bridge seams, the rooftop drop): commit at speed, otherwise back off for a run-up
+    const vx = car.body.velocity.x;
+    const aheadX = me.x + Math.sign(vx || throttle * car.facing) * 110;
+    const gap = (ARENAS[game.cfg.arena].gaps || []).find(([a, b]) => aheadX > a - 20 && aheadX < b + 20);
+    if (gap) {
+      if (Math.abs(vx) > 6) ai.jump = true;
+      else if (!ai.jump && Math.random() > L.noise) throttle = -Math.sign(throttle) || 1;
+    } else ai.jump = false;
+    if (game.liquid && Math.abs(dx) > 150) {
+      const dir = Math.sign(throttle * car.facing) || 1;
+      if (!groundBelow(me.x + dir * 120, me.y - 20, game.liquid.y)) throttle = -throttle * 0.8;
     }
   } else {
-    /* Natural progressive rolling resistance */
-    Body.setAngularVelocity(rw, rw.angularVelocity * 0.92);
-    Body.setAngularVelocity(fw, fw.angularVelocity * 0.92);
+    // Airborne: rotate back toward upright (throttle spins the body in the air)
+    throttle = Math.abs(angle) < 0.25 ? 0 : -Math.sign(angle) * car.facing;
   }
+  if (Math.random() < L.noise * 0.5) throttle *= -0.5;
+  ai.throttle = Math.max(-1, Math.min(1, throttle));
+  ai.boost = grounded && car.boostCd <= 0 && Math.abs(angle) < 0.5 && ((Math.abs(dx) < 330 && Math.random() < L.boost) || ai.jump);
+}
 
-  /* Chassis pitch stabilization damping so vehicles don't wobble or jitter */
-  if (Math.abs(ch.angularVelocity) > 0.0005) {
-    Body.setAngularVelocity(ch, ch.angularVelocity * 0.94);
-  }
+// ─────────────────────────── car control ───────────────────────────
+function driveCar(car, dt) {
+  const { def, facing, body, wheels } = car;
+  const inp = car.input;
+  const grounded = wheels.some((w) => game.frame - w.lastTouch < 4);
+  const target = inp.throttle * def.spin * facing;
+  for (const w of wheels) Body.setAngularVelocity(w, w.angularVelocity + (target - w.angularVelocity) * 0.12 * def.torque);
+  // Throttle also twists the chassis: small wheelies on the ground, controlled flips in the air
+  // (angular velocity is per 16.7 ms base step; ~0.12 ≈ one full turn a second)
+  const twist = -inp.throttle * facing * def.air * 0.3 * (grounded ? 0.12 : 1);
+  let av = body.angularVelocity + twist;
+  if (!inp.throttle && !grounded) av *= 0.985;
+  av = Math.max(-0.12, Math.min(0.12, av));
+  Body.setAngularVelocity(body, av);
 
-  /* Soft organic speed decay rather than harsh velocity snapping */
-  const maxSpd = def.maxSpeed || 10;
-  const speed = Math.hypot(ch.velocity.x, ch.velocity.y);
-  if (speed > maxSpd) {
-    const excess = speed - maxSpd;
-    const damping = Math.max(0.86, 1 - excess * 0.03);
-    Body.setVelocity(ch, { x: ch.velocity.x * damping, y: ch.velocity.y });
+  car.boostCd = Math.max(0, car.boostCd - dt);
+  car.boostFx = Math.max(0, car.boostFx - dt);
+  if (inp.boost && car.boostCd <= 0) {
+    car.boostCd = BOOST_COOLDOWN;
+    car.boostFx = 0.35;
+    const ax = Math.cos(body.angle) * facing;
+    const ay = Math.sin(body.angle) * facing;
+    const kick = 9 * (def.boost / 0.03);
+    for (const b of [body, ...wheels]) Body.setVelocity(b, { x: b.velocity.x + ax * kick, y: b.velocity.y + ay * kick - 1.5 });
+    playTone(160, 0.18, "sawtooth", 0.08);
   }
 }
 
-function handlePlayerInput(dt) {
-  const p1 = state.vehicles[0];
-  if (!p1) return;
-
-  /* JUMP input: W, Up Arrow, Space, or in-arena tap */
-  if (input.wasPressed("KeyW") || input.wasPressed("ArrowUp") || input.wasPressed("Space")) {
-    jumpVehicle(p1);
-  }
-  if (input.mouse.clicked && input.mouse.y > 80 && input.mouse.y < ARENA_FLOOR_Y) {
-    jumpVehicle(p1);
-  }
-
-  /* Player controls: A/D or Left/Right or virtual stick */
-  let target = 0;
-  if (input.isDown("KeyA") || input.isDown("ArrowLeft")) target = -1;
-  if (input.isDown("KeyD") || input.isDown("ArrowRight")) target = 1;
-  if (input.stick.active && Math.abs(input.stick.x) > 0.25) {
-    target = input.stick.x > 0 ? 1 : -1;
-  }
-
-  /* Smooth progressive throttle ramp-up and coast-down */
-  if (target !== 0) {
-    p1.throttle = lerp(p1.throttle, target, dt * 5.2);
-  } else {
-    p1.throttle = lerp(p1.throttle, 0, dt * 7.5);
-  }
-
-  applyVehiclePhysics(p1, p1.throttle);
-
-  /* Speedway boost pads */
-  if (state.arena && state.arena.boostPads) {
-    for (const pad of state.arena.boostPads) {
-      if (Math.abs(p1.chassis.position.x - pad.x) < pad.w / 2 && Math.abs(p1.chassis.position.y - pad.y) < 30) {
-        Body.applyForce(p1.chassis, p1.chassis.position, { x: pad.dir * 0.016, y: -0.005 });
-        spawnSparks(p1.chassis.position.x, p1.chassis.position.y + 10, 3, "#00ff66");
-      }
-    }
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 10: PARTICLES & SCREEN SHAKE
- * ═══════════════════════════════════════════════════════════════ */
-function spawnParticle(x, y, vx, vy, color, life, size) {
-  state.particles.push({ x, y, vx, vy, color, life, maxLife: life, size: size || 3 });
-}
-
-function spawnSparks(x, y, count, color) {
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 1.5 + Math.random() * 4;
-    spawnParticle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed - 2, color || "#ffaa00", 0.35 + Math.random() * 0.3, 2 + Math.random() * 2);
-  }
-}
-
-function spawnExplosion(x, y) {
-  for (let i = 0; i < 24; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 2 + Math.random() * 6;
-    const color = ["#ff3300", "#ff7700", "#ffcc00", "#ffffff"][Math.floor(Math.random() * 4)];
-    spawnParticle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed - 3, color, 0.45 + Math.random() * 0.4, 3 + Math.random() * 4);
-  }
-}
-
-function spawnHeadHitEffect(x, y) {
-  for (let i = 0; i < 35; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 2.5 + Math.random() * 8;
-    const color = ["#ff0055", "#00f0ff", "#ffffff", "#ffcc00"][Math.floor(Math.random() * 4)];
-    spawnParticle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed - 2, color, 0.5 + Math.random() * 0.5, 2 + Math.random() * 4);
-  }
-}
-
-function shakeScreen(intensity) {
-  state.screenShake.intensity = Math.max(state.screenShake.intensity, intensity);
-}
-
-function updateParticles(dt) {
-  for (let i = state.particles.length - 1; i >= 0; i--) {
-    const p = state.particles[i];
-    p.life -= dt;
-    if (p.life <= 0) { state.particles.splice(i, 1); continue; }
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.14; /* gravity */
-  }
-
-  if (state.screenShake.intensity > 0) {
-    state.screenShake.intensity *= 0.86;
-    if (state.screenShake.intensity < 0.3) state.screenShake.intensity = 0;
-    state.screenShake.x = (Math.random() - 0.5) * state.screenShake.intensity * 2;
-    state.screenShake.y = (Math.random() - 0.5) * state.screenShake.intensity * 2;
-  }
-}
-
-function renderParticles() {
-  for (const p of state.particles) {
-    const alpha = Math.max(0, p.life / p.maxLife);
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = p.color;
-    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
-    ctx.restore();
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 11: MATCH & ROUND MANAGEMENT
- * ═══════════════════════════════════════════════════════════════ */
+// ─────────────────────────── flow ───────────────────────────
 function startMatch() {
-  state.scores = [0, 0];
-  state.round = 0;
-  state.matchWinner = -1;
-  startCountdown();
+  sfx.click();
+  const foeCar = prefs.foeCar === "random" ? CAR_KEYS[Math.floor(Math.random() * CAR_KEYS.length)] : prefs.foeCar;
+  const arenaKey = prefs.arena === "random" ? ARENA_KEYS[Math.floor(Math.random() * ARENA_KEYS.length)] : prefs.arena;
+  game.cfg = { car: prefs.car, foeCar, arena: arenaKey, bot: prefs.bot, mode: prefs.mode };
+  game.scores = [0, 0];
+  game.round = 1;
+  game.stats = { headshots: [0, 0] };
+  game.arenaArt = art.buildArenaArt(game.cfg.arena, ARENAS[game.cfg.arena]);
+  overlay.hidden = true;
+  overlay.innerHTML = "";
+  canvas.focus({ preventScroll: true });
+  beginRound();
 }
 
-function startCountdown() {
-  clearPhysics();
-  initPhysics();
-  state.round++;
-
-  const arenaKey = ARENA_KEYS[state.selArena];
-  const arenaDef = ARENAS[arenaKey];
-  state.arena = arenaDef.create(mWorld);
-  state.arena.key = arenaKey;
-
-  const sp = state.arena.spawns;
-  const p1Key = VEHICLE_KEYS[state.selP1];
-  const p2Key = VEHICLE_KEYS[state.selP2];
-  state.vehicles[0] = createVehicle(p1Key, sp[0].x, sp[0].y, 0);
-  state.vehicles[1] = createVehicle(p2Key, sp[1].x, sp[1].y, 1);
-
-  state.screen = S.COUNTDOWN;
-  state.countdownTimer = COUNTDOWN_SECS + 0.4;
-  state.roundTimer = ROUND_TIME;
-  state.suddenDeath = false;
-  state.roundWinner = -1;
-  state.particles = [];
-  aiTimer = 0;
-  aiTargetThrottle = 0;
+function beginRound() {
+  buildRound();
+  game.screen = "countdown";
+  game.countdown = 3.2;
+  game.result = null;
+  game.cam = { x: W / 2, y: H / 2, z: 1 };
+  fx.clear?.();
 }
 
-function startPlaying() {
-  state.screen = S.PLAYING;
+function knockout(res, kos) {
+  game.screen = "ko";
+  game.koClock = 0;
+  game.result = res;
+  game.excite = 1;
+  game.knockoutsBy = null;
+  if (res.draw) {
+    game.focus = { x: W / 2, y: H / 2 };
+    playExplosion({ duration: 0.4, lowpass: 400 });
+    return;
+  }
+  const loser = game.cars[res.loser];
+  const ko = kos.find((k) => k.loser === res.loser) || kos[0];
+  game.knockoutsBy = ko.by;
+  game.lastCow = !!ko.cow;
+  game.focus = { x: loser.head.position.x, y: loser.head.position.y };
+  const byCar = ko.by === "car";
+  if (byCar) game.stats.headshots[res.winner]++;
+  // Pop the helmet off and send it spinning away from the hit
+  const hx = loser.head.position.x;
+  const hy = loser.head.position.y;
+  const away = Math.sign(hx - (byCar ? game.cars[res.winner].body.position.x : W / 2)) || 1;
+  const helmet = Bodies.circle(hx, hy, loser.def.head.r, { label: "helmet", restitution: 0.6, density: 0.001 });
+  Body.setVelocity(helmet, { x: away * 7, y: -11 });
+  Body.setAngularVelocity(helmet, away * 0.4);
+  Composite.add(game.engine.world, helmet);
+  game.helmet = { body: helmet, color: loser.color, r: loser.def.head.r };
+  loser.headless = true;
+  fx.burst(hx, hy, { count: 30, speed: 260, life: 1, size: 4, color: "#ffd23f", color2: "#ff3b5c", kind: "spark", drag: 0.95 });
+  fx.burst(hx, hy, { count: 18, speed: 160, life: 0.8, size: 3, color: "#ffffff", kind: "pixel", drag: 0.96 });
+  fx.spawn({ x: hx, y: hy, life: 0.4, size: 90, color: "#ffffff", kind: "ring", alpha: 0.9 });
+  game.shake = 14;
+  playExplosion({ duration: 0.6, lowpass: 700 });
+  playHit({ pitch: 90, duration: 0.3 });
 }
 
-function endRound(winner) {
-  if (state.screen !== S.PLAYING) return;
-  state.roundWinner = winner;
-  state.scores[winner]++;
-  state.screen = S.ROUND_END;
-  state.roundEndTimer = 2.4;
-
-  const loserHead = state.vehicles[1 - winner].headBody;
-  spawnHeadHitEffect(loserHead.position.x, loserHead.position.y);
-  shakeScreen(15);
-  playExplosion({ duration: 0.28 });
-  playTone(620, 0.12, "square");
-  setTimeout(() => playTone(940, 0.18, "square"), 120);
-
-  if (state.scores[winner] >= WINS_NEEDED) {
-    state.matchWinner = winner;
-  }
+function endKo() {
+  const res = game.result;
+  if (!res.draw) game.scores[res.winner]++;
+  const win = matchWinner(game.scores);
+  if (win !== -1) return endMatch(win);
+  game.round++;
+  beginRound();
 }
 
-function finishRound() {
-  if (state.matchWinner >= 0) {
-    state.screen = S.MATCH_END;
-    state.matchEndTimer = 4;
-
-    const p = getProgress();
-    if (state.matchWinner === 0) {
-      p.wins++;
-      state.streak++;
-      p.bestStreak = Math.max(p.bestStreak, state.streak);
-      toast({ title: "VICTORY! MATCH WON!", body: `Player defeated the Bot! Streak: ${state.streak}`, icon: "trophy" });
-    } else {
-      state.streak = 0;
-      toast({ title: "DEFEAT! BOT WINS MATCH", body: "Practice your aerial flips and try again!", icon: "skull" });
-    }
-    setProgress(p);
-    saveGameScore("headbutt", p.wins, `${p.wins} match wins`);
-  } else {
-    startCountdown();
+function endMatch(winner) {
+  game.screen = "matchEnd";
+  setEngineHum(false);
+  const youWon = winner === 0;
+  if (game.cfg.mode === "bot") {
+    if (youWon) record.wins++;
+    else record.losses++;
+    record.headshots += game.stats.headshots[0];
+    saveSlot("headbutt-record", record);
+    if (youWon) saveGameScore("headbutt", record.wins, `${record.wins} MATCH WINS`, { details: `${game.scores[0]}-${game.scores[1]} vs ${BOTS[game.cfg.bot].label} bot` });
   }
+  youWon ? sfx.win() : sfx.bad();
+  const title = game.cfg.mode === "friend" ? `PLAYER ${winner + 1} WINS` : youWon ? "VICTORY" : "DEFEATED";
+  overlay.hidden = false;
+  overlay.innerHTML = `
+    <div class="hb-panel hb-panel--result">
+      <p class="hb-kicker">${escapeHtml(ARENAS[game.cfg.arena].name.toUpperCase())} • ${game.cfg.mode === "friend" ? "VS FRIEND" : `${BOTS[game.cfg.bot].label} BOT`}</p>
+      <h2 class="hb-title ${youWon || game.cfg.mode === "friend" ? "is-win" : "is-loss"}">${title}</h2>
+      <p class="hb-score"><span style="color:#00d8ff">${game.scores[0]}</span> — <span style="color:#ff3b5c">${game.scores[1]}</span></p>
+      <p class="hb-note">${escapeHtml(CARS[game.cfg.car].name)} vs ${escapeHtml(CARS[game.cfg.foeCar].name)} • headshots ${game.stats.headshots[0]}–${game.stats.headshots[1]}</p>
+      ${game.cfg.mode === "bot" ? `<p class="hb-note">Career: ${record.wins} wins • ${record.losses} losses • ${record.headshots} headshots</p>` : ""}
+      <div class="hb-row">
+        <button type="button" class="btn btn--primary" data-act="rematch">REMATCH</button>
+        <button type="button" class="btn" data-act="garage">GARAGE</button>
+      </div>
+    </div>`;
+  overlay.querySelector("button")?.focus();
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 12: DYNAMIC HAZARDS UPDATE
- * ═══════════════════════════════════════════════════════════════ */
-function updateHazards(dt) {
-  if (!state.arena || !state.arena.hazards) return;
-  for (const h of state.arena.hazards) {
-    if (h.type === "saw") {
-      h.t += dt * h.speed * (state.suddenDeath ? 1.7 : 1);
-      const nx = h.baseX + Math.sin(h.t) * h.range;
-      Body.setPosition(h.body, { x: nx, y: h.body.position.y });
-      Body.setAngle(h.body, h.t * 6);
-      /* occasional spark from rail */
-      if (Math.random() < 0.25) {
-        spawnSparks(nx, h.body.position.y + 12, 1, "#ff8800");
-      }
-    } else if (h.type === "pillar") {
-      h.t += dt * h.speed;
-      const oldY = h.body.position.y;
-      const ny = h.baseY + Math.sin(h.t) * h.range;
-      const vy = (ny - oldY) / Math.max(0.001, dt);
-      Body.setPosition(h.body, { x: h.body.position.x, y: ny });
-      Body.setVelocity(h.body, { x: 0, y: vy });
-    } else if (h.type === "steam") {
-      h.timer = (h.timer || 0) + dt;
-      if (h.timer >= 3.5) {
-        h.active = true;
-        /* Billow upward steam particles */
-        for (let s = 0; s < 3; s++) {
-          spawnParticle(h.x + (Math.random() - 0.5) * 50, h.y - 8, (Math.random() - 0.5) * 2, -6 - Math.random() * 5, "rgba(220, 240, 255, 0.75)", 0.45, 6);
-        }
-        /* Blast vehicles into the air */
-        for (let v = 0; v < 2; v++) {
-          const veh = state.vehicles[v];
-          if (veh && Math.abs(veh.chassis.position.x - h.x) < 65 && veh.chassis.position.y > ARENA_FLOOR_Y - 140) {
-            Body.applyForce(veh.chassis, veh.chassis.position, { x: (Math.random() - 0.5) * 0.005, y: -0.026 * VEHICLES[veh.typeKey].mass });
-          }
-        }
-        if (h.timer >= 4.2) {
-          h.timer = 0;
-          h.active = false;
-        }
-      } else if (h.timer > 3.0) {
-        /* Pre-vent hiss */
-        spawnParticle(h.x + (Math.random() - 0.5) * 30, h.y - 4, (Math.random() - 0.5) * 1, -2 - Math.random() * 2, "rgba(220, 240, 255, 0.35)", 0.25, 3);
-      }
-    } else if (h.type === "lava_burst") {
-      h.timer = (h.timer || 0) + dt;
-      if (h.timer >= 2.5) {
-        h.timer = 0;
-        const bx = W / 2 + (Math.random() - 0.5) * 320;
-        for (let p = 0; p < 5; p++) {
-          spawnParticle(bx, H - 20, (Math.random() - 0.5) * 3.5, -6 - Math.random() * 6, Math.random() < 0.5 ? "#ff3300" : "#ffaa00", 0.65, 5);
-        }
-      }
-    } else if (h.type === "wall_saw") {
-      Body.setAngle(h.body, (h.body.angle || 0) + dt * 10 * h.dir);
-      if (Math.random() < 0.15) {
-        spawnSparks(h.x + (h.dir > 0 ? 25 : -25), h.y + (Math.random() - 0.5) * 20, 1, "#ffcc00");
-      }
-    } else if (h.type === "water_pool") {
-      if (Math.random() < 0.25) {
-        spawnParticle(Math.random() * W, ARENA_FLOOR_Y + 14, (Math.random() - 0.5) * 0.8, -1 - Math.random() * 2, "rgba(0, 240, 255, 0.6)", 0.4, 3);
-      }
-    }
+function togglePause() {
+  if (game.screen === "paused") {
+    game.screen = game.pausedFrom;
+    overlay.hidden = true;
+    overlay.innerHTML = "";
+    return;
   }
+  game.pausedFrom = game.screen;
+  game.screen = "paused";
+  setEngineHum(false);
+  overlay.hidden = false;
+  overlay.innerHTML = `
+    <div class="hb-panel hb-panel--small">
+      <h2 class="hb-title">PAUSED</h2>
+      <div class="hb-col">
+        <button type="button" class="btn btn--primary" data-act="resume">RESUME <small>Esc</small></button>
+        <button type="button" class="btn" data-act="rematch">RESTART MATCH</button>
+        <button type="button" class="btn" data-act="garage">QUIT TO GARAGE</button>
+      </div>
+    </div>`;
+  overlay.querySelector("button")?.focus();
 }
 
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 13: PROCEDURAL VEHICLE RENDERING
- * ═══════════════════════════════════════════════════════════════ */
-function drawWheel(x, y, angle, radius, color) {
-  ctx.save();
-  ctx.translate(x | 0, y | 0);
-  ctx.rotate(angle);
-  ctx.fillStyle = "#1e1e24";
-  ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = color || "#444";
-  ctx.beginPath(); ctx.arc(0, 0, radius * 0.55, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = "#383842"; ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(-radius + 1, 0); ctx.lineTo(radius - 1, 0);
-  ctx.moveTo(0, -radius + 1); ctx.lineTo(0, radius - 1);
-  ctx.stroke();
-  ctx.restore();
+// ─────────────────────────── garage ───────────────────────────
+const previewArena = () => (ARENAS[prefs.arena] ? prefs.arena : "stadium");
+const thumbCache = new Map();
+function arenaThumb(key) {
+  if (thumbCache.has(key)) return thumbCache.get(key);
+  const A = ARENAS[key];
+  const a = art.buildArenaArt(key, A);
+  const c = document.createElement("canvas");
+  c.width = 320;
+  c.height = 180;
+  const g = c.getContext("2d");
+  g.scale(0.25, 0.25);
+  g.drawImage(a.img, 0, 0);
+  art.drawCrowd(g, a.crowd, 0);
+  const vs = (b) => b.vertices.map((v) => [v.x, v.y]);
+  const drawShape = (shape) => {
+    if (shape.deco === "hidden") return;
+    const b = shapeBody(shape, { isStatic: true });
+    if (A.theme === "void") g.globalAlpha = 0.12;
+    art.drawSolid(g, A.theme, shape, vs(b));
+    g.globalAlpha = 1;
+  };
+  for (const sh of A.solids) drawShape(sh);
+  for (const pr of A.props || []) drawShape({ rect: pr.rect, deco: pr.deco });
+  for (const f of A.floaters || []) drawShape({ rect: f.rect, deco: f.deco === "barbell" ? "barbell" : f.deco });
+  if (A.rotor) drawShape({ rect: [A.rotor.x, A.rotor.y, A.rotor.w, A.rotor.h], deco: "rotor" });
+  if (A.dome) {
+    for (const sg of domeSegments(A.dome)) {
+      const b = Bodies.rectangle(A.dome.x + sg.x, A.dome.y + sg.y, sg.len, sg.thick, { angle: sg.angle, isStatic: true });
+      art.drawSolid(g, "dome", { deco: "cage" }, vs(b));
+    }
+    if (A.dome.saw) art.drawSaw(g, A.dome.x + A.dome.R * (1 + A.dome.k) * 0.72, A.dome.y, 42, 0);
+  }
+  for (const sw of A.saws || []) art.drawSaw(g, sw.x, sw.y, sw.r, 0);
+  if (A.pendulum) {
+    const pd = A.pendulum;
+    g.strokeStyle = "#8a93a3";
+    g.lineWidth = 6;
+    g.beginPath();
+    g.moveTo(pd.x, pd.y);
+    g.lineTo(pd.x, pd.y + pd.len);
+    g.stroke();
+    art.drawSaw(g, pd.x, pd.y + pd.len, pd.r, 0);
+  }
+  for (const h of A.hazards || []) {
+    const [cx, cy, w, hh] = h.rect;
+    if (h.kind === "lava") art.drawLava(g, cx - w / 2, cy - hh / 2, w, hh, 0);
+    else art.drawSpikes(g, cx - w / 2, cy - hh / 2, w, hh);
+  }
+  if (A.seesaw) {
+    const ss = A.seesaw;
+    art.drawSolid(g, A.theme, { deco: "plank" }, [[ss.x - ss.w / 2, ss.y - ss.h / 2], [ss.x + ss.w / 2, ss.y - ss.h / 2], [ss.x + ss.w / 2, ss.y + ss.h / 2], [ss.x - ss.w / 2, ss.y + ss.h / 2]]);
+  }
+  if (A.liquid && A.liquid.y < 720) art.drawLiquid(g, A.liquid.y, A.liquid.kind, 0);
+  const url = c.toDataURL();
+  thumbCache.set(key, url);
+  return url;
 }
 
-function drawDriverHead(x, y, angle, playerIdx) {
-  const r = HEAD_RADIUS;
-  const t = performance.now() / 500;
-  const glow = 2.5 + Math.sin(t) * 1.5;
-
-  /* Helmet glow */
-  ctx.fillStyle = playerIdx === 0 ? "rgba(0, 240, 255, 0.28)" : "rgba(255, 60, 60, 0.28)";
-  ctx.beginPath(); ctx.arc(x | 0, y | 0, r + glow, 0, Math.PI * 2); ctx.fill();
-
-  /* Helmet body */
-  ctx.fillStyle = playerIdx === 0 ? "#00f0ff" : "#ff3355";
-  ctx.beginPath(); ctx.arc(x | 0, y | 0, r, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = "#000"; ctx.lineWidth = 1.5; ctx.stroke();
-
-  /* Dark visor */
-  ctx.save();
-  ctx.translate(x | 0, y | 0);
-  ctx.rotate(angle);
-  ctx.fillStyle = "rgba(10,10,20,0.75)";
-  ctx.fillRect(1, -3, 6, 5);
-  ctx.restore();
+// Paint thumbnails a few at a time after the garage appears, so opening it stays instant
+let thumbJob = 0;
+function fillThumbs() {
+  const job = ++thumbJob;
+  const pending = [...overlay.querySelectorAll("img[data-thumb]")];
+  const step = () => {
+    if (job !== thumbJob) return;
+    const t0 = performance.now();
+    while (pending.length && performance.now() - t0 < 12) {
+      const img = pending.shift();
+      img.src = arenaThumb(img.dataset.thumb);
+      img.removeAttribute("data-thumb");
+    }
+    if (pending.length) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
-const DRAW = {
-  goKart(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.fillStyle = "#222";
-    ctx.fillRect(2, -def.chassisH / 2 - 6, 12, 6);
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-  bmx(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.strokeStyle = def.color; ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(-def.chassisW / 2, 0); ctx.lineTo(0, -8);
-    ctx.lineTo(def.chassisW / 2, 0); ctx.lineTo(0, 4);
-    ctx.closePath(); ctx.stroke();
-    ctx.fillStyle = "#222"; ctx.fillRect(-4, -12, 8, 4);
-    ctx.restore();
-  },
-  muscleCar(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.fillStyle = def.color2;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW * 0.4, def.chassisH);
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(-def.chassisW / 2 + 4, -2, def.chassisW - 8, 3);
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-  ambulance(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.fillStyle = def.color2;
-    ctx.fillRect(-def.chassisW / 2, def.chassisH / 2 - 7, def.chassisW, 7);
-    ctx.fillStyle = "#dd3333";
-    ctx.fillRect(10, -def.chassisH / 2 + 5, 12, 3);
-    ctx.fillRect(14, -def.chassisH / 2 + 2, 4, 9);
-    const flash = Math.sin(performance.now() / 180) > 0;
-    ctx.fillStyle = flash ? "#ff0000" : "#880000";
-    ctx.fillRect(-4, -def.chassisH / 2 - 6, 8, 5);
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-  offRoader(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.strokeStyle = "#333"; ctx.lineWidth = 2;
-    ctx.strokeRect(-8, -def.chassisH / 2 - 10, 22, 10);
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-  rallyCar(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.fillStyle = def.color2;
-    ctx.fillRect(def.chassisW / 2 - 12, -def.chassisH / 2 - 8, 14, 4);
-    ctx.fillRect(def.chassisW / 2 - 4, -def.chassisH / 2 - 8, 3, 8);
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-  formulaCar(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.fillStyle = def.color2;
-    ctx.fillRect(-def.chassisW / 2 - 10, -def.chassisH / 2 - 2, 16, 3);
-    ctx.fillRect(def.chassisW / 2 - 6, -def.chassisH / 2 - 9, 14, 4);
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-  monsterTruck(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.fillStyle = "#ff4400";
-    ctx.beginPath();
-    ctx.moveTo(-def.chassisW / 2, def.chassisH / 2);
-    ctx.lineTo(-def.chassisW / 2 + 20, 0);
-    ctx.lineTo(-def.chassisW / 2 + 10, def.chassisH / 2);
-    ctx.fill();
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-  garbageTruck(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color2;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, 28, def.chassisH);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2 + 28, -def.chassisH / 2, def.chassisW - 28, def.chassisH);
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-  tank(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = "#3b4a1f";
-    ctx.fillRect(-def.chassisW / 2, -2, def.chassisW, def.chassisH / 2 + 2);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2 + 6, -def.chassisH / 2, def.chassisW - 12, def.chassisH / 2 + 2);
-    ctx.fillStyle = "#444";
-    ctx.fillRect(-def.chassisW / 2 - 16, -def.chassisH / 2 - 5, 28, 4);
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-  eggMobile(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, def.chassisW / 2, def.chassisH / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = def.color2;
-    ctx.beginPath(); ctx.arc(-8, -4, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, def.chassisW / 2, def.chassisH / 2, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  },
-  sawbot(cx, cy, a, def) {
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
-    ctx.fillStyle = def.color;
-    ctx.fillRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.fillStyle = "#dd8800";
-    for (let sx = -def.chassisW / 2; sx < def.chassisW / 2; sx += 10) {
-      ctx.fillRect(sx, def.chassisH / 2 - 4, 5, 4);
-    }
-    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
-    ctx.strokeRect(-def.chassisW / 2, -def.chassisH / 2, def.chassisW, def.chassisH);
-    ctx.restore();
-  },
-};
-
-function drawSawBlade(x, y, radius) {
-  const t = performance.now() / 70;
-  ctx.save();
-  ctx.translate(x | 0, y | 0);
-  ctx.rotate(t);
-  ctx.fillStyle = "#999";
-  ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#ff4400";
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(a) * (radius - 2), Math.sin(a) * (radius - 2));
-    ctx.lineTo(Math.cos(a) * (radius + 4), Math.sin(a) * (radius + 4));
-    ctx.lineTo(Math.cos(a + 0.2) * (radius - 2), Math.sin(a + 0.2) * (radius - 2));
-    ctx.fill();
-  }
-  ctx.strokeStyle = "#333"; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke();
-  ctx.restore();
-}
-
-function renderVehicle(veh) {
-  const def = VEHICLES[veh.typeKey];
-  const ch = veh.chassis;
-  const fw = veh.frontWheel;
-  const rw = veh.rearWheel;
-  const hd = veh.headBody;
-
-  /* Suspension strut rods */
-  ctx.strokeStyle = "#2a2a32"; ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(rw.position.x | 0, rw.position.y | 0);
-  ctx.lineTo(ch.position.x | 0, (ch.position.y + def.chassisH / 2) | 0);
-  ctx.moveTo(fw.position.x | 0, fw.position.y | 0);
-  ctx.lineTo(ch.position.x | 0, (ch.position.y + def.chassisH / 2) | 0);
-  ctx.stroke();
-
-  /* Wheels */
-  drawWheel(rw.position.x, rw.position.y, rw.angle, def.wheelRadius, def.color2);
-  drawWheel(fw.position.x, fw.position.y, fw.angle, def.wheelRadius, def.color2);
-
-  /* Chassis */
-  const drawFn = DRAW[veh.typeKey];
-  if (drawFn) drawFn(ch.position.x, ch.position.y, ch.angle, def);
-
-  /* Sawbot spinning roof blade */
-  if (veh.bladeBody) {
-    drawSawBlade(veh.bladeBody.position.x, veh.bladeBody.position.y, 14);
-  }
-
-  /* Driver helmet */
-  drawDriverHead(hd.position.x, hd.position.y, ch.angle, veh.playerIdx);
-}
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 14: ENHANCED ARENA RENDERING & PROCEDURAL TEXTURING
- * ═══════════════════════════════════════════════════════════════ */
-
-function drawStadiumBackdrop(key, def) {
-  const time = performance.now();
-
-  /* 1. Dynamic Atmosphere Sky Gradient */
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, def.bg);
-  grad.addColorStop(0.65, "#10091c");
-  grad.addColorStop(1, "#04020a");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  /* 2. Top Steel Ceiling Truss Girders */
-  ctx.fillStyle = "#1e1a28";
-  ctx.fillRect(0, 0, W, 18);
-  ctx.strokeStyle = "#383248";
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(0, 0, W, 18);
-  for (let tx = 0; tx < W; tx += 36) {
-    ctx.beginPath();
-    ctx.moveTo(tx, 0); ctx.lineTo(tx + 18, 18);
-    ctx.moveTo(tx + 36, 0); ctx.lineTo(tx + 18, 18);
-    ctx.stroke();
-  }
-
-  /* 3. Overhead Corner Stadium Floodlights with Angled Light Cones */
-  const lightGlow = Math.sin(time / 300) * 0.01 + 0.05;
-  /* Left Floodlight */
-  ctx.fillStyle = `rgba(255, 245, 210, ${lightGlow})`;
-  ctx.beginPath();
-  ctx.moveTo(90, 16); ctx.lineTo(-40, H); ctx.lineTo(340, H); ctx.closePath(); ctx.fill();
-  /* Right Floodlight */
-  ctx.fillStyle = `rgba(255, 245, 210, ${lightGlow})`;
-  ctx.beginPath();
-  ctx.moveTo(W - 90, 16); ctx.lineTo(W + 40, H); ctx.lineTo(W - 340, H); ctx.closePath(); ctx.fill();
-
-  /* Floodlight housing fixtures */
-  ctx.fillStyle = "#323746";
-  ctx.fillRect(72, 10, 36, 12);
-  ctx.fillRect(W - 108, 10, 36, 12);
-  ctx.fillStyle = "#ffffea";
-  ctx.fillRect(76, 18, 28, 4);
-  ctx.fillRect(W - 104, 18, 28, 4);
-
-  /* 4. Cheering Spectator Grandstands (Tiered Seating with Animated Pixel Crowd) */
-  const tY = [40, 75, 110];
-  const tColors = ["#181224", "#140e1e", "#100b18"];
-  const crowdShirtColors = ["#00f0ff", "#ff3355", "#ffaa00", "#00ff66", "#9933ff", "#ffffff", "#ff77aa"];
-
-  for (let tier = 0; tier < 3; tier++) {
-    const y = tY[tier];
-    ctx.fillStyle = tColors[tier];
-    ctx.fillRect(0, y, W, 34);
-    ctx.strokeStyle = "#241c34"; ctx.lineWidth = 1;
-    ctx.strokeRect(0, y, W, 34);
-
-    /* Spectators */
-    const fans = 54;
-    for (let f = 0; f < fans; f++) {
-      const fx = 12 + f * 17.5 + ((tier * 7) % 12);
-      const bob = Math.sin(time / 180 + f * 0.9 + tier * 1.5) > 0.35 ? -2 : 0;
-      /* Torso */
-      ctx.fillStyle = crowdShirtColors[(f * 3 + tier * 5) % crowdShirtColors.length];
-      ctx.fillRect(fx - 3, y + 16 + bob, 6, 8);
-      /* Head */
-      ctx.fillStyle = (f % 5 === 0) ? "#f8c89c" : (f % 5 === 1) ? "#d49a6a" : (f % 5 === 2) ? "#945a34" : "#ffe0bd";
-      ctx.fillRect(fx - 2, y + 10 + bob, 4, 5);
-      /* Cheering arms */
-      if (bob < 0 && f % 3 === 0) {
-        ctx.fillStyle = crowdShirtColors[(f * 3 + tier * 5) % crowdShirtColors.length];
-        ctx.fillRect(fx - 5, y + 9, 2, 6);
-        ctx.fillRect(fx + 3, y + 9, 2, 6);
-      }
-    }
-  }
-
-  /* 5. Stadium Sponsor Ribbon Banners */
-  const banY = 144;
-  ctx.fillStyle = "#120d1c";
-  ctx.fillRect(0, banY, W, 22);
-  ctx.strokeStyle = "#2a1e3e"; ctx.lineWidth = 1.5;
-  ctx.strokeRect(0, banY, W, 22);
-
-  const banners = [
-    { text: "TURBO TURTLES", bg: "#143818", fg: "#ffcc00" },
-    { text: "KILLER CRASH", bg: "#4a1212", fg: "#ff4444" },
-    { text: "BATTLE SLIMES", bg: "#0d2e28", fg: "#00ff66" },
-    { text: "DODREAMS", bg: "#17183e", fg: "#00f0ff" },
-    { text: "TIMESINK.NET", bg: "#2a103c", fg: "#bb66ff" },
-  ];
-  const bW = 160, bGap = 28;
-  const bTotal = banners.length * (bW + bGap);
-  for (let i = 0; i < banners.length * 2; i++) {
-    const ban = banners[i % banners.length];
-    const bx = 10 + i * (bW + bGap);
-    if (bx < W) {
-      ctx.fillStyle = ban.bg;
-      ctx.fillRect(bx, banY + 2, bW, 18);
-      ctx.strokeStyle = ban.fg; ctx.lineWidth = 1;
-      ctx.strokeRect(bx, banY + 2, bW, 18);
-      ctx.fillStyle = ban.fg;
-      ctx.font = "bold 8px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-      ctx.fillText(ban.text, bx + bW / 2, banY + 14);
-    }
-  }
-
-  /* 6. Suspended Jumbotron Video Screen */
-  const jw = 180, jh = 76;
-  const jx = W / 2 - jw / 2, jy = 14;
-
-  /* Suspension cables */
-  ctx.strokeStyle = "#505868"; ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(jx + 24, 0); ctx.lineTo(jx + 24, jy);
-  ctx.moveTo(jx + jw - 24, 0); ctx.lineTo(jx + jw - 24, jy);
-  ctx.stroke();
-
-  /* Metal Bezel with Rivets */
-  ctx.fillStyle = "#222732";
-  ctx.fillRect(jx, jy, jw, jh);
-  ctx.strokeStyle = "#404a5c"; ctx.lineWidth = 2.5;
-  ctx.strokeRect(jx, jy, jw, jh);
-
-  /* Corner bolt rivets */
-  ctx.fillStyle = "#8a96aa";
-  ctx.fillRect(jx + 3, jy + 3, 3, 3);
-  ctx.fillRect(jx + jw - 6, jy + 3, 3, 3);
-  ctx.fillRect(jx + 3, jy + jh - 6, 3, 3);
-  ctx.fillRect(jx + jw - 6, jy + jh - 6, 3, 3);
-
-  /* Screen CRT Glass */
-  ctx.fillStyle = "#071216";
-  ctx.fillRect(jx + 7, jy + 7, jw - 14, jh - 14);
-  ctx.strokeStyle = "#00e5ff"; ctx.lineWidth = 1;
-  ctx.strokeRect(jx + 7, jy + 7, jw - 14, jh - 14);
-
-  /* Live Cam Header */
-  const blinkRec = Math.sin(time / 250) > 0;
-  if (blinkRec) {
-    ctx.fillStyle = "#ff2244";
-    ctx.beginPath(); ctx.arc(jx + 15, jy + 15, 3, 0, Math.PI * 2); ctx.fill();
-  }
-  ctx.fillStyle = "#00f0ff";
-  ctx.font = "6px 'Press Start 2P', monospace"; ctx.textAlign = "left";
-  ctx.fillText("LIVE FEED", jx + 22, jy + 18);
-
-  ctx.fillStyle = "#88aacc"; ctx.textAlign = "right";
-  ctx.fillText(def.name.toUpperCase(), jx + jw - 10, jy + 18);
-
-  /* Real-Time Mini Radar Display inside Jumbotron */
-  const radarX = jx + 10, radarY = jy + 22, radarW = jw - 20, radarH = jh - 28;
-  ctx.fillStyle = "rgba(0, 30, 40, 0.6)";
-  ctx.fillRect(radarX, radarY, radarW, radarH);
-
-  /* Ground silhouette in mini radar */
-  ctx.strokeStyle = "rgba(0, 255, 170, 0.45)"; ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.moveTo(radarX, radarY + radarH - 3);
-  ctx.lineTo(radarX + radarW, radarY + radarH - 3);
-  ctx.stroke();
-
-  /* Real-time player dots on radar */
-  if (state.vehicles[0] && state.vehicles[1]) {
-    const v1 = state.vehicles[0].chassis;
-    const v2 = state.vehicles[1].chassis;
-    const r1X = radarX + (v1.position.x / W) * radarW;
-    const r1Y = radarY + (v1.position.y / H) * radarH;
-    const r2X = radarX + (v2.position.x / W) * radarW;
-    const r2Y = radarY + (v2.position.y / H) * radarH;
-
-    ctx.fillStyle = "#00f0ff";
-    ctx.beginPath(); ctx.arc(Math.max(radarX + 3, Math.min(radarX + radarW - 3, r1X)), Math.max(radarY + 3, Math.min(radarY + radarH - 3, r1Y)), 2.5, 0, Math.PI * 2); ctx.fill();
-
-    ctx.fillStyle = "#ff3355";
-    ctx.beginPath(); ctx.arc(Math.max(radarX + 3, Math.min(radarX + radarW - 3, r2X)), Math.max(radarY + 3, Math.min(radarY + radarH - 3, r2Y)), 2.5, 0, Math.PI * 2); ctx.fill();
-  }
-
-  /* CRT Scanlines across screen */
-  ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
-  for (let sc = jy + 8; sc < jy + jh - 8; sc += 3) {
-    ctx.fillRect(jx + 8, sc, jw - 16, 1);
-  }
-}
-
-function renderArena() {
-  if (!state.arena) return;
-  const key = state.arena.key;
-  const def = ARENAS[key];
-  const time = performance.now();
-
-  /* ═══════════════════════════════════════════════════════════
-   * 1. GLOBAL STADIUM BACKDROP & ENVIRONMENT
-   * ═══════════════════════════════════════════════════════════ */
-  drawStadiumBackdrop(key, def);
-
-  /* ═══════════════════════════════════════════════════════════
-   * 2. ARENA-SPECIFIC ATMOSPHERIC OVERLAYS
-   * ═══════════════════════════════════════════════════════════ */
-  if (key === "theBump") {
-    ctx.fillStyle = "#9933ff"; ctx.font = "bold 11px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-    ctx.fillText("⚡ CYBER STADIUM OVERDRIVE ⚡", W / 2, 108);
-  } else if (key === "winterCliff") {
-    /* Shimmering Aurora Borealis */
-    const t = time / 1500;
-    const aurGrad = ctx.createLinearGradient(0, 20, W, 180);
-    aurGrad.addColorStop(0, `rgba(0, 255, 170, ${0.08 + Math.sin(t) * 0.04})`);
-    aurGrad.addColorStop(0.5, `rgba(0, 180, 255, ${0.12 + Math.cos(t * 0.8) * 0.05})`);
-    aurGrad.addColorStop(1, `rgba(180, 0, 255, ${0.07 + Math.sin(t * 1.2) * 0.03})`);
-    ctx.fillStyle = aurGrad;
-    ctx.fillRect(0, 0, W, 200);
-
-    /* Falling snow particles */
-    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-    for (let i = 0; i < 65; i++) {
-      const sx = ((i * 37 + t * 45) % W);
-      const sy = ((i * 29 + t * 60) % H);
-      ctx.fillRect(sx | 0, sy | 0, 2, 2);
-    }
-  } else if (key === "volcano") {
-    /* Magma heat haze & bubbles */
-    const t = time / 600;
-    ctx.fillStyle = "rgba(255, 50, 0, 0.22)";
-    ctx.fillRect(0, ARENA_FLOOR_Y + 5, W, H - ARENA_FLOOR_Y);
-    for (let i = 0; i < 32; i++) {
-      const bx = (i * 42 + t * 20) % W;
-      const by = H - 20 + Math.sin(t + i) * 6;
-      ctx.fillStyle = i % 2 === 0 ? "#ffaa00" : "#ff3300";
-      ctx.beginPath(); ctx.arc(bx, by, 4 + Math.sin(t * 2 + i) * 2, 0, Math.PI * 2); ctx.fill();
-    }
-  } else if (key === "scaffolding") {
-    /* City skyline silhouettes */
-    ctx.fillStyle = "rgba(10, 15, 30, 0.7)";
-    for (let i = 0; i < 24; i++) {
-      const bW = 45 + (i * 17) % 35;
-      const bH = 120 + (i * 31) % 150;
-      ctx.fillRect(i * 56, ARENA_FLOOR_Y - bH, bW, bH);
-    }
-    if (state.arena.wreckingBall && state.arena.anchor) {
-      const wb = state.arena.wreckingBall;
-      const anc = state.arena.anchor;
-      ctx.strokeStyle = "#778"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(anc.position.x, anc.position.y); ctx.lineTo(wb.position.x, wb.position.y); ctx.stroke();
-      ctx.fillStyle = "#555";
-      ctx.beginPath(); ctx.arc(wb.position.x, wb.position.y, 24, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#888"; ctx.lineWidth = 2; ctx.stroke();
-    }
-  } else if (key === "pirateShip") {
-    /* Rolling animated ocean waves */
-    const t = time / 700;
-    ctx.fillStyle = "rgba(0, 35, 100, 0.75)";
-    ctx.fillRect(0, ARENA_FLOOR_Y + 22, W, H);
-    ctx.strokeStyle = "rgba(0, 180, 255, 0.45)"; ctx.lineWidth = 3;
-    for (let wx = 0; wx < W + 40; wx += 35) {
-      ctx.beginPath();
-      ctx.moveTo(wx, ARENA_FLOOR_Y + 26 + Math.sin(t + wx * 0.04) * 5);
-      ctx.lineTo(wx + 20, ARENA_FLOOR_Y + 26 + Math.sin(t + (wx + 20) * 0.04) * 5);
-      ctx.stroke();
-    }
-  } else if (key === "catacombs") {
-    /* Flickering wall torch sconces casting ambient flame glow */
-    const torches = [110, W - 110, W / 2 - 180, W / 2 + 180];
-    for (const tx of torches) {
-      const ty = ARENA_FLOOR_Y - 95;
-      /* Wall bracket */
-      ctx.fillStyle = "#2c2836";
-      ctx.fillRect(tx - 3, ty, 6, 14);
-      /* Sconce cup */
-      ctx.fillStyle = "#4a4258";
-      ctx.fillRect(tx - 6, ty - 4, 12, 5);
-      /* Flickering Flame */
-      const fPulse = Math.sin(time / 70 + tx) * 2;
-      ctx.fillStyle = "#ffaa00";
-      ctx.beginPath();
-      ctx.arc(tx, ty - 8 + fPulse * 0.5, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#ffff55";
-      ctx.beginPath();
-      ctx.arc(tx, ty - 7 + fPulse * 0.5, 3, 0, Math.PI * 2);
-      ctx.fill();
-      /* Warm light halo */
-      ctx.fillStyle = "rgba(255, 140, 0, 0.08)";
-      ctx.beginPath();
-      ctx.arc(tx, ty - 8, 36, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-   * 3. PROCEDURAL MATERIAL TEXTURING ENGINE FOR TERRAIN
-   * ═══════════════════════════════════════════════════════════ */
-  for (const b of state.arena.bodies) {
-    if (b.label === "wall" || b.label === "hazard_lava" || b.label === "hazard_pit" || b.label === "hazard_water" || b.label === "hazard_saw" || b.label === "wrecking_ball" || b.label === "skeleton_bob" || b.label === "bumper") continue;
-
-    if (b.label === "barrel") {
-      let alive = false;
-      for (const h of state.arena.hazards || []) {
-        if (h.type === "barrels") {
-          for (const br of h.barrels) {
-            if (br.body === b && br.alive) alive = true;
-          }
-        }
-      }
-      if (!alive) continue;
-      /* Exploding TNT barrel */
-      ctx.save();
-      ctx.translate(b.position.x, b.position.y);
-      ctx.rotate(b.angle);
-      ctx.fillStyle = "#aa2211";
-      ctx.fillRect(-12, -16, 24, 32);
-      ctx.fillStyle = "#ffcc00";
-      ctx.font = "bold 9px monospace"; ctx.textAlign = "center";
-      ctx.fillText("TNT", 0, 3);
-      ctx.strokeStyle = "#441108"; ctx.lineWidth = 1.5;
-      ctx.strokeRect(-12, -16, 24, 32);
-      ctx.restore();
-      continue;
-    }
-
-    ctx.save();
-    ctx.translate(b.position.x, b.position.y);
-    ctx.rotate(b.angle);
-
-    const bw = b.bounds.max.x - b.bounds.min.x;
-    const bh = b.bounds.max.y - b.bounds.min.y;
-
-    /* A. Bone Bridge Segments */
-    if (b.label === "bone_bridge") {
-      ctx.fillStyle = "#ede5d0";
-      ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
-
-      /* Bone marrow fissure */
-      ctx.strokeStyle = "#b5a88e"; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.moveTo(-bw / 2 + 10, 0); ctx.lineTo(bw / 2 - 10, 0); ctx.stroke();
-
-      /* Joint knuckle rounded caps */
-      ctx.fillStyle = "#f5eee0";
-      ctx.beginPath();
-      ctx.arc(-bw / 2 + 5, -bh / 2 + 2, 4, 0, Math.PI * 2);
-      ctx.arc(-bw / 2 + 5, bh / 2 - 2, 4, 0, Math.PI * 2);
-      ctx.arc(bw / 2 - 5, -bh / 2 + 2, 4, 0, Math.PI * 2);
-      ctx.arc(bw / 2 - 5, bh / 2 - 2, 4, 0, Math.PI * 2);
-      ctx.fill();
-
-      /* Hemp binding ropes */
-      ctx.strokeStyle = "#7c5832"; ctx.lineWidth = 2;
-      ctx.strokeRect(-bw / 2 + 14, -bh / 2 - 1, 6, bh + 2);
-      ctx.strokeRect(bw / 2 - 20, -bh / 2 - 1, 6, bh + 2);
-
-      ctx.restore();
-      continue;
-    }
-
-    /* B. Dune Saws Material: Golden Sand Dunes with Steel Trusses */
-    if (key === "duneSaws") {
-      const sGrad = ctx.createLinearGradient(0, -bh / 2, 0, bh / 2);
-      sGrad.addColorStop(0, "#f2c64b");
-      sGrad.addColorStop(0.25, "#d69828");
-      sGrad.addColorStop(0.7, "#a66c16");
-      sGrad.addColorStop(1, "#66400c");
-      ctx.fillStyle = sGrad;
-      ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
-
-      /* Wind-rippled contour waves */
-      ctx.strokeStyle = "rgba(255, 235, 140, 0.22)";
-      ctx.lineWidth = 1.2;
-      for (let ry = -bh / 2 + 5; ry < bh / 2 - 4; ry += 6) {
-        ctx.beginPath();
-        for (let rx = -bw / 2; rx <= bw / 2; rx += 8) {
-          const dy = Math.sin((rx + ry * 3) * 0.12) * 1.5;
-          if (rx === -bw / 2) ctx.moveTo(rx, ry + dy);
-          else ctx.lineTo(rx, ry + dy);
-        }
-        ctx.stroke();
-      }
-
-      /* Sand grain stippling */
-      ctx.fillStyle = "rgba(255, 255, 200, 0.35)";
-      for (let g = 0; g < Math.min(120, (bw * bh) / 250); g++) {
-        const gx = ((g * 37) % bw) - bw / 2;
-        const gy = ((g * 59) % bh) - bh / 2;
-        ctx.fillRect(gx, gy, 1.2, 1.2);
-      }
-
-      /* Glowing sand crest line along top */
-      ctx.strokeStyle = "#fff6b0"; ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.moveTo(-bw / 2, -bh / 2); ctx.lineTo(bw / 2, -bh / 2); ctx.stroke();
-
-      /* Bottom steel truss structure */
-      if (bh > 28) {
-        ctx.fillStyle = "#2a2d36";
-        ctx.fillRect(-bw / 2, bh / 2 - 12, bw, 12);
-        ctx.strokeStyle = "#404654"; ctx.lineWidth = 1.5;
-        ctx.strokeRect(-bw / 2, bh / 2 - 12, bw, 12);
-        ctx.fillStyle = "#8a94a6";
-        for (let rv = -bw / 2 + 10; rv < bw / 2 - 6; rv += 18) {
-          ctx.beginPath(); ctx.arc(rv, bh / 2 - 6, 2, 0, Math.PI * 2); ctx.fill();
-        }
-      }
-    }
-    /* C. Stone Brick Masonry (The Thunderdome & Bone Catacombs) */
-    else if (key === "colosseum" || key === "catacombs") {
-      const isDungeon = key === "catacombs";
-      ctx.fillStyle = isDungeon ? "#18221b" : "#282330";
-      ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
-
-      /* Staggered masonry bricks */
-      const brW = 28, brH = 13;
-      const rows = Math.ceil(bh / brH);
-      const cols = Math.ceil(bw / brW) + 1;
-
-      for (let r = 0; r < rows; r++) {
-        const y0 = -bh / 2 + r * brH;
-        const rowH = Math.min(brH, bh / 2 - y0);
-        if (rowH <= 0) continue;
-        const xOffset = (r % 2 === 0 ? 0 : brW / 2);
-
-        for (let c = -1; c < cols; c++) {
-          const x0 = -bw / 2 + c * brW + xOffset;
-          const blockW = Math.min(brW, bw / 2 - x0);
-          if (x0 + brW < -bw / 2 || x0 > bw / 2 || blockW <= 0) continue;
-
-          const hash = ((r * 17 + c * 31) % 4);
-          if (isDungeon) {
-            ctx.fillStyle = hash === 0 ? "#1e2a21" : hash === 1 ? "#243228" : hash === 2 ? "#172019" : "#2a382e";
-          } else {
-            ctx.fillStyle = hash === 0 ? "#342d3e" : hash === 1 ? "#2e2837" : hash === 2 ? "#3a3245" : "#241f2b";
-          }
-          ctx.fillRect(Math.max(-bw / 2, x0 + 1), y0 + 1, Math.min(blockW - 2, bw / 2 - x0 - 1), rowH - 2);
-
-          /* Brick bevel highlight */
-          ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(Math.max(-bw / 2, x0 + 1), y0 + rowH - 1);
-          ctx.lineTo(Math.max(-bw / 2, x0 + 1), y0 + 1);
-          ctx.lineTo(Math.min(bw / 2, x0 + blockW - 1), y0 + 1);
-          ctx.stroke();
-        }
-      }
-
-      /* Moss patches on Catacombs */
-      if (isDungeon) {
-        ctx.fillStyle = "rgba(60, 140, 70, 0.45)";
-        for (let m = -bw / 2 + 12; m < bw / 2; m += 36) {
-          ctx.beginPath();
-          ctx.arc(m, -bh / 2 + 4, 5, 0, Math.PI * 2);
-          ctx.arc(m + 4, -bh / 2 + 3, 4, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-
-      /* Glowing trim rim */
-      ctx.strokeStyle = isDungeon ? "#66dd77" : "#ffd700"; ctx.lineWidth = 2.2;
-      ctx.beginPath(); ctx.moveTo(-bw / 2, -bh / 2); ctx.lineTo(bw / 2, -bh / 2); ctx.stroke();
-    }
-    /* D. Riveted Industrial Steel (Hydro Facility, Hazard Foundry, Cyber Stadium, Skyline) */
-    else if (key === "hydroDeck" || key === "sawmill" || key === "theBump" || key === "scaffolding" || key === "ovalTrack") {
-      const mGrad = ctx.createLinearGradient(0, -bh / 2, 0, bh / 2);
-      mGrad.addColorStop(0, "#363d4c");
-      mGrad.addColorStop(0.5, "#252b36");
-      mGrad.addColorStop(1, "#181d24");
-      ctx.fillStyle = mGrad;
-      ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
-
-      /* Brushed lines */
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.05)"; ctx.lineWidth = 1;
-      for (let ly = -bh / 2 + 4; ly < bh / 2; ly += 5) {
-        ctx.beginPath(); ctx.moveTo(-bw / 2, ly); ctx.lineTo(bw / 2, ly); ctx.stroke();
-      }
-
-      /* Rivet bolts */
-      ctx.fillStyle = "#8a96aa";
-      for (let rx = -bw / 2 + 8; rx < bw / 2 - 4; rx += 14) {
-        ctx.beginPath(); ctx.arc(rx, -bh / 2 + 4, 1.8, 0, Math.PI * 2); ctx.fill();
-      }
-
-      /* Safety hazard chevrons on steep ramps */
-      if (bh > 40 && b.angle !== 0) {
-        ctx.save();
-        ctx.clip();
-        ctx.strokeStyle = "rgba(240, 180, 0, 0.4)"; ctx.lineWidth = 6;
-        for (let s = -bw; s < bw + bh; s += 16) {
-          ctx.beginPath(); ctx.moveTo(s, -bh / 2); ctx.lineTo(s + bh, bh / 2); ctx.stroke();
-        }
-        ctx.restore();
-      }
-
-      ctx.strokeStyle = def.accent || "#00e5ff"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(-bw / 2, -bh / 2); ctx.lineTo(bw / 2, -bh / 2); ctx.stroke();
-    }
-    /* E. Glacial Ice & Snow (Aurora Glaciers) */
-    else if (key === "winterCliff") {
-      const iGrad = ctx.createLinearGradient(0, -bh / 2, 0, bh / 2);
-      iGrad.addColorStop(0, "#a8e0f5");
-      iGrad.addColorStop(0.4, "#5098c4");
-      iGrad.addColorStop(1, "#184568");
-      ctx.fillStyle = iGrad;
-      ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
-
-      /* Ice crystalline fracture lines */
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.35)"; ctx.lineWidth = 1.2;
-      for (let f = -bw / 2 + 25; f < bw / 2 - 15; f += 50) {
-        ctx.beginPath();
-        ctx.moveTo(f, -bh / 2 + 6);
-        ctx.lineTo(f + 8, -bh / 2 + 16);
-        ctx.lineTo(f + 2, -bh / 2 + 26);
-        ctx.stroke();
-      }
-
-      /* White snow blanket */
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.moveTo(-bw / 2, -bh / 2);
-      for (let sx = -bw / 2; sx <= bw / 2; sx += 12) {
-        const drift = Math.sin(sx * 0.15) * 2.5 + 3;
-        ctx.lineTo(sx, -bh / 2 + drift);
-      }
-      ctx.lineTo(bw / 2, -bh / 2);
-      ctx.closePath();
-      ctx.fill();
-
-      /* Diamond sparkles */
-      ctx.fillStyle = "#ffffff";
-      const spTime = time / 400;
-      for (let sp = 0; sp < 4; sp++) {
-        const px = (-bw / 2 + 15 + ((sp * 67 + spTime * 20) % (bw - 30)));
-        const py = -bh / 2 + 4;
-        ctx.fillRect(px, py, 2, 2);
-      }
-    }
-    /* F. Basalt Magma Rock (Magma Caverns) */
-    else if (key === "volcano") {
-      ctx.fillStyle = "#22130e";
-      ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
-
-      /* Glowing magma crack fissures */
-      const tPulse = Math.sin(time / 180) * 0.2 + 0.8;
-      ctx.strokeStyle = `rgba(255, 80, 0, ${0.7 * tPulse})`; ctx.lineWidth = 1.8;
-      for (let v = -bw / 2 + 20; v < bw / 2 - 10; v += 45) {
-        ctx.beginPath();
-        ctx.moveTo(v, -bh / 2 + 2);
-        ctx.lineTo(v + 10, -bh / 2 + 14);
-        ctx.lineTo(v + 4, -bh / 2 + 24);
-        ctx.stroke();
-      }
-
-      ctx.strokeStyle = "#ff4400"; ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.moveTo(-bw / 2, -bh / 2); ctx.lineTo(bw / 2, -bh / 2); ctx.stroke();
-    }
-    /* G. Varnished Wooden Planks (Seasaw Galleon & Demolition Derby) */
-    else {
-      ctx.fillStyle = key === "chaosBarn" ? "#4a3520" : "#56381e";
-      ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
-
-      const plH = 12;
-      for (let py = -bh / 2; py < bh / 2; py += plH) {
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.4)"; ctx.lineWidth = 1;
-        ctx.strokeRect(-bw / 2, py, bw, plH);
-
-        ctx.strokeStyle = "rgba(255, 200, 120, 0.08)";
-        ctx.beginPath();
-        ctx.moveTo(-bw / 2, py + plH / 2); ctx.lineTo(bw / 2, py + plH / 2);
-        ctx.stroke();
-
-        ctx.fillStyle = "#22140a";
-        for (let nx = -bw / 2 + 10; nx < bw / 2; nx += 32) {
-          ctx.fillRect(nx, py + 3, 2, 2);
-        }
-      }
-
-      if (key === "chaosBarn") {
-        ctx.strokeStyle = "#ffcc44"; ctx.lineWidth = 1.5;
-        for (let st = -bw / 2 + 8; st < bw / 2 - 4; st += 14) {
-          ctx.beginPath(); ctx.moveTo(st, -bh / 2); ctx.lineTo(st + 3, -bh / 2 - 4); ctx.stroke();
-        }
-      }
-
-      ctx.strokeStyle = def.accent || "#ffaa00"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(-bw / 2, -bh / 2); ctx.lineTo(bw / 2, -bh / 2); ctx.stroke();
-    }
-
-    /* Subtle perimeter shadow */
-    ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = 1;
-    ctx.strokeRect(-bw / 2, -bh / 2, bw, bh);
-    ctx.restore();
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-   * 4. HAZARDS & SPECIAL PROPS RENDERING
-   * ═══════════════════════════════════════════════════════════ */
-
-  /* A. Dune Saws Giant Wall Buzzsaws */
-  if (state.arena.hazards) {
-    for (const h of state.arena.hazards) {
-      if (h.type === "wall_saw") {
-        ctx.save();
-        ctx.translate(h.body.position.x, h.body.position.y);
-
-        /* Horizontal steel mounting arm extending from wall */
-        ctx.fillStyle = "#2c303a";
-        const armW = h.dir > 0 ? -h.x : (W - h.x);
-        ctx.fillRect(0, -8, armW, 16);
-        ctx.strokeStyle = "#464d5c"; ctx.lineWidth = 2;
-        ctx.strokeRect(0, -8, armW, 16);
-
-        ctx.rotate(h.body.angle);
-
-        /* Metallic saw disc */
-        ctx.fillStyle = "#4a505e";
-        ctx.beginPath(); ctx.arc(0, 0, h.radius, 0, Math.PI * 2); ctx.fill();
-
-        /* Concentric blade spin rings */
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.2)"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(0, 0, h.radius * 0.7, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.arc(0, 0, h.radius * 0.45, 0, Math.PI * 2); ctx.stroke();
-
-        /* 14 curved saw teeth around rim */
-        ctx.fillStyle = "#e0e4ec";
-        const teeth = 14;
-        for (let t = 0; t < teeth; t++) {
-          const a = (t / teeth) * Math.PI * 2;
-          ctx.beginPath();
-          ctx.moveTo(Math.cos(a) * (h.radius - 3), Math.sin(a) * (h.radius - 3));
-          ctx.lineTo(Math.cos(a + 0.15) * (h.radius + 7), Math.sin(a + 0.15) * (h.radius + 7));
-          ctx.lineTo(Math.cos(a + 0.25) * (h.radius - 4), Math.sin(a + 0.25) * (h.radius - 4));
-          ctx.fill();
-        }
-
-        /* Center axle hub with 6 bolts */
-        ctx.fillStyle = "#1e222a";
-        ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = "#e0a020"; ctx.lineWidth = 2; ctx.stroke();
-        ctx.fillStyle = "#f0f2f6";
-        for (let b = 0; b < 6; b++) {
-          const ba = (b / 6) * Math.PI * 2;
-          ctx.fillRect(Math.cos(ba) * 7 - 1.5, Math.sin(ba) * 7 - 1.5, 3, 3);
-        }
-
-        ctx.restore();
-      }
-    }
-  }
-
-  /* B. Hydro Facility Cyan Water Hazard Pool */
-  if (key === "hydroDeck") {
-    const t = time / 450;
-    const waterY = ARENA_FLOOR_Y + 12;
-    const wGrad = ctx.createLinearGradient(0, waterY, 0, H);
-    wGrad.addColorStop(0, "rgba(0, 229, 255, 0.7)");
-    wGrad.addColorStop(0.3, "rgba(0, 140, 220, 0.85)");
-    wGrad.addColorStop(1, "rgba(2, 20, 45, 0.95)");
-    ctx.fillStyle = wGrad;
-    ctx.fillRect(0, waterY, W, H - waterY);
-
-    /* Animated sine-wave water ripples */
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.65)"; ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    for (let wx = 0; wx <= W; wx += 15) {
-      const wy = waterY + Math.sin(wx * 0.035 + t) * 4 + Math.sin(wx * 0.08 - t * 1.5) * 2;
-      if (wx === 0) ctx.moveTo(wx, wy);
-      else ctx.lineTo(wx, wy);
-    }
-    ctx.stroke();
-
-    /* Rising water bubbles */
-    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-    for (let b = 0; b < 24; b++) {
-      const bx = ((b * 47 + t * 25) % W);
-      const by = H - ((b * 31 + t * 45) % (H - waterY));
-      ctx.beginPath(); ctx.arc(bx, by, 2 + (b % 3), 0, Math.PI * 2); ctx.fill();
-    }
-  }
-
-  /* C. Catacombs Swinging Skeleton Pendulum */
-  if (state.arena.skeletonBob && state.arena.anchor) {
-    const anc = state.arena.anchor;
-    const sk = state.arena.skeletonBob;
-
-    /* Chain links */
-    ctx.strokeStyle = "#606875"; ctx.lineWidth = 2.5;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.moveTo(anc.position.x, anc.position.y); ctx.lineTo(sk.position.x, sk.position.y); ctx.stroke();
-    ctx.setLineDash([]);
-
-    /* Pixel art Skeleton Bob */
-    ctx.save();
-    ctx.translate(sk.position.x, sk.position.y);
-    ctx.rotate(sk.angle);
-    /* Skull */
-    ctx.fillStyle = "#ede6d4";
-    ctx.beginPath(); ctx.arc(0, -6, 12, 0, Math.PI * 2); ctx.fill();
-    ctx.fillRect(-6, 2, 12, 7);
-    /* Eye sockets & nose */
-    ctx.fillStyle = "#111418";
-    ctx.fillRect(-5, -7, 4, 4);
-    ctx.fillRect(1, -7, 4, 4);
-    ctx.fillRect(-1.5, -2, 3, 2);
-    /* Teeth */
-    ctx.fillStyle = "#ede6d4";
-    ctx.fillRect(-4, 7, 2, 3);
-    ctx.fillRect(-1, 7, 2, 3);
-    ctx.fillRect(2, 7, 2, 3);
-    /* Ribcage & spine */
-    ctx.fillStyle = "#dcd2be";
-    ctx.fillRect(-1, 10, 2, 16);
-    for (let rib = 0; rib < 4; rib++) {
-      ctx.fillRect(-8 + rib, 12 + rib * 3, 16 - rib * 2, 2);
-    }
-    /* Dangling leg bones */
-    ctx.fillRect(-6, 26, 3, 14);
-    ctx.fillRect(3, 26, 3, 14);
-    ctx.restore();
-  }
-
-  /* D. Moving Saw Blades & Steam Vent (Hazard Foundry) */
-  if (state.arena.hazards) {
-    for (const h of state.arena.hazards) {
-      if (h.type === "saw") {
-        drawSawBlade(h.body.position.x, h.body.position.y, 18);
-        ctx.strokeStyle = "rgba(255, 60, 0, 0.28)"; ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.moveTo(h.baseX - h.range, h.body.position.y);
-        ctx.lineTo(h.baseX + h.range, h.body.position.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      } else if (h.type === "steam") {
-        ctx.save();
-        ctx.fillStyle = "#22252c";
-        ctx.fillRect(h.x - 40, ARENA_FLOOR_Y - 4, 80, 8);
-        ctx.strokeStyle = h.active ? "#00f0ff" : "#ff6600"; ctx.lineWidth = 2;
-        ctx.strokeRect(h.x - 40, ARENA_FLOOR_Y - 4, 80, 8);
-        ctx.fillStyle = "#08090c";
-        for (let g = -32; g <= 32; g += 8) {
-          ctx.fillRect(h.x + g, ARENA_FLOOR_Y - 3, 4, 6);
-        }
-        ctx.restore();
-      }
-    }
-  }
-
-  /* E. Speedway Boost Pads */
-  if (state.arena.boostPads) {
-    const pulse = Math.sin(time / 150) * 0.2 + 0.8;
-    for (const pad of state.arena.boostPads) {
-      ctx.fillStyle = `rgba(0, 255, 102, ${0.2 * pulse})`;
-      ctx.fillRect(pad.x - pad.w / 2, pad.y - 4, pad.w, 8);
-      ctx.fillStyle = "#00ff66";
-      ctx.font = "bold 10px monospace"; ctx.textAlign = "center";
-      ctx.fillText(pad.dir > 0 ? ">>>" : "<<<", pad.x, pad.y + 3);
-    }
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 15: HUD & MATCH TELEMETRY
- * ═══════════════════════════════════════════════════════════════ */
-function renderHUD() {
-  const dotR = 8, dotGap = 22, dotY = 30;
-
-  /* Player telemetry */
-  ctx.fillStyle = "#00f0ff"; ctx.font = "bold 12px 'Press Start 2P', monospace"; ctx.textAlign = "left";
-  ctx.fillText("PLAYER", 20, dotY - 12);
-  for (let i = 0; i < WINS_NEEDED; i++) {
-    ctx.fillStyle = i < state.scores[0] ? "#00f0ff" : "rgba(0, 240, 255, 0.18)";
-    ctx.beginPath(); ctx.arc(20 + i * dotGap + dotR, dotY + dotR, dotR, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#00f0ff"; ctx.lineWidth = 1.2; ctx.stroke();
-  }
-
-  /* Interactive Garage button in HUD */
-  const gHover = input.mouse.x >= 20 && input.mouse.x <= 135 && input.mouse.y >= 52 && input.mouse.y <= 74;
-  ctx.fillStyle = gHover ? "rgba(153, 51, 255, 0.45)" : "rgba(153, 51, 255, 0.2)";
-  ctx.fillRect(20, 52, 115, 22);
-  ctx.strokeStyle = gHover ? "#d488ff" : "#9933ff";
-  ctx.lineWidth = 1.2;
-  ctx.strokeRect(20, 52, 115, 22);
-  ctx.fillStyle = "#fff";
-  ctx.font = "8px 'Press Start 2P', monospace";
-  ctx.textAlign = "center";
-  ctx.fillText("⮌ GARAGE [G]", 77, 66);
-
-  /* Bot AI telemetry */
-  const diffLabels = ["ROOKIE BOT", "VETERAN BOT", "CHAMPION BOT"];
-  ctx.fillStyle = "#ff3355"; ctx.textAlign = "right";
-  ctx.fillText(diffLabels[state.aiDifficulty], W - 20, dotY - 12);
-  for (let i = 0; i < WINS_NEEDED; i++) {
-    ctx.fillStyle = i < state.scores[1] ? "#ff3355" : "rgba(255, 51, 85, 0.18)";
-    ctx.beginPath(); ctx.arc(W - 20 - i * dotGap - dotR, dotY + dotR, dotR, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#ff3355"; ctx.lineWidth = 1.2; ctx.stroke();
-  }
-
-  /* Round & timer */
-  const secs = Math.max(0, Math.ceil(state.roundTimer));
-  ctx.fillStyle = state.suddenDeath ? "#ff3300" : "#ffffff";
-  ctx.font = "bold 16px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-  ctx.fillText(secs + (state.suddenDeath ? " !" : ""), W / 2, 40);
-
-  ctx.fillStyle = "rgba(255,255,255,0.45)";
-  ctx.font = "10px 'Press Start 2P', monospace";
-  ctx.fillText(`ROUND ${state.round} / 9`, W / 2, 58);
-
-  /* Sudden death indicator */
-  if (state.suddenDeath) {
-    const flash = Math.sin(performance.now() / 180) > 0;
-    if (flash) {
-      ctx.fillStyle = "#ff3300"; ctx.font = "bold 15px 'Press Start 2P', monospace";
-      ctx.fillText("⚡ SUDDEN DEATH ⚡", W / 2, H / 2 - 70);
-    }
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 16: GARAGE (All Unlocked, Player vs Bot)
- * ═══════════════════════════════════════════════════════════════ */
-function updateGarage() {
-  const cols = 6, cardW = 130, cardH = 68, gap = 10;
-  const gridW = cols * (cardW + gap) - gap;
-  const startX = (W - gridW) / 2;
-  const startY = 60;
-
-  /* Vehicle click selections */
-  for (let i = 0; i < VEHICLE_KEYS.length; i++) {
-    const col = i % cols, row = Math.floor(i / cols);
-    const cx = startX + col * (cardW + gap);
-    const cy = startY + row * (cardH + gap);
-    const hover = input.mouse.x >= cx && input.mouse.x <= cx + cardW &&
-                  input.mouse.y >= cy && input.mouse.y <= cy + cardH;
-
-    if (hover) {
-      if (input.mouse.clicked) {
-        state.selP1 = i;
-        sfx.click();
-      }
-      if (input.mouse.rightClicked) {
-        state.selP2 = i;
-        sfx.click();
-      }
-    }
-  }
-
-  /* Bot Difficulty selector */
-  const diffY = startY + 2 * (cardH + gap) + 12;
-  const diffs = ["ROOKIE", "VETERAN", "CHAMPION"];
-  const dbW = 110, dbGap = 15;
-  const dStartX = W / 2 - (diffs.length * dbW + (diffs.length - 1) * dbGap) / 2;
-
-  for (let i = 0; i < diffs.length; i++) {
-    const dx = dStartX + i * (dbW + dbGap);
-    const hover = input.mouse.x >= dx && input.mouse.x <= dx + dbW &&
-                  input.mouse.y >= diffY && input.mouse.y <= diffY + 28;
-    if (hover && input.mouse.clicked) {
-      state.aiDifficulty = i;
-      sfx.click();
-    }
-  }
-
-  /* Random Bot car button */
-  const randBx = dStartX + 3 * (dbW + dbGap) + 10;
-  const hoverRand = input.mouse.x >= randBx && input.mouse.x <= randBx + 110 &&
-                    input.mouse.y >= diffY && input.mouse.y <= diffY + 28;
-  if (hoverRand && input.mouse.clicked) {
-    state.selP2 = Math.floor(Math.random() * VEHICLE_KEYS.length);
-    sfx.click();
-  }
-
-  /* Arena selection (2 rows of 6 cards for 12 arenas) */
-  const aCols = 6, aCardW = 132, aCardH = 42, aGapX = 10, aGapY = 8;
-  const aGridW = aCols * (aCardW + aGapX) - aGapX;
-  const aStartX = (W - aGridW) / 2;
-  const arenaY = diffY + 40;
-
-  for (let i = 0; i < ARENA_KEYS.length; i++) {
-    const col = i % aCols, row = Math.floor(i / aCols);
-    const ax = aStartX + col * (aCardW + aGapX);
-    const ay = arenaY + row * (aCardH + aGapY);
-    const hover = input.mouse.x >= ax && input.mouse.x <= ax + aCardW &&
-                  input.mouse.y >= ay && input.mouse.y <= ay + aCardH;
-    if (hover && input.mouse.clicked) {
-      state.selArena = i;
-      sfx.click();
-    }
-  }
-
-  /* Keyboard shortcuts 1-9, 0, -, = for rapid arena selection */
-  const digitKeys = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal"];
-  for (let k = 0; k < ARENA_KEYS.length && k < digitKeys.length; k++) {
-    if (input.wasPressed(digitKeys[k])) {
-      state.selArena = k;
-      sfx.click();
-    }
-  }
-
-  /* START MATCH button */
-  const btnY = arenaY + 2 * (aCardH + aGapY) + 14;
-  const btnW = 260, btnH = 44;
-  const bx = W / 2 - btnW / 2;
-  const hoverStart = input.mouse.x >= bx && input.mouse.x <= bx + btnW &&
-                     input.mouse.y >= btnY && input.mouse.y <= btnY + btnH;
-
-  if ((hoverStart && input.mouse.clicked) || input.wasPressed("Space") || input.wasPressed("Enter")) {
-    sfx.click();
-    startMatch();
-  }
+function statBar(label, v) {
+  return `<div class="hb-stat"><span>${label}</span><i><b style="width:${Math.round(v * 100)}%"></b></i></div>`;
 }
 
 function renderGarage() {
-  ctx.fillStyle = "#0c0618";
-  ctx.fillRect(0, 0, W, H);
+  game.screen = "garage";
+  setEngineHum(false);
+  const car = CARS[prefs.car];
+  const foe = prefs.foeCar === "random" ? null : CARS[prefs.foeCar];
+  const card = (k) => {
+    const ready = thumbCache.get(k);
+    return `<button type="button" class="hb-arena ${k === prefs.arena ? "is-on" : ""}" data-arena="${k}" aria-pressed="${k === prefs.arena}">
+      <img ${ready ? `src="${ready}"` : `data-thumb="${k}"`} alt="" width="320" height="180" />
+      <b>${escapeHtml(ARENAS[k].name)}</b><small>${escapeHtml(ARENAS[k].blurb)}</small>
+    </button>`;
+  };
+  const randomCard = `<button type="button" class="hb-arena hb-arena--random ${prefs.arena === "random" ? "is-on" : ""}" data-arena="random" aria-pressed="${prefs.arena === "random"}">
+      <span class="hb-arena__dice" aria-hidden="true">?</span>
+      <b>Random</b><small>A different arena every match.</small>
+    </button>`;
+  const originals = ARENA_KEYS.filter((k) => ARENAS[k].section !== "classic");
+  const classics = ARENA_KEYS.filter((k) => ARENAS[k].section === "classic");
+  const arenaCards = `${randomCard}${originals.map(card).join("")}`;
+  const classicCards = classics.map(card).join("");
+  overlay.hidden = false;
+  overlay.innerHTML = `
+    <div class="hb-panel hb-panel--garage">
+      <header class="hb-head">
+        <div>
+          <h2 class="hb-logo">HEAD<span>BUTT</span></h2>
+          <p class="hb-kicker">Bonk the other driver's helmet with your car. First to ${WINS_NEEDED}.</p>
+        </div>
+        <button type="button" class="btn btn--primary hb-go" data-act="start">FIGHT ▶</button>
+      </header>
+      <div class="hb-picks">
+        <section class="hb-pick">
+          <p class="hb-label">${prefs.mode === "friend" ? "PLAYER 1 • A D W" : "YOUR CAR • A D OR ARROWS • W BOOST"}</p>
+          <div class="hb-carousel">
+            <button type="button" class="hb-arrow" data-car="-1" aria-label="Previous car">◀</button>
+            <canvas class="hb-preview" id="hb-prev-p1" width="360" height="200" aria-label="${escapeHtml(car.name)}"></canvas>
+            <button type="button" class="hb-arrow" data-car="1" aria-label="Next car">▶</button>
+          </div>
+          <h3 class="hb-name" style="color:#00d8ff">${escapeHtml(car.name)}</h3>
+          <p class="hb-blurb">${escapeHtml(car.blurb)}</p>
+          ${statBar("SPEED", car.stats.speed)}${statBar("WEIGHT", car.stats.weight)}${statBar("GRIP", car.stats.grip)}
+        </section>
+        <section class="hb-pick">
+          <p class="hb-label">${prefs.mode === "friend" ? "PLAYER 2 • ARROW KEYS" : "OPPONENT"}</p>
+          <div class="hb-carousel">
+            <button type="button" class="hb-arrow" data-foe="-1" aria-label="Previous opponent car">◀</button>
+            <canvas class="hb-preview" id="hb-prev-p2" width="360" height="200" aria-label="${foe ? escapeHtml(foe.name) : "Random car"}"></canvas>
+            <button type="button" class="hb-arrow" data-foe="1" aria-label="Next opponent car">▶</button>
+          </div>
+          <h3 class="hb-name" style="color:#ff3b5c">${foe ? escapeHtml(foe.name) : "RANDOM"}</h3>
+          <div class="hb-chips">
+            ${BOT_KEYS.map((b) => `<button type="button" class="hb-chip ${prefs.mode === "bot" && prefs.bot === b ? "is-on" : ""}" data-bot="${b}">${BOTS[b].label}</button>`).join("")}
+            <button type="button" class="hb-chip ${prefs.mode === "friend" ? "is-on" : ""}" data-bot="friend">VS FRIEND</button>
+          </div>
+          <p class="hb-note">Career vs bots: ${record.wins} W • ${record.losses} L • ${record.headshots} headshots</p>
+        </section>
+      </div>
+      <p class="hb-label">ARENA</p>
+      <div class="hb-arenas">${arenaCards}</div>
+      <p class="hb-label">DRIVE AHEAD CLASSICS <small>(${classics.length} maps)</small></p>
+      <div class="hb-arenas">${classicCards}</div>
+    </div>`;
+  const p1 = overlay.querySelector("#hb-prev-p1");
+  p1.getContext("2d").drawImage(art.carPreview(car, 360, 200), 0, 0);
+  const p2 = overlay.querySelector("#hb-prev-p2");
+  const g2 = p2.getContext("2d");
+  if (foe) {
+    g2.translate(360, 0);
+    g2.scale(-1, 1);
+    g2.drawImage(art.carPreview({ ...foe }, 360, 200), 0, 0);
+  } else {
+    g2.fillStyle = "#ff3b5c";
+    g2.font = "bold 90px monospace";
+    g2.textAlign = "center";
+    g2.fillText("?", 180, 135);
+  }
+  overlay.querySelector("[data-act=start]")?.focus();
+  fillThumbs();
+}
 
-  /* Title */
-  ctx.fillStyle = "#9933ff";
-  ctx.font = "bold 20px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-  ctx.fillText("HEADBUTT // BATTLE GARAGE", W / 2, 34);
-
-  const cols = 6, cardW = 130, cardH = 68, gap = 10;
-  const gridW = cols * (cardW + gap) - gap;
-  const startX = (W - gridW) / 2;
-  const startY = 60;
-
-  /* 12 Vehicle Cards */
-  for (let i = 0; i < VEHICLE_KEYS.length; i++) {
-    const key = VEHICLE_KEYS[i];
-    const def = VEHICLES[key];
-    const col = i % cols, row = Math.floor(i / cols);
-    const cx = startX + col * (cardW + gap);
-    const cy = startY + row * (cardH + gap);
-
-    const isP1 = state.selP1 === i;
-    const isP2 = state.selP2 === i;
-    const hover = input.mouse.x >= cx && input.mouse.x <= cx + cardW &&
-                  input.mouse.y >= cy && input.mouse.y <= cy + cardH;
-
-    ctx.fillStyle = isP1 ? "rgba(0, 240, 255, 0.2)" :
-                    isP2 ? "rgba(255, 51, 85, 0.2)" :
-                    hover ? "rgba(153, 51, 255, 0.2)" : "rgba(35, 30, 50, 0.5)";
-    ctx.fillRect(cx, cy, cardW, cardH);
-
-    ctx.strokeStyle = isP1 ? "#00f0ff" : isP2 ? "#ff3355" : hover ? "#bb66ff" : "#443860";
-    ctx.lineWidth = isP1 || isP2 ? 2.5 : 1;
-    ctx.strokeRect(cx, cy, cardW, cardH);
-
-    /* Mini pixel-art vehicle preview */
-    ctx.save();
-    ctx.translate(cx + cardW / 2, cy + 26);
-    ctx.scale(0.55, 0.55);
-    const drawFn = DRAW[key];
-    if (drawFn) drawFn(0, 0, 0, def);
-    drawWheel(-def.wheelBase / 2, def.chassisH / 2 + 2, 0, def.wheelRadius * 0.75, def.color2);
-    drawWheel(def.wheelBase / 2, def.chassisH / 2 + 2, 0, def.wheelRadius * 0.75, def.color2);
-    ctx.restore();
-
-    /* Labels */
-    ctx.fillStyle = "#ddd";
-    ctx.font = "7px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-    ctx.fillText(def.name.toUpperCase(), cx + cardW / 2, cy + cardH - 6);
-
-    if (isP1) {
-      ctx.fillStyle = "#00f0ff"; ctx.font = "bold 8px 'Press Start 2P', monospace"; ctx.textAlign = "left";
-      ctx.fillText("PLAYER", cx + 6, cy + 12);
+overlay.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  sfx.click();
+  if (b.dataset.car) {
+    const i = CAR_KEYS.indexOf(prefs.car);
+    prefs.car = CAR_KEYS[(i + Number(b.dataset.car) + CAR_KEYS.length) % CAR_KEYS.length];
+  } else if (b.dataset.foe) {
+    const list = ["random", ...CAR_KEYS];
+    const i = list.indexOf(prefs.foeCar);
+    prefs.foeCar = list[(i + Number(b.dataset.foe) + list.length) % list.length];
+  } else if (b.dataset.bot) {
+    if (b.dataset.bot === "friend") prefs.mode = "friend";
+    else {
+      prefs.mode = "bot";
+      prefs.bot = b.dataset.bot;
     }
-    if (isP2) {
-      ctx.fillStyle = "#ff3355"; ctx.font = "bold 8px 'Press Start 2P', monospace"; ctx.textAlign = "right";
-      ctx.fillText("BOT", cx + cardW - 6, cy + 12);
-    }
+  } else if (b.dataset.arena) {
+    prefs.arena = b.dataset.arena;
+  } else if (b.dataset.act) {
+    const act = b.dataset.act;
+    if (act === "start") return startMatch();
+    if (act === "resume") return togglePause();
+    if (act === "rematch") return startMatch();
+    if (act === "garage") return renderGarage();
+    return;
   }
-
-  /* Bot Difficulty row */
-  const diffY = startY + 2 * (cardH + gap) + 12;
-  const diffs = ["ROOKIE", "VETERAN", "CHAMPION"];
-  const dbW = 110, dbGap = 15;
-  const dStartX = W / 2 - (diffs.length * dbW + (diffs.length - 1) * dbGap) / 2;
-
-  ctx.fillStyle = "#aaa"; ctx.font = "9px 'Press Start 2P', monospace"; ctx.textAlign = "right";
-  ctx.fillText("BOT AI:", dStartX - 14, diffY + 18);
-
-  for (let i = 0; i < diffs.length; i++) {
-    const dx = dStartX + i * (dbW + dbGap);
-    const sel = state.aiDifficulty === i;
-    const hover = input.mouse.x >= dx && input.mouse.x <= dx + dbW &&
-                  input.mouse.y >= diffY && input.mouse.y <= diffY + 28;
-
-    ctx.fillStyle = sel ? "rgba(255, 51, 85, 0.4)" : hover ? "rgba(255, 51, 85, 0.2)" : "rgba(40,30,50,0.4)";
-    ctx.fillRect(dx, diffY, dbW, 28);
-    ctx.strokeStyle = sel ? "#ff3355" : hover ? "#ff6688" : "#553850";
-    ctx.lineWidth = sel ? 2 : 1;
-    ctx.strokeRect(dx, diffY, dbW, 28);
-
-    ctx.fillStyle = sel ? "#fff" : "#aaa";
-    ctx.font = "8px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-    ctx.fillText(diffs[i], dx + dbW / 2, diffY + 17);
-  }
-
-  /* Arena selection (2 rows of 6 cards for 12 arenas) */
-  const aCols = 6, aCardW = 132, aCardH = 42, aGapX = 10, aGapY = 8;
-  const aGridW = aCols * (aCardW + aGapX) - aGapX;
-  const aStartX = (W - aGridW) / 2;
-  const arenaY = diffY + 40;
-
-  for (let i = 0; i < ARENA_KEYS.length; i++) {
-    const key = ARENA_KEYS[i];
-    const def = ARENAS[key];
-    const col = i % aCols, row = Math.floor(i / aCols);
-    const ax = aStartX + col * (aCardW + aGapX);
-    const ay = arenaY + row * (aCardH + aGapY);
-    const sel = state.selArena === i;
-    const hover = input.mouse.x >= ax && input.mouse.x <= ax + aCardW &&
-                  input.mouse.y >= ay && input.mouse.y <= ay + aCardH;
-
-    ctx.fillStyle = sel ? "rgba(153, 51, 255, 0.4)" : hover ? "rgba(153, 51, 255, 0.2)" : "rgba(35, 30, 50, 0.55)";
-    ctx.fillRect(ax, ay, aCardW, aCardH);
-
-    ctx.strokeStyle = sel ? "#bb66ff" : hover ? "#9933ff" : "#443860";
-    ctx.lineWidth = sel ? 2.5 : 1;
-    ctx.strokeRect(ax, ay, aCardW, aCardH);
-
-    /* Arena color bar */
-    ctx.fillStyle = def.accent || def.bg;
-    ctx.fillRect(ax + 2, ay + 2, aCardW - 4, 10);
-
-    /* Arena name */
-    ctx.fillStyle = sel ? "#ffffff" : "#cccccc";
-    ctx.font = "bold 7px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-    ctx.fillText(def.name.toUpperCase(), ax + aCardW / 2, ay + aCardH - 9);
-  }
-
-  /* START MATCH button */
-  const btnY = arenaY + 2 * (aCardH + aGapY) + 14;
-  const btnW = 260, btnH = 44;
-  const bx = W / 2 - btnW / 2;
-  const hoverStart = input.mouse.x >= bx && input.mouse.x <= bx + btnW &&
-                     input.mouse.y >= btnY && input.mouse.y <= btnY + btnH;
-
-  ctx.fillStyle = hoverStart ? "rgba(153, 51, 255, 0.5)" : "rgba(153, 51, 255, 0.25)";
-  ctx.fillRect(bx, btnY, btnW, btnH);
-  ctx.strokeStyle = hoverStart ? "#d488ff" : "#9933ff";
-  ctx.lineWidth = 2.5;
-  ctx.strokeRect(bx, btnY, btnW, btnH);
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 13px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-  ctx.fillText("START MATCH", W / 2, btnY + btnH / 2 + 5);
-
-  /* Quick hint */
-  ctx.fillStyle = "#888";
-  ctx.font = "8px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-  ctx.fillText("LEFT CLICK = SELECT YOUR CAR  •  RIGHT CLICK = SELECT BOT CAR", W / 2, H - 20);
-  ctx.fillText("PRESS SPACE OR ENTER TO COMMENCE BATTLE", W / 2, H - 7);
-}
-
-function renderCountdown() {
-  renderArena();
-  if (state.vehicles[0]) renderVehicle(state.vehicles[0]);
-  if (state.vehicles[1]) renderVehicle(state.vehicles[1]);
-  renderHUD();
-
-  const secs = Math.ceil(state.countdownTimer - 0.4);
-  const text = secs > 0 ? String(secs) : "HEADBUTT!";
-  const scale = secs > 0 ? 1 + (1 - (state.countdownTimer % 1)) * 0.35 : 1.25;
-
-  ctx.save();
-  ctx.translate(W / 2, H / 2 - 20);
-  ctx.scale(scale, scale);
-  ctx.fillStyle = secs > 0 ? "#ffffff" : "#ff3300";
-  ctx.font = secs > 0 ? "bold 64px 'Press Start 2P', monospace" : "bold 32px 'Press Start 2P', monospace";
-  ctx.textAlign = "center";
-  ctx.fillText(text, 0, 0);
-  ctx.restore();
-
-  ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
-  ctx.fillRect(0, 0, W, H);
-}
-
-function renderRoundEnd() {
-  renderArena();
-  if (state.vehicles[0]) renderVehicle(state.vehicles[0]);
-  if (state.vehicles[1]) renderVehicle(state.vehicles[1]);
-  renderParticles();
-  renderHUD();
-
-  const winner = state.roundWinner;
-  const label = winner === 0 ? "PLAYER WINS ROUND!" : "BOT WINS ROUND!";
-  const color = winner === 0 ? "#00f0ff" : "#ff3355";
-
-  ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-  ctx.fillRect(0, H / 2 - 38, W, 76);
-
-  ctx.fillStyle = color;
-  ctx.font = "bold 22px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-  ctx.fillText(label, W / 2, H / 2 + 8);
-}
-
-function renderMatchEnd() {
-  ctx.fillStyle = "#0c0618";
-  ctx.fillRect(0, 0, W, H);
-
-  const winner = state.matchWinner;
-  const label = winner === 0 ? "🏆 PLAYER WINS THE MATCH! 🏆" : "💀 BOT WINS THE MATCH 💀";
-  const color = winner === 0 ? "#00f0ff" : "#ff3355";
-
-  ctx.fillStyle = color;
-  ctx.font = "bold 20px 'Press Start 2P', monospace"; ctx.textAlign = "center";
-  ctx.fillText(label, W / 2, 170);
-
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 34px 'Press Start 2P', monospace";
-  ctx.fillText(`${state.scores[0]}  -  ${state.scores[1]}`, W / 2, 240);
-
-  const p = getProgress();
-  ctx.fillStyle = "#aaa"; ctx.font = "10px 'Press Start 2P', monospace";
-  ctx.fillText(`TOTAL MATCH WINS: ${p.wins}  |  CURRENT STREAK: ${state.streak}`, W / 2, 300);
-
-  const flash = Math.sin(performance.now() / 350) > 0;
-  if (flash) {
-    ctx.fillStyle = "#9933ff";
-    ctx.font = "12px 'Press Start 2P', monospace";
-    ctx.fillText("PRESS SPACE FOR REMATCH", W / 2, 380);
-    ctx.fillText("PRESS ESC FOR GARAGE", W / 2, 410);
-  }
-}
-
-function updateMatchEnd() {
-  if (input.wasPressed("Space") || input.wasPressed("Enter") || input.mouse.clicked) {
-    sfx.click();
-    startMatch();
-  }
-  if (input.wasPressed("Escape") || input.wasPressed("KeyG")) {
-    sfx.click();
-    state.screen = S.GARAGE;
-    state.matchWinner = -1;
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════
- *  SECTION 17: GAME LOOP & TIMESTEP
- * ═══════════════════════════════════════════════════════════════ */
-function update(dt) {
-  const clickedGarageBtn = input.mouse.clicked && input.mouse.x >= 20 && input.mouse.x <= 135 && input.mouse.y >= 52 && input.mouse.y <= 74;
-
-  switch (state.screen) {
-    case S.GARAGE:
-      updateGarage();
-      break;
-
-    case S.COUNTDOWN:
-      if (input.wasPressed("Escape") || input.wasPressed("KeyG") || clickedGarageBtn) {
-        sfx.click();
-        clearPhysics();
-        state.screen = S.GARAGE;
-        state.matchWinner = -1;
-        break;
-      }
-      state.countdownTimer -= dt;
-      if (mEngine) Engine.update(mEngine, PHYSICS_DT);
-      if (state.countdownTimer <= 0) {
-        startPlaying();
-        playTone(850, 0.12, "square");
-      } else if (state.countdownTimer <= COUNTDOWN_SECS) {
-        const prev = Math.ceil(state.countdownTimer + dt);
-        const curr = Math.ceil(state.countdownTimer);
-        if (prev !== curr) playTone(440, 0.08, "square");
-      }
-      break;
-
-    case S.PLAYING:
-      if (input.wasPressed("Escape") || input.wasPressed("KeyG") || clickedGarageBtn) {
-        sfx.click();
-        clearPhysics();
-        state.screen = S.GARAGE;
-        state.matchWinner = -1;
-        break;
-      }
-      handlePlayerInput(dt);
-      updateAI(dt);
-
-      /* Fixed 60 Hz physics step */
-      state.physicsAccum += dt * 1000;
-      let steps = 0;
-      while (state.physicsAccum >= PHYSICS_DT && steps < 4) {
-        Engine.update(mEngine, PHYSICS_DT);
-        state.physicsAccum -= PHYSICS_DT;
-        steps++;
-      }
-      if (state.physicsAccum > PHYSICS_DT * 4) state.physicsAccum = 0;
-
-      updateHazards(dt);
-
-      /* Round Timer */
-      state.roundTimer -= dt;
-      if (state.roundTimer <= 0 && !state.suddenDeath) {
-        state.suddenDeath = true;
-        state.roundTimer = 15;
-        shakeScreen(10);
-        toast({ title: "⚡ SUDDEN DEATH ⚡", body: "15s remaining! Hazards intensified!", icon: "sparkle" });
-      }
-      if (state.suddenDeath && state.roundTimer <= 0) {
-        /* Sudden death timeout: vehicle with higher Y position (head height) wins */
-        const p1Y = state.vehicles[0].headBody.position.y;
-        const p2Y = state.vehicles[1].headBody.position.y;
-        endRound(p1Y < p2Y ? 0 : 1);
-      }
-
-      /* Ring-out bounds check */
-      for (let i = 0; i < 2; i++) {
-        const ch = state.vehicles[i].chassis;
-        if (ch.position.y > H + 80 || ch.position.x < -100 || ch.position.x > W + 100) {
-          endRound(1 - i);
-          break;
-        }
-      }
-
-      updateParticles(dt);
-      break;
-
-    case S.ROUND_END:
-      if (input.wasPressed("Escape") || input.wasPressed("KeyG") || clickedGarageBtn) {
-        sfx.click();
-        clearPhysics();
-        state.screen = S.GARAGE;
-        state.matchWinner = -1;
-        break;
-      }
-      state.roundEndTimer -= dt;
-      updateParticles(dt);
-      if (mEngine) Engine.update(mEngine, PHYSICS_DT);
-      if (state.roundEndTimer <= 0) finishRound();
-      break;
-
-    case S.MATCH_END:
-      updateMatchEnd();
-      break;
-  }
-
-  input.clearJustPressed();
-}
-
-function render(dt, { paused, fps }) {
-  ctx.save();
-  if (state.screenShake.intensity > 0) {
-    ctx.translate(state.screenShake.x, state.screenShake.y);
-  }
-
-  switch (state.screen) {
-    case S.GARAGE:
-      renderGarage();
-      break;
-    case S.COUNTDOWN:
-      renderCountdown();
-      break;
-    case S.PLAYING:
-      renderArena();
-      if (state.vehicles[0]) renderVehicle(state.vehicles[0]);
-      if (state.vehicles[1]) renderVehicle(state.vehicles[1]);
-      renderParticles();
-      renderHUD();
-      break;
-    case S.ROUND_END:
-      renderRoundEnd();
-      break;
-    case S.MATCH_END:
-      renderMatchEnd();
-      break;
-  }
-
-  ctx.restore();
-
-  /* Minimal FPS debug watermark */
-  ctx.fillStyle = "rgba(255,255,255,0.25)";
-  ctx.font = "8px monospace"; ctx.textAlign = "right";
-  ctx.fillText(`${fps} FPS`, W - 8, H - 6);
-}
-
-/* ── Loop Start ────────────────────────────────────────────────── */
-const loop = createGameLoop({
-  canvas, update, render, targetFps: 60,
+  savePrefs();
+  const scroll = overlay.querySelector(".hb-panel")?.scrollTop || 0;
+  renderGarage();
+  const panel = overlay.querySelector(".hb-panel");
+  if (panel) panel.scrollTop = scroll;
 });
-loop.start();
+
+// ─────────────────────────── update ───────────────────────────
+let acc = 0;
+let last = performance.now();
+function update(dtReal) {
+  if (game.screen === "countdown") {
+    const before = Math.ceil(game.countdown);
+    game.countdown -= dtReal;
+    if (Math.ceil(game.countdown) !== before && game.countdown > 0) playTone(520, 0.08, "square", 0.06);
+    if (game.countdown <= 0) {
+      game.screen = "play";
+      playTone(880, 0.2, "square", 0.08);
+    }
+  }
+  const live = game.screen === "countdown" || game.screen === "play" || game.screen === "ko";
+  if (!live) return;
+
+  // Slow motion during the knockout
+  let scale = 1;
+  if (game.screen === "ko") {
+    game.koClock += dtReal;
+    scale = game.koClock < 1.3 ? 0.22 : 1;
+    if (game.koClock > 2.6) {
+      endKo();
+      return;
+    }
+  }
+  if (game.screen === "play") {
+    game.timer -= dtReal;
+    if (game.timer <= 0 && !game.overtime) {
+      game.overtime = true;
+      sfx.warn();
+      startOvertime();
+    }
+    // Inputs
+    for (const car of game.cars) {
+      if (car.ai) {
+        botThink(car, game.cars[1 - car.idx], dtReal);
+        car.input = { throttle: car.ai.throttle, boost: car.ai.boost };
+      } else car.input = humanInput(car.idx);
+    }
+  } else {
+    for (const car of game.cars) car.input = { throttle: 0, boost: false };
+  }
+
+  acc += dtReal * 1000 * scale;
+  let steps = 0;
+  while (acc >= STEP_MS && steps < 8) {
+    game.frame++;
+    for (const car of game.cars) driveCar(car, STEP_MS / 1000);
+    if (game.overtime) advanceOvertime(STEP_MS / 1000);
+    stepFeatures(STEP_MS / 1000);
+    Engine.update(game.engine, STEP_MS);
+    settleMeteors();
+    acc -= STEP_MS;
+    steps++;
+    if (game.screen === "play") {
+      // Falling off the map counts as a knockout
+      for (const car of game.cars) {
+        if (car.body.position.y > (ARENAS[game.cfg.arena].fallY || 900)) game.knockouts.push({ loser: car.idx, by: "fall", x: car.body.position.x, y: H });
+        // Helmet under the surface: drowned (or dissolved in acid)
+        if (game.liquid && car.head.position.y > game.liquid.y + 4) game.knockouts.push({ loser: car.idx, by: game.liquid.kind === "acid" ? "acid" : "drown", x: car.head.position.x, y: game.liquid.y });
+      }
+      if (game.knockouts.length) {
+        const res = resolveRound(game.knockouts);
+        if (res) knockout(res, game.knockouts);
+        game.knockouts = [];
+      }
+    } else game.knockouts = [];
+  }
+  if (steps >= 8) acc = 0;
+
+  // Exhaust and boost flames
+  for (const car of game.cars) {
+    const b = car.body;
+    const back = { x: b.position.x - Math.cos(b.angle) * car.facing * 60, y: b.position.y - Math.sin(b.angle) * car.facing * 60 + 8 };
+    if (Math.abs(car.input.throttle) > 0 && Math.random() < 0.4) fx.spawn({ x: back.x, y: back.y, vx: -car.facing * 30, vy: -20, life: 0.5, size: 4, grow: 10, color: "#b9bcc4", kind: "smoke", alpha: 0.35 });
+    if (car.boostFx > 0) for (let k = 0; k < 3; k++) fx.spawn({ x: back.x, y: back.y, vx: -Math.cos(b.angle) * car.facing * 260, vy: -Math.sin(b.angle) * car.facing * 260, life: 0.3, size: 6, grow: 8, color: "#ffd23f", color2: "#ff3b1f", kind: "smoke", alpha: 0.9 });
+  }
+  fx.update(dtReal * scale);
+  game.shake = Math.max(0, game.shake - dtReal * 30);
+  game.excite = Math.max(0, game.excite - dtReal * 0.4);
+
+  // Engine note follows the player's throttle
+  const p = game.cars[0];
+  setEngineHum(game.screen === "play", { throttle: Math.abs(p.input.throttle) * 0.7 + Math.min(1, Math.hypot(p.body.velocity.x, p.body.velocity.y) / 12) * 0.5, baseFreq: 48 });
+}
+
+function startOvertime() {
+  const arena = ARENAS[game.cfg.arena];
+  if (arena.overtime === "lava" && game.lavaRise) return;
+  if ((arena.overtime === "flood" || arena.overtime === "acid") && game.liquid) {
+    game.rising = true;
+    return;
+  }
+  if (arena.overtime === "saws") {
+    for (const x of [320, 640, 960]) {
+      const b = Bodies.circle(x, -70, 54, { isStatic: true, label: "saw" });
+      b.sawR = 54;
+      b.spin = 10;
+      b.dropping = true;
+      b.baseX = x;
+      b.phase = x * 0.01;
+      game.saws.push(b);
+      Composite.add(game.engine.world, b);
+    }
+    return;
+  }
+  const crusher = Bodies.rectangle(W / 2, -60, W + 200, 120, { isStatic: true, label: "hazard" });
+  Composite.add(game.engine.world, crusher);
+  game.crusher = crusher;
+}
+function advanceOvertime(dt) {
+  if (game.rising && game.liquid) game.liquid.y = Math.max(250, game.liquid.y - (game.liquid.kind === "acid" ? 11 : 13) * dt);
+  // Sudden-death saws sink all the way to the floor, swaying so there's nowhere to hide
+  for (const s of game.saws) {
+    if (!s.dropping) continue;
+    const y = Math.min(720, s.position.y + 48 * dt);
+    const x = s.baseX + Math.sin(game.simT * 0.9 + s.phase) * 115;
+    Body.setPosition(s, { x, y });
+  }
+  if (game.crusher && game.crusher.position.y < 330) Body.setPosition(game.crusher, { x: W / 2, y: game.crusher.position.y + 26 * dt });
+  if (game.lavaRise && ARENAS[game.cfg.arena].overtime === "lava" && game.lavaRise.position.y > 470) {
+    Body.setPosition(game.lavaRise, { x: game.lavaRise.position.x, y: game.lavaRise.position.y - 14 * dt });
+    // The pool also spreads across the whole floor once it tops the banks
+    if (game.lavaRise.position.y < 600 && !game.lavaRise.widened) {
+      game.lavaRise.widened = true;
+      const wide = Bodies.rectangle(W / 2, game.lavaRise.position.y, W + 200, 120, { isStatic: true, isSensor: true, label: "hazard" });
+      wide.kind = "lava";
+      wide.rect = [W / 2, 0, W + 200, 120];
+      Composite.remove(game.engine.world, game.lavaRise);
+      Composite.add(game.engine.world, wide);
+      game.hazards = game.hazards.filter((h) => h !== game.lavaRise).concat(wide);
+      game.lavaRise = wide;
+    }
+  }
+}
+
+// ─────────────────────────── render ───────────────────────────
+function carTransform(car) {
+  const b = car.body;
+  ctx.translate(b.position.x, b.position.y);
+  ctx.rotate(b.angle);
+  ctx.translate(car.origin.x, car.origin.y);
+}
+
+function drawCar(car, t) {
+  const b = car.body;
+  // Ground shadow
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.beginPath();
+  ctx.ellipse(b.position.x, Math.min(H - 60, b.position.y + 60), 70, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.save();
+  carTransform(car);
+  if (car.facing === -1) ctx.scale(-1, 1);
+  art.drawCarBody(ctx, car.base, t, { mirrored: car.facing === -1 });
+  if (!car.headless) {
+    const hd = car.base.head;
+    art.drawHelmet(ctx, hd.x, hd.y, hd.r, car.color, t, { target: true });
+  }
+  ctx.restore();
+  for (const w of car.wheels) art.drawWheel(ctx, w.position.x, w.position.y, w.circleRadius, w.angle, car.base.accent);
+}
+
+function render(now) {
+  const t = now / 1000;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (!game.arenaArt) game.arenaArt = art.buildArenaArt(previewArena(), ARENAS[previewArena()]);
+  const aa = game.arenaArt;
+  // Camera: gentle zoom toward the knockout
+  const cam = game.cam;
+  const wantZ = game.screen === "ko" && game.koClock < 1.6 ? 1.45 : 1;
+  const wantX = game.screen === "ko" && game.koClock < 1.6 ? game.focus.x : W / 2;
+  const wantY = game.screen === "ko" && game.koClock < 1.6 ? game.focus.y : H / 2;
+  cam.z += (wantZ - cam.z) * 0.08;
+  cam.x += (wantX - cam.x) * 0.08;
+  cam.y += (wantY - cam.y) * 0.08;
+  const sx = (Math.random() - 0.5) * game.shake;
+  const sy = (Math.random() - 0.5) * game.shake;
+  const cx = Math.max(W / 2 / cam.z, Math.min(W - W / 2 / cam.z, cam.x));
+  const cy = Math.max(H / 2 / cam.z, Math.min(H - H / 2 / cam.z, cam.y));
+  ctx.setTransform(cam.z, 0, 0, cam.z, W / 2 - cx * cam.z + sx, H / 2 - cy * cam.z + sy);
+
+  ctx.drawImage(aa.img, 0, 0);
+  art.drawLights(ctx, aa.lights, t);
+  art.drawCrowd(ctx, aa.crowd, t, game.excite);
+  if (game.cfg || game.screen !== "garage") {
+    if (game.engine) {
+      const theme = ARENAS[game.cfg.arena].theme;
+      drawFeaturesBack(t, theme);
+      for (const s of game.statics) {
+        if (s.shape.deco === "hidden") continue;
+        if (theme === "void") {
+          // The Invisible Map: only a faint shimmer gives the ground away
+          ctx.save();
+          ctx.globalAlpha = 0.05 + Math.max(0, Math.sin(t * 1.3 + s.position.x * 0.01)) * 0.05;
+          art.drawSolid(ctx, "sand", s.shape, s.vertices.map((v) => [v.x, v.y]));
+          ctx.restore();
+          continue;
+        }
+        art.drawSolid(ctx, theme, s.shape, s.vertices.map((v) => [v.x, v.y]));
+      }
+      if (game.seesaw) {
+        const p = game.seesaw.plank;
+        art.drawSolid(ctx, theme, { deco: "plank" }, p.vertices.map((v) => [v.x, v.y]));
+      }
+      for (const h of game.hazards) {
+        const bb = h.bounds;
+        if (h.kind === "lava") art.drawLava(ctx, bb.min.x, bb.min.y, bb.max.x - bb.min.x, bb.max.y - bb.min.y + 200, t);
+        else art.drawSpikes(ctx, bb.min.x, bb.min.y, bb.max.x - bb.min.x, bb.max.y - bb.min.y);
+      }
+      for (const car of game.cars) drawCar(car, t);
+      drawFeaturesFront(t);
+      if (game.helmet) {
+        const hb = game.helmet.body;
+        ctx.save();
+        ctx.translate(hb.position.x, hb.position.y);
+        ctx.rotate(hb.angle);
+        art.drawHelmet(ctx, 0, 0, game.helmet.r, game.helmet.color, t, { noBody: true });
+        ctx.restore();
+      }
+      if (game.crusher) {
+        const cb = game.crusher.bounds;
+        ctx.fillStyle = "#1c1d24";
+        ctx.fillRect(cb.min.x, cb.min.y, cb.max.x - cb.min.x, cb.max.y - cb.min.y);
+        ctx.fillStyle = "#ffd23f";
+        for (let x = cb.min.x; x < cb.max.x; x += 60) {
+          ctx.beginPath();
+          ctx.moveTo(x, cb.max.y - 26);
+          ctx.lineTo(x + 30, cb.max.y - 26);
+          ctx.lineTo(x + 18, cb.max.y - 14);
+          ctx.lineTo(x - 12, cb.max.y - 14);
+          ctx.fill();
+        }
+        art.drawSpikes(ctx, cb.min.x, cb.max.y, cb.max.x - cb.min.x, 22, true);
+      }
+    }
+  }
+  fx.draw(ctx);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  vignette(ctx, W, H, 0.35);
+  if (game.engine && game.screen !== "garage") drawHud(t);
+}
+
+const verts = (b) => b.vertices.map((v) => [v.x, v.y]);
+function drawFeaturesBack(t, theme) {
+  const pd = ARENAS[game.cfg.arena].pendulum;
+  if (pd) {
+    const s = game.kin.find((k) => k.body.label === "saw" && k.body.pivot)?.body;
+    if (s) {
+      ctx.strokeStyle = "#8a93a3";
+      ctx.lineWidth = 6;
+      ctx.setLineDash([10, 6]);
+      ctx.beginPath();
+      ctx.moveTo(pd.x, pd.y);
+      ctx.lineTo(s.position.x, s.position.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#1c1d24";
+      ctx.beginPath();
+      ctx.arc(pd.x, pd.y, 14, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  for (const k of game.kin) {
+    const b = k.body;
+    if (b.isDome) for (const part of b.parts.slice(1)) art.drawSolid(ctx, "dome", { deco: "cage" }, verts(part));
+    else if (b.deco === "rotor") {
+      art.drawSolid(ctx, theme, { deco: "rotor" }, verts(b));
+      ctx.fillStyle = "#ffd23f";
+      ctx.beginPath();
+      ctx.arc(b.position.x, b.position.y, 9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  for (const b of game.props) art.drawSolid(ctx, theme, b.shape, verts(b));
+  for (const f of game.floaters) {
+    const parts = f.parts.length > 1 ? f.parts.slice(1) : [f];
+    for (const part of parts) art.drawSolid(ctx, theme, { deco: part.deco || f.deco }, verts(part));
+  }
+  for (const s of game.saws) art.drawSaw(ctx, s.position.x, s.position.y, s.sawR, t * (s.spin || 9));
+  for (const k of game.kin) if (k.body.label === "saw") art.drawSaw(ctx, k.body.position.x, k.body.position.y, k.body.sawR, k.body.angle);
+}
+function drawFeaturesFront(t) {
+  for (const m of game.meteors) art.drawMeteor(ctx, m.position.x, m.position.y, m.mr, m.angle, m.velocity.x, m.velocity.y, t, m.cow);
+  if (game.liquid) art.drawLiquid(ctx, game.liquid.y, game.liquid.kind, t);
+}
+
+function pips(x, y, n, color, alignRight) {
+  for (let k = 0; k < WINS_NEEDED; k++) {
+    const px = alignRight ? x - k * 26 : x + k * 26;
+    ctx.beginPath();
+    ctx.arc(px, y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = k < n ? color : "rgba(255,255,255,0.08)";
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = k < n ? "#ffffff" : "rgba(255,255,255,0.25)";
+    ctx.stroke();
+  }
+}
+
+function drawHud(t) {
+  const DISP = "'Press Start 2P', monospace";
+  const p0 = game.cars[0];
+  const p1 = game.cars[1];
+  // Score cards
+  const card = (x, align, car, name, score) => {
+    ctx.fillStyle = "rgba(8,6,14,0.78)";
+    ctx.fillRect(x, 14, 330, 70);
+    ctx.fillStyle = car.color;
+    ctx.fillRect(align === "right" ? x + 324 : x, 14, 6, 70);
+    ctx.font = `12px ${DISP}`;
+    ctx.textAlign = align;
+    ctx.fillStyle = car.color;
+    ctx.fillText(name, align === "right" ? x + 312 : x + 18, 38);
+    pips(align === "right" ? x + 300 : x + 30, 62, score, car.color, align === "right");
+    // Boost meter
+    const k = 1 - car.boostCd / BOOST_COOLDOWN;
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.fillRect(align === "right" ? x + 18 : x + 170, 55, 140, 8);
+    ctx.fillStyle = k >= 1 ? "#ffd23f" : "#7a6a2a";
+    const bw = 140 * Math.min(1, k);
+    ctx.fillRect(align === "right" ? x + 158 - bw : x + 170, 55, bw, 8);
+    ctx.font = `7px ${DISP}`;
+    ctx.fillStyle = k >= 1 ? "#ffd23f" : "#8a8a9a";
+    ctx.fillText("BOOST", align === "right" ? x + 88 : x + 240, 50);
+  };
+  const foeName = game.cfg.mode === "friend" ? "PLAYER 2" : `${BOTS[game.cfg.bot].label} BOT`;
+  card(14, "left", p0, game.cfg.mode === "friend" ? "PLAYER 1" : "YOU", game.scores[0]);
+  card(W - 344, "right", p1, foeName, game.scores[1]);
+  // Timer
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(8,6,14,0.78)";
+  ctx.fillRect(W / 2 - 90, 14, 180, 70);
+  ctx.font = `28px ${DISP}`;
+  ctx.fillStyle = game.overtime ? (Math.sin(t * 10) > 0 ? "#ff3b3b" : "#ffd23f") : "#ffffff";
+  ctx.fillText(game.overtime ? "SD" : String(Math.max(0, Math.ceil(game.timer))), W / 2, 58);
+  ctx.font = `8px ${DISP}`;
+  ctx.fillStyle = "#9a90b8";
+  ctx.fillText(`ROUND ${game.round}`, W / 2, 76);
+
+  if (game.overtime && game.screen === "play") {
+    ctx.font = `18px ${DISP}`;
+    ctx.fillStyle = Math.sin(t * 8) > 0 ? "#ff3b3b" : "#ffd23f";
+    const ot = ARENAS[game.cfg.arena].overtime;
+    const sdText = { lava: "THE LAVA RISES", flood: "THE WATER RISES", acid: "THE ACID RISES", saws: "SAWBLADES DESCENDING", crusher: "CRUSHER" }[ot] || "CRUSHER";
+    ctx.fillText(`SUDDEN DEATH — ${sdText}`, W / 2, 118);
+  }
+  if (game.screen === "countdown") {
+    const n = Math.ceil(game.countdown);
+    const f = game.countdown - Math.floor(game.countdown);
+    ctx.font = `${80 + f * 40}px ${DISP}`;
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#0b0a10";
+    ctx.lineWidth = 8;
+    const txt = n > 3 ? `ROUND ${game.round}` : String(n);
+    if (n > 3) ctx.font = `44px ${DISP}`;
+    ctx.strokeText(txt, W / 2, H / 2);
+    ctx.fillText(txt, W / 2, H / 2);
+    ctx.font = `10px ${DISP}`;
+    ctx.fillStyle = "#c9c0e6";
+    ctx.fillText("HIT THEIR HELMET • PROTECT YOURS", W / 2, H / 2 + 60);
+  }
+  if (game.screen === "play" && game.timer > ROUND_SECONDS - 0.8) {
+    ctx.font = `64px ${DISP}`;
+    ctx.fillStyle = "#ffd23f";
+    ctx.strokeStyle = "#0b0a10";
+    ctx.lineWidth = 8;
+    ctx.strokeText("GO!", W / 2, H / 2);
+    ctx.fillText("GO!", W / 2, H / 2);
+  }
+  if (game.screen === "ko" && game.result) {
+    const r = game.result;
+    const pop = Math.min(1, game.koClock * 3);
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 40);
+    ctx.scale(0.6 + pop * 0.4, 0.6 + pop * 0.4);
+    ctx.rotate(-0.06);
+    ctx.font = `64px ${DISP}`;
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = "#0b0a10";
+    const cause = game.knockoutsBy;
+    const hazardKind = game.crusher ? "CRUSHED!" : ARENAS[game.cfg.arena].theme === "volcano" ? "BURNED!" : "SPIKED!";
+    const causes = { fall: "OVERBOARD!", hazard: hazardKind, drown: "DROWNED!", acid: "DISSOLVED!", saw: "SLICED!", meteor: game.lastCow ? "MOOOO!" : "METEOR!" };
+    const label = r.draw ? "DOUBLE K.O." : causes[cause] || "HEADSHOT!";
+    ctx.strokeText(label, 0, 0);
+    ctx.fillStyle = r.draw ? "#ffffff" : game.cars[r.winner].color;
+    ctx.fillText(label, 0, 0);
+    ctx.font = `14px ${DISP}`;
+    ctx.fillStyle = "#ffffff";
+    const who = r.draw ? "NO POINT" : game.cfg.mode === "friend" ? `PLAYER ${r.winner + 1} SCORES` : r.winner === 0 ? "YOU SCORE" : "BOT SCORES";
+    ctx.fillText(who, 0, 44);
+    ctx.restore();
+  }
+}
+
+// ─────────────────────────── loop ───────────────────────────
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (game.screen !== "paused" && game.screen !== "matchEnd" && game.screen !== "garage") update(dt);
+  else fx.update(dt);
+  render(now);
+  requestAnimationFrame(frame);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && ["countdown", "play", "ko"].includes(game.screen)) togglePause();
+});
+
+game.arenaArt = art.buildArenaArt(previewArena(), ARENAS[previewArena()]);
+renderGarage();
+requestAnimationFrame(frame);
+
+// Debug/test hook (used by automated verification scripts).
+window.__headbutt = {
+  get game() {
+    return game;
+  },
+  prefs,
+  startMatch,
+  renderGarage,
+  keys
+};

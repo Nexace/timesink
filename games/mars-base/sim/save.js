@@ -78,8 +78,13 @@ function cleanSlots(arr, len) {
 export function deserialize(data) {
   if (!data || typeof data !== "object" || data.version !== SAVE_VERSION) return null;
   const seed = num(data.seed, 0, 0, 0xffffffff) >>> 0;
-  const world = generateWorld(seed);
+  // Older saves predate the bigger map: rebuild them at the size they were made on
+  const ww = Math.round(num(data.worldW, 384, 128, 2048));
+  const wh = Math.round(num(data.worldH, 384, 128, 2048));
+  const world = generateWorld(seed, { w: ww, h: wh });
   const s = data;
+  s.worldW = ww;
+  s.worldH = wh;
   s.seed = seed;
   s.mode = ["campaign", "endless", "daily"].includes(s.mode) ? s.mode : "campaign";
   s.tick = Math.floor(num(s.tick, 0, 0, 1e9));

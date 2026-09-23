@@ -8,7 +8,6 @@ const BASE_URL = "http://localhost:5173";
 const SLUGS = [
   "mars-base",
   "ground-zero",
-  "scale-jump",
   "diet-game",
   "ping-age",
   "rootkit",

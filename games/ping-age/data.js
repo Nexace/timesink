@@ -541,6 +541,23 @@ export function evaluateBadges(scores, chosenEraIndices, eras = ERAS) {
 /**
  * Generate a clean ASCII / Unicode shareable card
  */
+// Word-wrap `text` to `width` columns.
+function wrapText(text, width) {
+  const out = [];
+  let line = "";
+  for (const word of String(text).split(/\s+/)) {
+    if (!word) continue;
+    if (line && (line + " " + word).length > width) {
+      out.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) out.push(line);
+  return out.length ? out : [""];
+}
+
 export function formatDossierShareText({ winningEra, dna, badges }) {
   const dnaStr = dna
     .filter((d) => d.pct > 0)
@@ -552,18 +569,23 @@ export function formatDossierShareText({ winningEra, dna, badges }) {
       ? badges.map((b) => `${b.icon} ${b.name}`).join(", ")
       : "NONE (Standard Civilian)";
 
+  // Plain labelled lines wrap cleanly in every chat app (box-drawing art does not).
+  const LABEL = 13;
+  const row = (label, value) =>
+    wrapText(value, 46)
+      .map((part, i) => `${(i === 0 ? label : "").padEnd(LABEL)}${part}`)
+      .join("\n");
+
   return [
-    `┌────────────────────────────────────────────────────────┐`,
-    `│ PING AGE // DIGITAL ARCHAEOLOGY REPORT                 │`,
-    `├────────────────────────────────────────────────────────┤`,
-    `│ ERA:        ${winningEra.name} (${winningEra.dates})`.padEnd(57) + `│`,
-    `│ ARCHETYPE:  ${winningEra.archetype}`.padEnd(57) + `│`,
-    `│ HOLY RELIC: ${winningEra.dossier.relic}`.padEnd(57) + `│`,
-    `│ TRAUMA:     ${winningEra.dossier.trauma}`.padEnd(57) + `│`,
-    `│ HYBRID DNA: ${dnaStr}`.padEnd(57) + `│`,
-    `│ BADGES:     ${badgeStr}`.padEnd(57) + `│`,
-    `├────────────────────────────────────────────────────────┤`,
-    `│ Discover your digital archaeology: timesink.net/ping-age│`,
-    `└────────────────────────────────────────────────────────┘`,
+    "PING AGE // DIGITAL ARCHAEOLOGY REPORT",
+    "======================================",
+    row("ERA:", `${winningEra.name} (${winningEra.dates})`),
+    row("ARCHETYPE:", winningEra.archetype),
+    row("HOLY RELIC:", winningEra.dossier.relic),
+    row("TRAUMA:", winningEra.dossier.trauma),
+    row("HYBRID DNA:", dnaStr),
+    row("BADGES:", badgeStr),
+    "======================================",
+    "Find your era: https://timesink.vercel.app/games/ping-age",
   ].join("\n");
 }

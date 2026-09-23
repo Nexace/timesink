@@ -1,3 +1,8 @@
+/* Stage uses nearly the full window width */
+main.wrap.stage-page {
+  --game-content-w: min(1900px, calc(100vw - 24px));
+}
+
 /* ── TERAFORM RUN — 1-Bit Endless Runner ── */
 
 /* ── Layout ── */
@@ -9,8 +14,8 @@
 
 .tr-canvas-container {
   position: relative;
-  width: 100%;
-  max-width: 1440px;
+  /* Full page width, capped so the whole 1440×700 stage fits on screen */
+  width: min(100%, calc(max(400px, 100vh - 170px) * 1440 / 700));
   margin: 0 auto;
   border: 2px solid var(--accent, #f4f6f8);
   border-radius: 4px;
@@ -298,13 +303,26 @@
   border-radius: 4px;
   padding: 16px 12px;
   cursor: pointer;
-  transition: border-color 0.15s, transform 0.1s;
+  transition: border-color 0.15s, box-shadow 0.15s;
   text-align: center;
+  font: inherit;
+  color: inherit;
+  width: 100%;
 }
 
-.perk-card:hover {
+.perk-card:hover,
+.perk-card:focus-visible {
   border-color: var(--accent, #f4f6f8);
-  transform: translateY(-3px);
+  box-shadow: 0 0 12px rgba(244, 246, 248, 0.35);
+  outline: none;
+}
+
+.perk-card .perk-key {
+  display: block;
+  font-family: "Press Start 2P", monospace;
+  font-size: 8px;
+  color: #8a97b1;
+  margin-bottom: 6px;
 }
 
 .perk-card .perk-icon {

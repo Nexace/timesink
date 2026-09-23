@@ -2,6 +2,7 @@ import { initShell, escapeHtml, toast } from "/shared/shell.js";
 import { sfx } from "/shared/sound.js";
 import { saveScore } from "/shared/scores.js";
 import { createRuleEngine } from "/shared/rule-engine.js";
+import { ATOMIC_NUMBERS, parseRoman, getMoonPhaseName, calorieTotals, findNonVegan, stripPlantQualified, FOOD_EMOJI_RE, FOOD_EMOJI_ALL_RE } from "./engine.js";
 
 initShell({ crumb: "The Diet Game" });
 
@@ -25,45 +26,7 @@ let avocadoAddedTime = null;
 let fireAddedTime = null;
 let avocadoTimerInterval = null;
 let fireTimerInterval = null;
-
-function getMoonPhaseName(date = new Date()) {
-  let year = date.getUTCFullYear();
-  let month = date.getUTCMonth() + 1;
-  let day = date.getUTCDate();
-  if (month < 3) { year--; month += 12; }
-  let c = 365.25 * year;
-  let e = 30.6 * month;
-  let jd = c + e + day - 694039.09;
-  jd /= 29.5305882;
-  let b = parseInt(jd);
-  jd -= b;
-  let phase = Math.round(jd * 8) % 8;
-  const names = [
-    "new moon", "waxing crescent", "first quarter", "waxing gibbous",
-    "full moon", "waning gibbous", "last quarter", "waning crescent"
-  ];
-  return names[phase];
-}
-
-const ATOMIC_NUMBERS = {
-  H: 1, HE: 2, LI: 3, BE: 4, B: 5, C: 6, N: 7, O: 8, F: 9, NE: 10,
-  NA: 11, MG: 12, AL: 13, SI: 14, P: 15, S: 16, CL: 17, AR: 18,
-  K: 19, CA: 20, SC: 21, TI: 22, V: 23, CR: 24, MN: 25, FE: 26,
-  CO: 27, NI: 28, CU: 29, ZN: 30, GA: 31, GE: 32, AS: 33, SE: 34,
-  BR: 35, KR: 36, RB: 37, SR: 38, Y: 39, ZR: 40,
-};
-
-const ROMAN_VALS = { I: 1, V: 5, X: 10, L: 50, C: 100 };
-function parseRoman(str) {
-  let sum = 0;
-  for (let i = 0; i < str.length; i++) {
-    const curr = ROMAN_VALS[str[i]] || 0;
-    const next = ROMAN_VALS[str[i + 1]] || 0;
-    if (curr < next) { sum += next - curr; i++; }
-    else { sum += curr; }
-  }
-  return sum;
-}
+let hasWon = false;
 
 const FOOD_DICTIONARY = [
   // Plant-based proteins
@@ -144,7 +107,8 @@ const FOOD_DICTIONARY = [
 
   // Grains, Fast Food, Prepared items
   { pattern: /\b(?:pizza)\b/i, name: "Pizza", emoji: "🍕", category: "grain", isVegan: false },
-  { pattern: /\b(?:burgers?|veggie\s+burger)\b/i, name: "Burger", emoji: "🍔", category: "grain", isVegan: false },
+  { pattern: /\b(?:veggie|vegan|plant[\s-]?based|beyond|impossible|bean|mushroom)\s+burgers?\b/i, name: "Veggie Burger", emoji: "🍔", category: "grain", isVegan: true },
+  { pattern: /\b(?:(?:ham|cheese)?burgers?)\b/i, name: "Burger", emoji: "🍔", category: "grain", isVegan: false },
   { pattern: /\b(?:sandwich(?:es)?|wrap)\b/i, name: "Sandwich", emoji: "🥪", category: "grain", isVegan: true },
   { pattern: /\b(?:tacos?|burritos?)\b/i, name: "Taco", emoji: "🌮", category: "grain", isVegan: false },
   { pattern: /\b(?:oatmeal|oats|porridge)\b/i, name: "Oatmeal", emoji: "🥣", category: "grain", isVegan: true },
@@ -162,14 +126,18 @@ const FOOD_DICTIONARY = [
   // Desserts
   { pattern: /\b(?:cakes?|cupcakes?)\b/i, name: "Cake", emoji: "🍰", category: "dessert", isDessert: true, isVegan: false },
   { pattern: /\b(?:cookies?|biscuits?)\b/i, name: "Cookie", emoji: "🍪", category: "dessert", isDessert: true, isVegan: false },
-  { pattern: /\b(?:ice\s*cream|gelato|sorbet)\b/i, name: "Ice Cream", emoji: "🍨", category: "dessert", isDessert: true, isVegan: false },
+  { pattern: /\b(?:ice\s*cream|gelato)\b/i, name: "Ice Cream", emoji: "🍨", category: "dessert", isDessert: true, isVegan: false },
+  { pattern: /\b(?:sorbet)\b/i, name: "Sorbet", emoji: "🍧", category: "dessert", isDessert: true, isVegan: true },
+  { pattern: /\b(?:tiramisu)\b/i, name: "Tiramisu", emoji: "🍰", category: "dessert", isDessert: true, isVegan: false },
+  { pattern: /\b(?:cheesecake)\b/i, name: "Cheesecake", emoji: "🍰", category: "dessert", isDessert: true, isVegan: false },
+  { pattern: /\b(?:mousse)\b/i, name: "Mousse", emoji: "🍮", category: "dessert", isDessert: true, isVegan: false },
   { pattern: /\b(?:brownies?)\b/i, name: "Brownie", emoji: "🍫", category: "dessert", isDessert: true, isVegan: false },
   { pattern: /\b(?:chocolates?)\b/i, name: "Chocolate", emoji: "🍫", category: "dessert", isDessert: true, isVegan: true },
   { pattern: /\b(?:donuts?|doughnuts?)\b/i, name: "Donut", emoji: "🍩", category: "dessert", isDessert: true, isVegan: false },
   { pattern: /\b(?:puddings?|custard)\b/i, name: "Pudding", emoji: "🍮", category: "dessert", isDessert: true, isVegan: false },
   { pattern: /\b(?:pies?|tarts?)\b/i, name: "Pie", emoji: "🥧", category: "dessert", isDessert: true, isVegan: false },
   { pattern: /\b(?:pancakes?|waffles?)\b/i, name: "Pancakes", emoji: "🥞", category: "dessert", isDessert: true, isVegan: false },
-  { pattern: /\b(?:halwa|gulab\s+jamun|jalebi|kheer|rasgulla|sweets?)\b/i, name: "Mithai", emoji: "🍯", category: "dessert", isDessert: true, isVegan: false }
+  { pattern: /\b(?:halwa|gulab\s+jamun|jalebi|kheer|rasgulla|sweets?(?!\s+potato))\b/i, name: "Mithai", emoji: "🍯", category: "dessert", isDessert: true, isVegan: false }
 ];
 
 const DIET_RULES = [
@@ -177,8 +145,9 @@ const DIET_RULES = [
     id: "r1",
     label: "Include at least 3 distinct food items (separated by commas or lines).",
     test: (t) => {
-      const items = t.split(/[\n,]+/).map((s) => s.trim()).filter((s) => s.length > 2);
-      return items.length >= 3;
+      // Distinct items: "rice, rice, rice" is one food, not three
+      const items = new Set(t.split(/[\n,]+/).map((s) => s.trim().toLowerCase()).filter((s) => s.length > 2));
+      return { pass: items.size >= 3, note: `Distinct items: ${items.size}` };
     },
   },
   {
@@ -194,10 +163,9 @@ const DIET_RULES = [
     id: "r3",
     label: "Total calories must be listed and under 600 cal.",
     test: (t) => {
-      const m = t.match(/(\d+)\s*(?:cal|calories|kcal)/i);
-      if (!m) return { pass: false, note: "Specify calories, e.g. '450 cal'" };
-      const cal = parseInt(m[1], 10);
-      return { pass: cal < 600, note: `Current: ${cal} cal` };
+      const c = calorieTotals(t);
+      if (!c.entries.length) return { pass: false, note: "Specify calories, e.g. '450 cal'" };
+      return { pass: c.net < 600, note: `Current total: ${c.net} cal` };
     },
   },
   {
@@ -218,44 +186,38 @@ const DIET_RULES = [
     id: "r6",
     label: "Must be 100% vegan (no meat, eggs, dairy, poultry, or fish).",
     test: (t) => {
-      // Exclude matches that are explicitly qualified as plant-based or vegan
-      const qualifiedRegex = /\b(?:vegan|plant|plant-based|soy|soya|almond|oat|coconut|cashew|rice|hemp|tofu|seitan)\s+(?:steak|milk|cheese|meat|patty|butter|burger)\b/gi;
-      const stripped = t.replace(qualifiedRegex, "");
-      const nonVegan = /\b(chicken|beef|pork|bacon|turkey|duck|lamb|mutton|goat|veal|egg|eggs|dairy|butter|ghee|salmon|fish|tuna|cod|tilapia|trout|shrimp|prawn|prawns|crab|lobster|honey|paneer)\b/i;
-      const nonVeganMilkCheese = /\b(milk|cheese)\b/i;
-      const found = stripped.match(nonVegan) || stripped.match(nonVeganMilkCheese);
-      if (found) return { pass: false, note: `Disallowed: ${found[0]}` };
+      // Plant-based versions ("tofu steak", "oat milk", "veggie burger") are fine
+      const found = findNonVegan(t);
+      if (found) return { pass: false, note: `Not vegan: ${found} (try a plant-based version)` };
       return true;
     },
   },
   {
     id: "r7",
     label: "Must include steak (hint: plant-based steaks count).",
-    test: (t) => /\bsteak\b/i.test(t),
+    test: (t) => /\bsteaks?\b/i.test(t),
   },
   {
     id: "r8",
-    label: "Calories must now sum to exactly 1000.",
+    label: "The food calories (positive amounts) must now sum to exactly 1000.",
     test: (t) => {
-      const matches = [...t.matchAll(/(\d+)\s*(?:cal|kcal|calories)/gi)];
-      if (!matches.length) return { pass: false, note: "Include calorie amounts" };
-      const sum = matches.reduce((acc, m) => acc + parseInt(m[1], 10), 0);
-      return { pass: sum === 1000, note: `Current sum: ${sum} / 1000` };
+      const c = calorieTotals(t);
+      if (!c.entries.length) return { pass: false, note: "Include calorie amounts" };
+      return { pass: c.food === 1000, note: `Food calories: ${c.food} / 1000` };
     },
   },
   {
     id: "r9",
     label: "Include a dessert item.",
-    test: (t) => /\b(cake|cakes|cupcake|cupcakes|cookie|cookies|biscuit|biscuits|pudding|sorbet|ice cream|gelato|kulfi|brownie|brownies|pie|pies|tart|tarts|parfait|chocolate|chocolates|donut|donuts|doughnut|doughnuts|pastry|pastries|mousse|cheesecake|pancake|pancakes|waffle|waffles|halwa|gulab jamun|jalebi|kheer|rasgulla|barfi|laddoo|ladoo|custard|sundae|fudge|macaron|macarons|churro|churros|baklava|tiramisu|candy|candies|sweet|sweets|dessert|desserts|truffle|truffles)\b/i.test(t) || /[\u{1F370}\u{1F36A}\u{1F366}\u{1F368}\u{1F369}\u{1F36B}\u{1F36E}\u{1F967}\u{1F95E}]/u.test(t),
+    test: (t) => /\b(cake|cakes|cupcake|cupcakes|cookie|cookies|biscuit|biscuits|pudding|sorbet|ice cream|gelato|kulfi|brownie|brownies|pie|pies|tart|tarts|parfait|chocolate|chocolates|donut|donuts|doughnut|doughnuts|pastry|pastries|mousse|cheesecake|pancake|pancakes|waffle|waffles|halwa|gulab jamun|jalebi|kheer|rasgulla|barfi|laddoo|ladoo|custard|sundae|fudge|macaron|macarons|churro|churros|baklava|tiramisu|candy|candies|sweets?(?!\s+potato)|dessert|desserts|truffle|truffles)\b/i.test(t) || /[\u{1F370}\u{1F36A}\u{1F366}\u{1F368}\u{1F369}\u{1F36B}\u{1F36E}\u{1F967}\u{1F95E}]/u.test(t),
   },
   {
     id: "r10",
     label: "Contradiction! Net calories must now be under 400 cal (hint: add negative/burned calories).",
     test: (t) => {
-      const burns = [...t.matchAll(/(?:burn|minus|-)\s*(\d+)\s*cal/gi)].reduce((a, m) => a + parseInt(m[1], 10), 0);
-      const total = [...t.matchAll(/(\d+)\s*(?:cal|kcal)/gi)].reduce((a, m) => a + parseInt(m[1], 10), 0);
-      const net = total - (burns * 2); // subtract burned
-      return { pass: net < 400, note: `Net: ${net} cal (Try adding '-800 cal workout')` };
+      // Net = food calories minus anything negative or burned ("-800 cal workout", "burned 300 cal")
+      const c = calorieTotals(t);
+      return { pass: c.net < 400, note: `Net: ${c.food} − ${c.burned} = ${c.net} cal (try adding '-800 cal workout')` };
     },
   },
   {
@@ -266,7 +228,7 @@ const DIET_RULES = [
   {
     id: "r12",
     label: "Include at least one food emoji (🍎, 🥦, 🥑, 🥕, etc.).",
-    test: (t) => /[\u{1F34E}-\u{1F37F}\u{1F950}-\u{1F96B}\u{1F9C0}]/u.test(t),
+    test: (t) => FOOD_EMOJI_RE.test(t),
   },
   {
     id: "r13",
@@ -355,8 +317,8 @@ const DIET_RULES = [
   },
   {
     id: "r21",
-    label: "Include a price formatted in Indian Rupees (e.g. ₹250 or 500 rupees).",
-    test: (t) => /₹\s*\d+|\b\d+\s*(?:rs|rupees)\b/i.test(t),
+    label: "Include a price formatted in Indian Rupees (e.g. ₹250, Rs 250 or 500 rupees).",
+    test: (t) => /₹\s*\d+|\b(?:rs\.?|inr)\s*\d+|\b\d+\s*(?:rs|inr|rupees?)\b/i.test(t),
   },
   {
     id: "r22",
@@ -365,14 +327,16 @@ const DIET_RULES = [
   },
   {
     id: "r23",
-    label: "The last two listed food words must rhyme (e.g. bean and clean, or rice and spice).",
+    label: "The last two words of your plan must rhyme (e.g. bean and clean, or rice and spice).",
     test: (t) => {
-      const words = t.match(/[a-zA-Z]{3,}/g) || [];
-      if (words.length < 2) return false;
+      // Ignore the sign-off token, typo tags and calorie units so this rule can coexist with the others.
+      const cleaned = t.replace(/DIET_APPROVED_2026/g, " ").replace(/\[typo:[^\]]*\]/gi, " ");
+      const words = (cleaned.match(/[a-zA-Z]{3,}/g) || []).filter((w) => !/^(cal|kcal|calories|rupees)$/i.test(w));
+      if (words.length < 2) return { pass: false, note: "Add two rhyming food words near the end" };
       const w1 = words[words.length - 2].toLowerCase();
       const w2 = words[words.length - 1].toLowerCase();
-      // Check last 2-3 characters rhyme
-      return w1.slice(-2) === w2.slice(-2) && w1 !== w2;
+      // Last two letters must match (bean/clean, rice/spice)
+      return { pass: w1.slice(-2) === w2.slice(-2) && w1 !== w2, note: `Last two words: "${w1}" / "${w2}"` };
     },
   },
   {
@@ -383,7 +347,7 @@ const DIET_RULES = [
   {
     id: "r25",
     label: "Final submission: End your plan with 'DIET_APPROVED_2026'.",
-    test: (t) => t.includes("DIET_APPROVED_2026"),
+    test: (t) => t.trimEnd().endsWith("DIET_APPROVED_2026"),
   },
 ];
 
@@ -403,19 +367,20 @@ function extractPlatedFoods(text) {
   const plated = [];
   const seen = new Set();
 
-  // 1. Scan for dictionary items
+  // 1. Scan for dictionary items ("tofu steak" plates a Plant Steak, not a beef one)
+  const animalText = stripPlantQualified(text);
   for (const item of FOOD_DICTIONARY) {
-    if (item.pattern.test(text)) {
+    if (item.pattern.test(item.isVegan === false ? animalText : text)) {
       if (!seen.has(item.name)) {
         seen.add(item.name);
+        seen.add(item.emoji);
         plated.push(item);
       }
     }
   }
 
-  // 2. Scan for raw food emojis that weren't matched
-  const emojiRegex = /[\u{1F300}-\u{1F9FF}]/gu;
-  const rawEmojis = text.match(emojiRegex) || [];
+  // 2. Food emojis typed on their own (🔥 and other non-food emoji stay off the plate)
+  const rawEmojis = text.match(FOOD_EMOJI_ALL_RE) || [];
   for (const em of rawEmojis) {
     if (!seen.has(em)) {
       seen.add(em);
@@ -465,10 +430,9 @@ function updatePlateVisual(text) {
     ptItemsVal.textContent = platedFoods.length.toString();
   }
 
-  const calMatches = [...text.matchAll(/(\d+)\s*(?:cal|kcal|calories)/gi)];
-  const totalCal = calMatches.reduce((acc, m) => acc + parseInt(m[1], 10), 0);
+  const cal = calorieTotals(text);
   if (ptCalVal) {
-    ptCalVal.textContent = totalCal > 0 ? `${totalCal} CAL` : "0 CAL";
+    ptCalVal.textContent = cal.burned ? `${cal.net} CAL NET (${cal.food} − ${cal.burned})` : `${cal.net} CAL`;
   }
 
   const detectedProteins = platedFoods.filter((f) => f.isProtein).map((f) => f.name.toUpperCase());
@@ -483,9 +447,7 @@ function updatePlateVisual(text) {
   }
 
   if (ptVeganVal) {
-    const isVeganCheck = DIET_RULES[5].test(text);
-    const isVegan = isVeganCheck === true || (isVeganCheck && isVeganCheck.pass === true);
-    if (isVegan) {
+    if (!findNonVegan(text)) {
       ptVeganVal.textContent = "YES";
       ptVeganVal.style.color = "#00ff66";
     } else {
@@ -500,7 +462,15 @@ function renderUI() {
   charStat.textContent = `CHARS: ${text.length}`;
   lineStat.textContent = `LINES: ${text.split("\n").length}`;
 
+  // Timed hazards only tick while the emoji is actually on the plate.
+  if (!/🥑/u.test(text)) avocadoAddedTime = null;
+  if (!/🔥/u.test(text)) fireAddedTime = null;
+
   const res = engine.evaluate(text, {});
+  if (res.failed) {
+    ruleCountEl.textContent = `${res.unlockedCount} / ${res.total}`;
+    return;
+  }
 
   ruleCountEl.textContent = `${res.unlockedCount} / ${res.total}`;
   const pct = Math.round((res.unlockedCount / res.total) * 100);
@@ -529,7 +499,8 @@ function renderUI() {
   // Save score
   saveScore("diet-game", res.passedCount, `${res.passedCount}/25 Rules`);
 
-  if (res.completedAll) {
+  if (res.completedAll && !hasWon) {
+    hasWon = true;
     sfx.win();
     winOverlay.style.display = "flex";
   }
@@ -546,6 +517,7 @@ btnRestart.addEventListener("click", () => {
   sfx.click();
   avocadoAddedTime = null;
   fireAddedTime = null;
+  hasWon = false;
   engine.reset();
   failOverlay.style.display = "none";
   mealInput.value = "";
@@ -555,6 +527,9 @@ btnRestart.addEventListener("click", () => {
 btnWinRestart.addEventListener("click", () => {
   sfx.click();
   winOverlay.style.display = "none";
+  avocadoAddedTime = null;
+  fireAddedTime = null;
+  hasWon = false;
   engine.reset();
   mealInput.value = "";
   renderUI();

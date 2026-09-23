@@ -6,7 +6,7 @@
 import { generateSudoku, generateKillerCages } from "./solver.js";
 
 self.onmessage = function (e) {
-  const { action, tier, mode, seed } = e.data;
+  const { action, tier, mode, seed, reqId } = e.data;
 
   if (action === "generate") {
     try {
@@ -29,12 +29,14 @@ self.onmessage = function (e) {
 
       self.postMessage({
         status: "ok",
+        reqId,
         ...generated,
         killerCages,
       });
     } catch (err) {
       self.postMessage({
         status: "error",
+        reqId,
         error: err.message,
       });
     }

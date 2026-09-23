@@ -22,9 +22,10 @@
 
 .sl-canvas-container {
   position: relative;
-  width: 100%;
+  /* Width follows the height cap so the 16:9 canvas is never stretched on short windows */
+  width: min(100%, calc(min(80vh, 760px) * 16 / 9));
+  margin-inline: auto;
   aspect-ratio: 16 / 9;
-  max-height: min(80vh, 760px);
   background: #09030a;
   border: 2px solid var(--accent, #ff007f);
   border-radius: var(--radius-md, 6px);
@@ -350,7 +351,6 @@
 }
 
 .upgrade-card:hover {
-  transform: translateY(-5px);
   background: linear-gradient(160deg, #30103b 0%, #1a0820 100%);
   border-color: #00f0ff;
   box-shadow: 0 8px 24px rgba(0, 240, 255, 0.45);

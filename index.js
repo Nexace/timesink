@@ -52,6 +52,12 @@ function renderGrid() {
   const host = document.getElementById("game-grid");
   if (!host) return;
   host.innerHTML = visibleGames().map((g, i) => renderCard(g, i)).join("");
+  // A missing cover falls back to the card's drawn motif underneath it
+  host.querySelectorAll(".card__cover").forEach((img) => {
+    const drop = () => img.remove();
+    if (img.complete && !img.naturalWidth) drop();
+    else img.addEventListener("error", drop, { once: true });
+  });
 }
 
 function renderScoresWall(host) {
@@ -131,7 +137,7 @@ function renderCard(game, index) {
     <div class="cartridge-specs">
       <div class="spec-row"><span class="spec-label">ID:</span> <span class="spec-val spec-val--id">${id}</span></div>
       <div class="spec-row"><span class="spec-label">TITLE:</span> <span class="spec-val spec-val--title">${escapeHtml(game.title)}</span></div>
-      ${live ? `<div class="spec-row"><span class="spec-label">GENRE:</span> <span class="spec-val">${escapeHtml([game.kind, ...tags.slice(0, 2)].filter(Boolean).join(" / "))}</span></div>` : ""}
+      ${live ? `<div class="spec-row"><span class="spec-label">GENRE:</span> <span class="spec-val">${escapeHtml([...new Set([game.kind, ...tags].filter(Boolean))].slice(0, 3).join(" / "))}</span></div>` : ""}
       <div class="spec-row"><span class="spec-label">SUMMARY:</span> <span class="spec-val spec-val--summary">${escapeHtml(game.tagline ?? "")}</span></div>
       <div class="spec-row"><span class="spec-label">RECORD:</span> <span class="spec-val spec-val--accent" style="color:${color}">${bestText}</span></div>
       <div class="cartridge-tags">${tagChips}</div>
@@ -154,7 +160,7 @@ function renderCard(game, index) {
 
         <div class="cartridge-screen">
           <div class="cartridge-screen__bezel">
-            <div class="card__thumb-inner">${motif(game.motif, color)}</div>
+            <div class="card__thumb-inner">${motif(game.motif, color)}${live ? `<img class="card__cover" src="/assets/covers/${escapeHtml(game.slug)}.webp" alt="" width="800" height="360" loading="lazy" decoding="async" />` : ""}</div>
             ${fx}
           </div>
         </div>

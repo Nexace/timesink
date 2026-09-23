@@ -20,17 +20,18 @@ export const RESUME_RULES = [
     id: "r1",
     label: "Include candidate full name (e.g. 'Name: Jane Doe').",
     test: (t) => {
-      const m = t.match(/(?:name|candidate)\s*[:=]\s*([A-Za-z\s]{3,})/i);
-      return Boolean(m && m[1].trim().length >= 3);
+      // First and last name on the same line as the label ("Name: Jane Doe")
+      const m = t.match(/(?:name|candidate)[ \t]*[:=][ \t]*([A-Za-z][A-Za-z'.-]*(?:[ \t]+[A-Za-z][A-Za-z'.-]*)+)/i);
+      return m ? true : { pass: false, note: "First and last name after 'Name:' on one line" };
     },
   },
   {
     id: "r2",
     label: "State at least 5 years of professional experience.",
     test: (t) => {
-      const m = t.match(/(\d+)\+?\s*(?:years?|yrs?)\s*(?:of\s*)?(?:exp|experience)/i);
-      if (!m) return { pass: false, note: "Specify experience, e.g. '6 years of experience'" };
-      const yrs = parseInt(m[1], 10);
+      const all = [...t.matchAll(/(\d+)\+?\s*(?:years?|yrs?)\s*(?:of\s*)?(?:exp|experience)/gi)].map((m) => parseInt(m[1], 10));
+      if (!all.length) return { pass: false, note: "Specify experience, e.g. '6 years of experience'" };
+      const yrs = Math.max(...all);
       return { pass: yrs >= 5, note: `Found ${yrs} yrs (needs ≥ 5)` };
     },
   },
@@ -56,10 +57,10 @@ export const RESUME_RULES = [
     id: "r6",
     label: "Quantify an achievement with a percentage increase of at least 200%.",
     test: (t) => {
-      const m = t.match(/(\d+)%/g);
-      if (!m) return { pass: false, note: "Include a percent metric, e.g. '250%'" };
-      const high = m.map(s => parseInt(s, 10)).filter(n => n >= 200);
-      return { pass: high.length > 0, note: high.length ? `Found ${high[0]}%` : "Needs metric ≥ 200%" };
+      const pcts = [...t.matchAll(/(?<![\d.])(\d+(?:\.\d+)?)\s*%/g)].map((m) => parseFloat(m[1]));
+      if (!pcts.length) return { pass: false, note: "Include a percent metric, e.g. '250%'" };
+      const best = Math.max(...pcts);
+      return { pass: best >= 200, note: best >= 200 ? `Found ${best}%` : `Best so far ${best}% (needs ≥ 200%)` };
     },
   },
   {
@@ -71,25 +72,41 @@ export const RESUME_RULES = [
     id: "r8",
     label: "List six-figure salary expectations (e.g. $150,000 or $200k).",
     test: (t) => {
-      if (/\$\s*(?:[1-9]\d{2}(?:,\d{3})|\d{6,})\b/.test(t)) return true;
-      const kMatch = t.match(/\$\s*(\d{3,})k\b/i);
-      return Boolean(kMatch && parseInt(kMatch[1], 10) >= 100);
+      // $150,000 · $150000 · $200k · $1.2M · $1,000,000 — anything from $100,000 up
+      const amounts = [...t.matchAll(/\$\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k|m|mm)?\b/gi)].map((m) => {
+        const n = parseFloat(m[1].replace(/,/g, ""));
+        const unit = (m[2] || "").toLowerCase();
+        return n * (unit === "k" ? 1e3 : unit ? 1e6 : 1);
+      });
+      if (!amounts.length) return { pass: false, note: "Add a salary, e.g. $150,000 or $200k" };
+      const best = Math.max(...amounts);
+      return { pass: best >= 100000, note: `Highest: $${Math.round(best).toLocaleString("en-US")}` };
     },
   },
   {
     id: "r9",
     label: "List proficiency in a programming language invented before 1975 (C, Fortran, Cobol, Lisp, Basic, Pascal, Assembly).",
-    test: (t) => new RegExp(`\\b(${OLD_LANGUAGES.join("|")})\\b`, "i").test(t),
+    test: (t) => {
+      // Plain "C" must be the capital letter on its own: not "c/o", "C-suite", "C++" or "C#"
+      const others = OLD_LANGUAGES.filter((l) => l !== "c");
+      return new RegExp(`\\b(${others.join("|")})\\b`, "i").test(t) || /(?<![\w+#.-])C(?![\w+#-])/.test(t);
+    },
   },
   {
     id: "r10",
     label: "State willingness to relocate to Mars, The Moon, or Night City.",
-    test: (t) => /\b(relocate|relocation)\b.*?\b(mars|the moon|moon|night city)\b/i.test(t),
+    // Either order, same sentence: "willing to relocate to Mars" or "Mars relocation: yes"
+    test: (t) => /\b(relocat(?:e|ion|ing))\b[^.!?\n]*\b(mars|moon|night city)\b|\b(mars|moon|night city)\b[^.!?\n]*\b(relocat(?:e|ion|ing))\b/i.test(t),
   },
   {
     id: "r11",
     label: "Include a Roman numeral for job title seniority (e.g. Engineer III or VP IV).",
-    test: (t) => /\b(I|II|III|IV|V|VI)\b/.test(t),
+    test: (t) => {
+      // A job title followed by an uppercase numeral; the pronoun "I" on its own doesn't count
+      const titles = /^(engineer|developer|dev|programmer|manager|vp|director|architect|lead|analyst|scientist|designer|consultant|officer|associate|specialist|intern|swe|sde|staff|principal|president|head)$/i;
+      for (const m of t.matchAll(/\b([A-Za-z]+)[ \t]+(I{1,3}|IV|VI{0,3}|IX|X)\b/g)) if (titles.test(m[1])) return true;
+      return { pass: false, note: "e.g. 'Engineer III' or 'VP IV'" };
+    },
   },
   {
     id: "r12",
@@ -123,7 +140,7 @@ export const RESUME_RULES = [
     label: "Include today's day of the week.",
     test: (t, options = {}) => {
       const today = options.dayOfWeek || new Date().toLocaleDateString("en-US", { weekday: "long" });
-      return new RegExp(`\\b${today}\\b`, "i").test(t);
+      return { pass: new RegExp(`\\b${today}\\b`, "i").test(t), note: `Today is ${today}` };
     },
   },
   {
@@ -164,7 +181,7 @@ export const RESUME_RULES = [
   {
     id: "r22",
     label: "Cite your typing speed of 100+ WPM (e.g. '120 WPM').",
-    test: (t) => /\b(1\d{2}|[2-9]\d{2})\s*wpm\b|100\+\s*wpm/i.test(t),
+    test: (t) => [...t.matchAll(/\b(\d+)\+?\s*wpm\b/gi)].some((m) => parseInt(m[1], 10) >= 100),
   },
   {
     id: "r23",
@@ -173,7 +190,7 @@ export const RESUME_RULES = [
   },
   {
     id: "r24",
-    label: "ATS Toxicity Filter: Absolutely NO negative words (bug, fail, slow, error, crash, fired).",
+    label: "ATS Toxicity Filter: Absolutely NO negative words (bug, fail, slow, error, crash, fired, terrible, bad).",
     test: (t) => {
       const bad = TOXIC_WORDS.filter(w => new RegExp(`\\b${w}\\b`, "i").test(t));
       return { pass: bad.length === 0, note: bad.length ? `Illegal word: "${bad[0]}"` : "" };

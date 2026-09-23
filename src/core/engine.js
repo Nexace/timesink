@@ -12,20 +12,37 @@ export function createGameLoop({ update, render, canvas, targetFps = 60, onPause
   let frameCount = 0;
   let fpsTimer = performance.now();
   let currentFps = targetFps;
+  let loggedError = false;
 
   function togglePause() {
     paused = !paused;
     if (onPause) onPause(paused);
     if (!paused) {
       lastTime = performance.now();
+      // Input buffered while paused (the resume click/key itself included) must not leak into play.
+      window.dispatchEvent(new Event("timesink:resume"));
     }
   }
 
   window.addEventListener("keydown", (e) => {
-    if (e.code === "Escape") {
-      togglePause();
-    }
+    if (e.code !== "Escape" || e.repeat) return;
+    // Escape belongs to open dialogs / the footer terminal first.
+    if (document.querySelector(".modal-backdrop")) return;
+    if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    togglePause();
   });
+
+  // The pause overlay promises "tap screen to resume": honour it, and swallow that click so it
+  // doesn't also fire the game's own canvas click (e.g. placing a tower).
+  if (canvas) {
+    canvas.addEventListener("click", (e) => {
+      if (!paused) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      togglePause();
+    }, true);
+  }
+
 
   function tick(now) {
     if (!running) return;
@@ -43,17 +60,25 @@ export function createGameLoop({ update, render, canvas, targetFps = 60, onPause
       fpsTimer = now;
     }
 
-    if (!paused) {
-      update(dt);
-    }
-
-    render(dt, { paused, fps: currentFps });
-
-    if (paused && canvas) {
-      renderPauseOverlay(canvas);
-    }
-
+    // Schedule the next frame first so one bad frame can never freeze the game for good.
     animId = requestAnimationFrame(tick);
+
+    try {
+      if (!paused) {
+        update(dt);
+      }
+
+      render(dt, { paused, fps: currentFps });
+
+      if (paused && canvas) {
+        renderPauseOverlay(canvas);
+      }
+    } catch (err) {
+      if (!loggedError) {
+        loggedError = true;
+        console.error("[game loop]", err);
+      }
+    }
   }
 
   function start() {
@@ -76,7 +101,10 @@ export function createGameLoop({ update, render, canvas, targetFps = 60, onPause
     setPaused: (p) => {
       paused = p;
       if (onPause) onPause(paused);
-      if (!paused) lastTime = performance.now();
+      if (!paused) {
+        lastTime = performance.now();
+        window.dispatchEvent(new Event("timesink:resume"));
+      }
     },
     getFps: () => currentFps,
   };
@@ -129,10 +157,11 @@ export function createInputManager({ canvas, buttons = [] } = {}) {
   });
 
   window.addEventListener("keydown", (e) => {
+    // Typing in the footer terminal / form fields must not drive the game.
+    if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) {
-      if (document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
-        e.preventDefault();
-      }
+      e.preventDefault();
     }
     if (!keys[e.code]) {
       justPressed.add(e.code);
@@ -144,6 +173,20 @@ export function createInputManager({ canvas, buttons = [] } = {}) {
   window.addEventListener("keyup", (e) => {
     keys[e.code] = false;
     keys[e.key] = false;
+  });
+
+  window.addEventListener("timesink:resume", () => {
+    justPressed.clear();
+    mouse.clicked = false;
+    mouse.rightClicked = false;
+  });
+
+  // Releasing focus (alt-tab, clicking the address bar) must not leave keys "held down".
+  window.addEventListener("blur", () => {
+    for (const k of Object.keys(keys)) keys[k] = false;
+    justPressed.clear();
+    mouse.down = false;
+    mouse.rightDown = false;
   });
 
   if (canvas) {

@@ -1,3 +1,8 @@
+/* Battle stage uses nearly the full window width */
+main.wrap.stage-page {
+  --game-content-w: min(1900px, calc(100vw - 24px));
+}
+
 /* IRONCLAD.EXE — Naval RTS Styling (Accent: Steel Blue #4682b4) */
 
 :root {
@@ -18,7 +23,7 @@
   flex-direction: column;
   gap: 8px;
   width: 100%;
-  max-width: 1280px;
+  max-width: 1880px;
   margin: 0 auto;
   user-select: none;
 }
@@ -183,8 +188,10 @@
 /* ── CANVAS CONTAINER ── */
 .ic-canvas-container {
   position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
+  /* Leave room for the HUD above and the build dock below on shorter screens */
+  width: min(100%, max(640px, calc((100vh - 260px) * 2.4)));
+  margin-inline: auto;
+  aspect-ratio: 2.4 / 1;
   background: #04080e;
   border: 1px solid var(--steel-panel-border);
   border-radius: 4px;
@@ -427,7 +434,6 @@
 
 .ic-bldg-card:hover {
   border-color: var(--steel-accent-bright);
-  transform: translateY(-2px);
   background: #0f1926;
   box-shadow: 0 4px 12px rgba(70, 130, 180, 0.25);
 }
@@ -755,5 +761,247 @@
 .ic-btn-primary:hover {
   background: var(--steel-accent-bright);
   box-shadow: 0 0 16px var(--steel-accent-glow);
-  transform: translateY(-1px);
+}
+
+/* Narrow screens: stack the three HUD columns instead of overflowing sideways */
+@media (max-width: 760px) {
+  .ic-hud {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ic-hud__controls {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .ic-hud__fleet--enemy {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .ic-hud__fleet--enemy .ic-hud__stats {
+    justify-content: flex-start !important;
+  }
+}
+
+/* The build dock scrolls its cards sideways instead of widening the page */
+.ic-dock,
+.ic-dock__cards {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ic-dock__tabs {
+  flex-wrap: wrap;
+}
+
+/* ── Revamp: context menu production, dock icons, hangar, sector cards ── */
+.ic-context-menu {
+  min-width: 190px;
+  max-width: 240px;
+}
+.ic-context-title {
+  padding: 7px 12px 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #9bf6ff;
+  border-bottom: 1px solid #1e3046;
+  background: #0a121c;
+}
+.ic-context-units {
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  border-bottom: 1px solid #1e3046;
+}
+.ic-context-units[hidden] {
+  display: none;
+}
+.ic-context-label {
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.1em;
+}
+.ic-context-unit {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ic-context-unit small {
+  font-size: 9px;
+  color: #68d8d6;
+}
+.ic-context-unit:hover:not(:disabled) {
+  background: #1c2c40;
+}
+.ic-context-unit.on {
+  border-color: #7cfc00;
+  color: #eaffd8;
+  background: rgba(124, 252, 0, 0.08);
+}
+.ic-context-unit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ic-bldg-card {
+  flex: 0 0 236px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+}
+.ic-bldg-card__icon {
+  flex: 0 0 64px;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(ellipse at 50% 70%, #1b2d44, #070c12 75%);
+  border: 1px solid #16263a;
+  border-radius: 3px;
+}
+.ic-bldg-card__icon img {
+  display: block;
+  image-rendering: auto;
+}
+.ic-bldg-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.ic-bldg-card.short:not(.locked) .ic-bldg-card__drones {
+  color: #ffb703;
+}
+.ic-bldg-card.short:not(.locked) .ic-bldg-card__drones::after {
+  content: " · QUEUES";
+  color: #8da4c4;
+  font-weight: 600;
+}
+
+.ic-tech-card__pips {
+  display: flex;
+  gap: 3px;
+}
+.ic-tech-card__pips i {
+  flex: 1;
+  height: 4px;
+  background: #1e3046;
+  border-radius: 1px;
+}
+.ic-tech-card__pips i.on {
+  background: var(--steel-warning, #ffb703);
+}
+
+.ic-hangar {
+  margin-bottom: 10px;
+}
+.ic-hangar__label {
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #64748b;
+}
+.ic-hangar__row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+.ic-hull {
+  flex: 0 0 176px;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  font: inherit;
+  text-align: left;
+  color: #cbd5e1;
+  background: #070d15;
+  border: 1px solid #1e3046;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ic-hull img {
+  width: 100%;
+  height: auto;
+}
+.ic-hull b {
+  font-size: 11px;
+  color: #fff;
+}
+.ic-hull small {
+  font-size: 9px;
+  color: #68d8d6;
+}
+.ic-hull em {
+  font-style: normal;
+  font-size: 9px;
+  color: #8da4c4;
+}
+.ic-hull.on {
+  border-color: #00f0ff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+}
+.ic-hull:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ic-hull__lock {
+  display: grid;
+  place-items: center;
+  height: 61px;
+  font-size: 20px;
+}
+
+.ic-sector-card {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  font: inherit;
+  text-align: left;
+  color: #fff;
+  background: #070d15;
+  border: 1px solid var(--steel-accent);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ic-sector-card:hover:not(:disabled) {
+  background: #0f1926;
+}
+.ic-sector-card.locked {
+  border-color: #1e3046;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ic-sector-card__num {
+  font-size: 12px;
+  font-weight: 700;
+}
+.ic-sector-card__stars {
+  color: #ffb703;
+}
+.ic-sector-card__meta {
+  font-size: 10px;
+  color: #8da4c4;
+}
+#ic-canvas {
+  cursor: grab;
 }

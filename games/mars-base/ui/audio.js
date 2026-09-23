@@ -1,4 +1,4 @@
-import { sfx, isSoundEnabled, getVolume } from "../../../shared/sound.js";
+import { sfx, isSoundEnabled, getVolume, onSoundStateChange } from "../../../shared/sound.js";
 
 // Small ambient layer: filtered-noise wind (louder outside and in storms), rover motor hum,
 // plus one-shot synth blips for mining and alarms. Everything respects the cabinet's sound toggle.
@@ -25,6 +25,17 @@ if (typeof window !== "undefined") {
   };
   window.addEventListener("pointerdown", unlock, { once: true, passive: true });
   window.addEventListener("keydown", unlock, { once: true, passive: true });
+  // The wind and rover loops only fade when the sim updates them; a hidden tab or the SFX toggle
+  // must silence them straight away.
+  document.addEventListener("visibilitychange", () => {
+    if (!ctx) return;
+    if (document.hidden) ctx.suspend().catch(() => {});
+    else if (unlocked) ctx.resume().catch(() => {});
+  });
+  onSoundStateChange((on) => {
+    if (on || !ctx) return;
+    for (const layer of [wind, hum]) if (layer) layer.gain.gain.setValueAtTime(0, ctx.currentTime);
+  });
 }
 
 function noiseBuffer(c, secs = 2) {
@@ -75,6 +86,7 @@ export function updateAmbience({ outside, storm, roverSpeed, inRover, paused }) 
   const c = ac();
   if (!c) return;
   const on = isSoundEnabled() && !paused;
+  if (!on && !wind) return; // don't spin up the loops until they'd actually be heard
   const vol = getVolume();
   const w = ensureWind(c);
   const target = on ? (storm ? 0.16 : outside ? 0.045 : 0.012) * vol : 0;

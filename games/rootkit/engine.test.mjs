@@ -182,6 +182,13 @@ describe("Interactive Command Execution & Mechanics", () => {
   it("shred removes target file and sanitizes trace", () => {
     const state = createGameState(1);
     state.connectedIp = "192.168.4.25";
+
+    // Locked until a port is cracked, and the ledger must be extracted before wiping the audit trail.
+    assert.equal(executeCommand("shred audit.log", state).missionCleared, false);
+    executeCommand("crack 443", state);
+    assert.equal(executeCommand("shred audit.log", state).missionCleared, false);
+    const dec = executeCommand("decrypt ledger.enc 5", state);
+    assert.ok(dec.lines.some((l) => l.text === "CODE{CONFIRM_BANK_TRANSFER_882}"), "ledger decrypts to readable text");
     state.traceLevel = 50;
 
     const shredResult = executeCommand("shred audit.log", state);

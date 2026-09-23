@@ -6,8 +6,10 @@ export const SOL_TICKS = SOL_SECONDS * TICK_RATE;
 export const DAY_FRACTION = 0.6; // daylight share of a sol
 export const DAWN = 0.2; // time-of-day where the sol "starts" for autosave and day counting
 
-export const WORLD_W = 384;
-export const WORLD_H = 384;
+// ~16 km across. Saves made on the original 384×384 map keep regenerating at that size.
+export const WORLD_W = 1024;
+export const WORLD_H = 1024;
+export const LEGACY_WORLD = 384;
 export const CHUNK = 32;
 
 export const PLAYER_SPEED = 4.2; // tiles / s

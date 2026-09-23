@@ -16,9 +16,10 @@
 
 .av-canvas-container {
   position: relative;
-  width: 100%;
+  /* Width follows the height cap so the 16:9 canvas is never stretched on short windows */
+  width: min(100%, calc(min(80vh, 760px) * 16 / 9));
+  margin-inline: auto;
   aspect-ratio: 16 / 9;
-  max-height: min(80vh, 760px);
   background: #080a0d;
   border: 2px solid var(--accent, #ffb700);
   border-radius: var(--radius-md, 6px);
@@ -188,7 +189,6 @@
 }
 
 .hangar-card:hover {
-  transform: translateY(-2px);
   border-color: #ffb700;
   box-shadow: 0 6px 20px rgba(255, 183, 0, 0.25);
 }
@@ -304,4 +304,14 @@
   text-shadow: 0 0 12px rgba(255, 183, 0, 0.6);
   letter-spacing: 0.15em;
   margin: 0;
+}
+
+/* Phones: shrink the whole HUD to fit the canvas instead of letting it spill past the edge */
+@media (max-width: 600px) {
+  .av-hud {
+    right: auto;
+    width: calc((100% - 12px) / 0.62);
+    transform: scale(0.62);
+    transform-origin: top left;
+  }
 }

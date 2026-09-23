@@ -16,10 +16,10 @@
 
 .sd-canvas-container {
   position: relative;
-  width: 100%;
-  max-width: 520px;
+  /* Width follows the height cap so the 2:3 canvas keeps its shape */
+  width: min(100%, 520px, calc(min(82vh, 760px) * 2 / 3));
+  margin-inline: auto;
   aspect-ratio: 480 / 720;
-  max-height: min(82vh, 760px);
   background: #080d1a;
   border: 3px solid var(--accent, #39ff14);
   border-radius: var(--radius-md, 6px);

@@ -21,6 +21,8 @@ export function createGame({ mode = "campaign", seed = null, start = "solo", dai
     mode,
     startKit: start,
     seed: resolvedSeed,
+    worldW: world.w,
+    worldH: world.h,
     dailyKey,
     tick: Math.floor(SOL_TICKS * (DAWN + 0.02)), // start just after dawn on sol 1
     rng: { events: makeRngState(resolvedSeed, "events"), ai: makeRngState(resolvedSeed, "ai"), misc: makeRngState(resolvedSeed, "misc") },

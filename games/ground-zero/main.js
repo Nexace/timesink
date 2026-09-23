@@ -29,6 +29,7 @@ let currentTarget = [40.7128, -74.006]; // NYC
 let currentBurstType = "air"; // "air" | "surface"
 let activeRings = [];
 let activeFallout = null;
+let effectTimers = [];
 
 const MAJOR_CITIES = [
   { name: "New York City, USA", lat: 40.7128, lng: -74.006 },
@@ -263,6 +264,9 @@ function initMap() {
 }
 
 function clearEffects() {
+  // Cancel rings/plume still scheduled from a previous detonation.
+  effectTimers.forEach((t) => clearTimeout(t));
+  effectTimers = [];
   for (const ring of activeRings) {
     if (map && ring) map.removeLayer(ring);
   }
@@ -277,6 +281,9 @@ function detonate() {
   if (!map) return;
   sfx.alarm();
   clearEffects();
+  // Restart the sweep animation on every detonation.
+  radarSweepEl.classList.remove("is-active");
+  void radarSweepEl.offsetWidth;
   radarSweepEl.classList.add("is-active");
 
   const Y = getYield();
@@ -301,7 +308,7 @@ function detonate() {
 
   // Draw concentric rings with slight delay animation
   ringsConfig.forEach((ring, idx) => {
-    setTimeout(() => {
+    effectTimers.push(setTimeout(() => {
       const circle = L.circle(currentTarget, {
         radius: ring.r,
         color: ring.color,
@@ -312,25 +319,23 @@ function detonate() {
         interactive: false, // Critical: allow clicks through blast rings to map
       }).addTo(map);
       activeRings.push(circle);
-    }, idx * 120);
+    }, idx * 120));
   });
 
   // Fallout plume if surface burst
   if (currentBurstType === "surface") {
-    const windDir = Number(windDirSlider.value); // degrees
+    // Compass bearing the plume drifts TOWARD (0° = north, 90° = east).
+    const windDir = Number(windDirSlider.value);
     const windSpeed = Number(windSpdSlider.value); // km/h
     const plumeLengthKm = Math.min(300, (windSpeed * Math.pow(Y, 0.45) * 0.8));
-    const angleRad = ((windDir - 90) * Math.PI) / 180;
+    const bearing = (windDir * Math.PI) / 180;
     const spreadRad = (25 * Math.PI) / 180;
+    const kmPerLngDeg = 111 * Math.max(0.05, Math.cos((currentTarget[0] * Math.PI) / 180));
+    const offset = (b, len) => [(Math.cos(b) * len) / 111, (Math.sin(b) * len) / kmPerLngDeg];
 
-    const latOffset = (Math.sin(angleRad) * plumeLengthKm) / 111;
-    const lngOffset = (Math.cos(angleRad) * plumeLengthKm) / (111 * Math.cos((currentTarget[0] * Math.PI) / 180));
-
-    const leftLat = (Math.sin(angleRad - spreadRad) * (plumeLengthKm * 0.85)) / 111;
-    const leftLng = (Math.cos(angleRad - spreadRad) * (plumeLengthKm * 0.85)) / (111 * Math.cos((currentTarget[0] * Math.PI) / 180));
-
-    const rightLat = (Math.sin(angleRad + spreadRad) * (plumeLengthKm * 0.85)) / 111;
-    const rightLng = (Math.cos(angleRad + spreadRad) * (plumeLengthKm * 0.85)) / (111 * Math.cos((currentTarget[0] * Math.PI) / 180));
+    const [latOffset, lngOffset] = offset(bearing, plumeLengthKm);
+    const [leftLat, leftLng] = offset(bearing - spreadRad, plumeLengthKm * 0.85);
+    const [rightLat, rightLng] = offset(bearing + spreadRad, plumeLengthKm * 0.85);
 
     const conePoints = [
       currentTarget,
@@ -339,7 +344,7 @@ function detonate() {
       [currentTarget[0] + rightLat, currentTarget[1] + rightLng],
     ];
 
-    setTimeout(() => {
+    effectTimers.push(setTimeout(() => {
       activeFallout = L.polygon(conePoints, {
         color: "#9900ff",
         fillColor: "#9900ff",
@@ -348,7 +353,7 @@ function detonate() {
         dashArray: "6 3",
         interactive: false, // Critical: allow clicks through fallout plume to map
       }).addTo(map);
-    }, 800);
+    }, 800));
   }
 
   // Estimated population density (assumed 4,500 people / km2 urban average)

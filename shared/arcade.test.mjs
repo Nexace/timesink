@@ -5,14 +5,13 @@ import path from "node:path";
 import { games, liveGames, getGame, getHowToPlay } from "./registry.js";
 import { createRuleEngine } from "./rule-engine.js";
 
-test("registry contains exactly 19 live games", () => {
-  assert.equal(games.length, 19, "Should have exactly 19 games");
-  assert.equal(liveGames().length, 19, "All 19 games should be live");
+test("registry contains exactly 18 live games", () => {
+  assert.equal(games.length, 18, "Should have exactly 18 games");
+  assert.equal(liveGames().length, 18, "All 18 games should be live");
 
   const expectedSlugs = [
     "mars-base",
     "ground-zero",
-    "scale-jump",
     "diet-game",
     "ping-age",
     "rootkit",
@@ -34,10 +33,10 @@ test("registry contains exactly 19 live games", () => {
   const actualSlugs = games.map((g) => g.slug);
   assert.deepEqual(actualSlugs, expectedSlugs);
 
-  // Verify all 19 games have unique signature accent colors
+  // Verify all 18 games have unique signature accent colors
   const accents = games.map((g) => g.accent);
   const uniqueAccents = new Set(accents);
-  assert.equal(uniqueAccents.size, 19, `All 19 games must have unique colors, got: ${accents.join(", ")}`);
+  assert.equal(uniqueAccents.size, 18, `All 18 games must have unique colors, got: ${accents.join(", ")}`);
 
   const validAccents = new Set([
     "flare", "lime", "cyan", "pink", "teal", "purple", "blue", "crimson", "gold", "red", "blood", "amber", "magenta", "green", "emerald", "orange", "copper", "indigo", "doodle", "mint", "phosphor", "mono", "silver", "violet", "steel", "steel-blue"
@@ -108,7 +107,7 @@ test("rule engine escalates rules progressively", () => {
   assert.equal(res.results[2].passed, false);
 
   // Satisfy all 3
-  res = engine.evaluate("hello retro 1984");
+  res = engine.evaluate("hello retro 1884");
   assert.equal(res.completedAll, true);
   assert.equal(res.passedCount, 3);
 });
@@ -152,9 +151,9 @@ test("score store handles numeric and categorical scores", () => {
     assert.equal(best.score, 180, "Faster time should overwrite");
 
     // 3. Categorical string score (e.g. Ping Age era)
-    saveScore("ping-age", "DIAL-UP NATIVE", "DIAL-UP NATIVE (1995-2001)");
+    saveScore("ping-age", "DIAL-UP NATIVE", "DIAL-UP NATIVE (1895-2001)");
     best = getBestScore("ping-age");
     assert.equal(best.score, "DIAL-UP NATIVE");
-    assert.equal(best.label, "DIAL-UP NATIVE (1995-2001)");
+    assert.equal(best.label, "DIAL-UP NATIVE (1895-2001)");
   });
 });

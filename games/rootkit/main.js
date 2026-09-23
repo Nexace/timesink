@@ -133,6 +133,7 @@ function startMission(idx) {
     missionTimer.style.display = "inline-flex";
     timerVal.textContent = `${activeCountdown}s`;
     timerInterval = setInterval(() => {
+      if (gameState.isFailed || gameState.isCleared) return;
       activeCountdown -= 1;
       timerVal.textContent = `${activeCountdown}s`;
       if (activeCountdown <= 0) {
@@ -163,6 +164,7 @@ function startMission(idx) {
 
 function completeCurrentMission() {
   if (timerInterval) clearInterval(timerInterval);
+  gameState.isCleared = true;
   playSound("win");
 
   print(`\n======================================================================`, "rk-line--success");
@@ -187,6 +189,8 @@ function completeCurrentMission() {
     print(`  [***] GRAND MASTER INTRUSION ACHIEVED // ALL 6 NODES COMPROMISED [***]  `, "rk-line--banner");
     print(`  PERSISTENT RING-0 ROOTKIT ACTIVE ACROSS ALL SUBNETS.                    `, "rk-line--banner");
     print(`======================================================================`, "rk-line--banner");
+    print(`Type 'restart' to replay the campaign from Mission 1.`, "rk-line--dim");
+    missionTitle.textContent = "ALL CLEARED";
   }
 }
 
@@ -218,6 +222,22 @@ function processTerminalCommand(raw) {
 
   // Echo user command
   print(`${promptStr.textContent} ${cmd}`, "rk-line--cmd");
+
+  // The session is being severed after a 100% trace — nothing gets through.
+  if (gameState.isFailed) {
+    print("[!] Connection severed. Rebooting proxy gateway...", "rk-line--err");
+    return;
+  }
+
+  const lower = cmd.toLowerCase();
+  if (lower === "restart" || lower === "reset") {
+    startMission(currentMissionIdx >= MISSIONS.length ? 0 : currentMissionIdx);
+    return;
+  }
+  if (currentMissionIdx >= MISSIONS.length) {
+    print("All 6 networks are already compromised. Type 'restart' to run the campaign again.", "rk-line--dim");
+    return;
+  }
 
   // Execute in engine
   const result = executeCommand(cmd, gameState);

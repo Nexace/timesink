@@ -57,25 +57,9 @@ const btnRetake = document.getElementById("btn-retake");
 let latestShareText = "";
 
 function playEraSound(eraId) {
-  switch (eraId) {
-    case "dialup":
-      sfx.dialup?.() || sfx.click?.();
-      break;
-    case "myspace":
-      sfx.good?.() || sfx.click?.();
-      break;
-    case "meme":
-      sfx.coin?.() || sfx.click?.();
-      break;
-    case "feed":
-      sfx.hover?.() || sfx.click?.();
-      break;
-    case "brainrot":
-      sfx.laser?.() || sfx.bad?.() || sfx.click?.();
-      break;
-    default:
-      sfx.click?.();
-  }
+  const byEra = { dialup: "dialup", myspace: "good", meme: "coin", feed: "hover", brainrot: "laser" };
+  const fn = sfx[byEra[eraId]] ?? sfx.click;
+  fn?.();
 }
 
 function renderQuestion() {
@@ -246,6 +230,9 @@ function showResults() {
 // Keyboard shortcuts (A-E or 1-5)
 window.addEventListener("keydown", (e) => {
   if (quizView.style.display === "none") return;
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (document.querySelector(".modal-backdrop")) return;
   const key = e.key.toUpperCase();
   let idx = -1;
 
@@ -262,10 +249,15 @@ window.addEventListener("keydown", (e) => {
 });
 
 btnShareEra.addEventListener("click", () => {
-  if (latestShareText) {
-    navigator.clipboard?.writeText?.(latestShareText);
-    toast({ title: "DOSSIER COPIED", body: "Archaeology Report copied to clipboard!", icon: "check" });
+  if (!latestShareText) return;
+  if (!navigator.clipboard?.writeText) {
+    toast({ title: "COPY UNAVAILABLE", body: "Your browser blocked clipboard access.", icon: "alert" });
+    return;
   }
+  navigator.clipboard.writeText(latestShareText).then(
+    () => toast({ title: "DOSSIER COPIED", body: "Archaeology Report copied to clipboard!", icon: "check" }),
+    () => toast({ title: "COPY FAILED", body: "Your browser blocked clipboard access.", icon: "alert" }),
+  );
 });
 
 btnRetake.addEventListener("click", () => {

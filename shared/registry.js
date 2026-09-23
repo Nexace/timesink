@@ -52,28 +52,6 @@ export const games = [
     },
   },
   {
-    slug: "scale-jump",
-    title: "Scale Jump",
-    tagline: "Logarithmic zoom from Planck length to the observable universe across 60+ detailed scientific checkpoints.",
-    kind: "science",
-    tags: ["cosmic", "powers-of-10", "toy"],
-    accent: "cyan",
-    motif: "scale",
-    version: "2.0",
-    status: "live",
-    added: "2026-09-20",
-    howToPlay: {
-      goal: "Traverse 62 powers of ten from quantum Planck strings to the cosmic observable universe.",
-      steps: [
-        "Drag the horizontal logarithmic slider, use mouse wheel, or press Arrow keys / PageUp / PageDown to zoom.",
-        "Click any category regime (Quantum, Subatomic, Atomic, Cellular, Human, Planetary, Stellar, Galactic, Cosmic) for instant jump.",
-        "Toggle COMPARE MODE for true-size side-by-side relative scale with preset matchups and mind-bending analogies."
-      ],
-      controls: "[← / →] or Mouse Wheel to zoom, [PageUp / PageDown] for 10x steps, [Home / End] for extremes",
-      tip: "Check the Mind-Bending Scale Analogy section on each checkpoint to truly grasp the unimaginable relative sizes of reality!"
-    },
-  },
-  {
     slug: "diet-game",
     title: "The Diet Game",
     tagline: "Escalating meal planner with 25 increasingly absurd and contradictory diet rules.",
@@ -142,23 +120,24 @@ export const games = [
   {
     slug: "ghost-lap",
     title: "Ghost Lap",
-    tagline: "Neon vector top-down time-trial racer with ghost replays, live delta, and track editor.",
+    tagline: "Top-down Formula racing on all 24 real calendar circuits: 10-car Grands Prix, bot duels and ghost time trials.",
     kind: "racing",
-    tags: ["arcade", "drifting", "time-trial"],
+    tags: ["racing", "f1", "time-trial"],
     accent: "blue",
     motif: "car",
-    version: "1.0",
+    version: "2.0",
     status: "live",
     added: "2026-09-20",
     howToPlay: {
-      goal: "Set blistering lap records across world-famous circuits and outrun your ghost car.",
+      goal: "Win Grands Prix against nine rivals, beat a bot from Very Easy to Impossible, or chase your own ghost on real-length F1 circuits.",
       steps: [
-        "Steer into corners and brake before the turn-in point to avoid skidding off-track.",
-        "Use Handbrake Drift to kick the rear out around sharp chicanes and hairpins.",
-        "Race against your recorded ghost car to shave off milliseconds every lap."
+        "Pick a mode, a circuit, the lap count and the AI level, then wait for the five red lights to go out.",
+        "Brake in a straight line before each corner. Track limits are lenient: kerb hops are free, and only running clearly wide counts. You get five warnings, then 3 second penalties (time trials delete the lap).",
+        "Within a second of the car ahead at the DRS detection line, open DRS on the next straight for extra top speed; tuck into a slipstream for a tow.",
+        "ERS: braking charges the battery. Hold ERS for a power boost anywhere except while DRS is open. You can only deploy 60% of the battery per lap, and braking recovers at most 55%, so save it for corner exits, attacks and defending."
       ],
-      controls: "[W / ↑] Accel, [S / ↓] Brake/Rev, [A/D / ←/→] Steer, [Space] Drift, [C] Controls, [R] Restart",
-      tip: "Brake in a straight line before turning in; trail-braking maintains high apex speed!"
+      controls: "[W / ↑] Throttle, [S / ↓] Brake/Reverse, [A/D / ←/→] Steer, [E] DRS, [Shift] ERS (hold), [Space] Handbrake, [Esc] Pause, [R] Restart. Settings let you rebind keys and tune steering, acceleration sensitivity and braking.",
+      tip: "Follow the racing line guide: red dashes mean brake now, amber means lift, green means flat out."
     },
   },
   {
@@ -208,25 +187,27 @@ export const games = [
   {
     slug: "ironsail",
     title: "IronSail",
-    tagline: "Top-down naval conquest & trading RPG. Capture 12 islands, command broadsides, and conquer the archipelago.",
+    tagline: "Open-sea naval conquest & trading across a 14 km archipelago: pirate packs, island forts, storms and two sea legends.",
     kind: "naval-rpg",
-    tags: ["naval", "trading", "conquest"],
+    tags: ["naval", "trading", "open-world"],
     accent: "teal",
     motif: "ship",
-    version: "1.0",
+    version: "2.0",
     status: "live",
     added: "2026-09-21",
     howToPlay: {
-      goal: "Capture all 12 islands across the Home Sea and Deep Sea to rule the archipelago.",
+      goal: "Capture all 30 islands and sink the Ghost Ship and the Kraken to rule the archipelago.",
       steps: [
-        "Click or drag mouse to steer your vessel toward destination or enemy ships.",
-        "Broadside cannons auto-fire on enemies within left and right firing arcs.",
-        "Approach captured friendly islands and press [E] to trade commodities, repair hull, and buy upgrades."
+        "Steer with A/D, trim sails with W/S (or hold the mouse to sail at the cursor). A beam reach is fastest; heading into the wind is slow.",
+        "Broadsides fire automatically at anything in your left or right arc. Pirates roam alone or in packs, fiercer in the outer seas.",
+        "Destroy every fort on a hostile island to capture it: it pays taxes and becomes a port where [E] opens the market and shipyard.",
+        "Salvage wrecks and floating crates, avoid rocks and whirlpools, then hunt the Ghost Ship in the Devil's Shroud and the Kraken in the Abyssal Trench."
       ],
-      controls: "Mouse Click/Drag or Virtual Stick to steer, [Space] Boost, [E] Dock at Port",
-      tip: "Commodity prices fluctuate every 2 minutes—buy low at island ports and sell high across the sea!"
+      controls: "A/D steer, W/S sails, Space all hands, E dock, M chart, Esc pause",
+      tip: "Buy goods tagged LOCAL and sell them where they're WANTED; prices shift every two minutes."
     },
   },
+
   {
     slug: "ace-vector",
     title: "Ace Vector",
@@ -297,7 +278,7 @@ export const games = [
   {
     slug: "ore-runner",
     title: "Ore Runner",
-    tagline: "Newtonian zero-friction asteroid miner. Cargo mass inertia, fuel conservation, unbanked cargo loss, and unstable cores.",
+    tagline: "Newtonian asteroid miner in an endless star field: richer ore, derelict wrecks and pirate packs the further you fly.",
     kind: "space-sim",
     tags: ["physics", "newtonian", "mining"],
     accent: "copper",
@@ -306,7 +287,7 @@ export const games = [
     status: "live",
     added: "2026-09-21",
     howToPlay: {
-      goal: "Mine precious minerals across the asteroid belt and safely deposit them at the central depot.",
+      goal: "Mine ore across an endless star field and bank it at the home depot or a remote outpost before pirates or rocks take it.",
       steps: [
         "Master zero-friction Newtonian thrust: use retro-burners [S] to slow down before collisions.",
         "Heavier cargo holds increase your ship's mass, slowing turn rate and acceleration by up to 30%.",
@@ -385,46 +366,47 @@ export const games = [
   {
     slug: "headbutt",
     title: "Headbutt",
-    tagline: "Side-view 2D physics car battler against intelligent bot AI. Land a hit on the bot's exposed driver head to win. 12 vehicles, 12 arenas.",
+    tagline: "Drive Ahead-style car battles: bonk the other driver's helmet with your car. 8 cars, 31 arenas including 23 Drive Ahead classics, bots or a friend.",
     kind: "physics-battler",
-    tags: ["physics", "fighting", "bot-ai"],
+    tags: ["physics", "versus", "cars"],
     accent: "violet",
     motif: "headbutt",
-    version: "1.0",
+    version: "2.0",
     status: "live",
     added: "2026-09-22",
     howToPlay: {
-      goal: "Land a hit on the bot's exposed driver head to win the round. First to 5 round wins takes the match.",
+      goal: "Touch the other driver's helmet with any part of your car. First to 5 rounds wins; protect your own head.",
       steps: [
-        "Select your vehicle, choose the bot's car and AI difficulty in the battle garage.",
-        "Smoothly drive, jump, and air-pitch your car to dive onto the bot's head hitbox.",
-        "Dodge arena hazards like rotating buzzsaws, lava geysers, seesaw decks, and swinging wrecking balls."
+        "Pick your car, an opponent (a bot from Easy to Insane, or a friend) and an arena: 8 originals, 23 Drive Ahead classics, or Random.",
+        "Drive with A/D; in the air the same keys spin the car, so flip onto their helmet. W fires a nitro boost.",
+        "Mind the arena: lava, spikes and drops knock you out, a helmet under water or acid drowns, and sawblades and meteors are deadly to helmets. After 45 seconds sudden death floods the arena, drops saws from the roof or brings the crusher down."
       ],
-      controls: "A/D or ←/→ to drive & pitch in air. Space/Enter to start. ESC to pause.",
-      tip: "Controls auto-invert when flipped upside-down so you can drive inverted for surprise comeback attacks!"
+      controls: "A/D or ←/→ drive and flip, W/↑/Space boost, Esc pause. Vs friend: P1 A D W, P2 ← → ↑.",
+      tip: "Get your wheels onto their roof: a car that lands on your cab reaches your helmet before you reach theirs."
     },
   },
   {
     slug: "ironclad",
     title: "Ironclad",
-    tagline: "Side-view 2D naval RTS. Command enormous battlecruisers, manage builder drones, construct tactical slots, and unleash superweapons.",
+    tagline: "Side-view naval RTS in the Battlecruisers mould: spend builder drones on deck guns, shields and factories, pick targets, and sink the enemy battlecruiser.",
     kind: "naval-rts",
     tags: ["rts", "strategy", "naval", "battlecruiser"],
     accent: "steel",
     motif: "ironclad",
-    version: "1.0",
+    version: "2.0",
     status: "live",
     added: "2026-09-22",
     howToPlay: {
-      goal: "Reduce the enemy battlecruiser's hull HP to 0 while protecting your own. Manage builder drones with strategic timing!",
+      goal: "Sink the enemy battlecruiser before it sinks you. Builder drones are your only currency: every building and every unit locks drones while it's being made.",
       steps: [
-        "Drones are your only currency: builds lock idle drones for their build duration (true cost = drones × time).",
-        "Assign buildings into specialized slots: Utility (Drone Stations), Deck (guns/shields/factories), Platform (ultraweapons), Mast (anti-air), and Bow (Ion Cannon).",
-        "Deploy autonomous naval ships and air squadrons from factories to swarm and screen enemy forces.",
-        "Right-click damaged buildings to assign idle drones to repair them, or sell buildings to clear slots."
+        "Pick a card in the build dock, then click a glowing slot on your hull. Slots are typed: Utility, Deck, Platform, Mast and Bow. If you're short on drones the build queues.",
+        "Build Drone Stations early. More drones let you build more at once and afford the big guns.",
+        "Click one of your factories to choose what it produces. It keeps launching that unit, using drones for each one, until you hold production.",
+        "Click an enemy building to make it the target for every gun and warship. Kill the artillery and silos first, then batter the hull.",
+        "Click your own building to repair it with a drone or demolish it and free the slot. Shields soak damage until they collapse."
       ],
-      controls: "Left Click: Select & Place / Focus Target. Right Click: Repair / Sell. Drag / Wheel: Pan & Zoom. [1-3]: Camera Jump. [Space]: Pause.",
-      tip: "Artillery (6 drones × 180s) is cheaper and earlier than LasCannon (10 drones × 120s) — build Drone Stations early to scale into high-tech superweapons!"
+      controls: "Click slot: place · Click enemy building: target · Click own building: repair / production / demolish · Drag, wheel, A/D: camera · Z X C or minimap: jump · Space: pause · F: speed · 1–5: dock tabs · Shift: keep card armed",
+      tip: "Watch the red dashed box on your deck: that's what the enemy is aiming at. Put a Shield Generator next to it, or repair it before it falls."
     },
   },
 ];

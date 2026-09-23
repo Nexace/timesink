@@ -94,9 +94,11 @@ function playVictoryArpeggio() {
 // -------------------------------------------------------------
 
 let worker = null;
+let requestId = 0; // only the newest request's puzzle may land on the board
 try {
   worker = new Worker("/src/games/gridlock/worker.js", { type: "module" });
   worker.onmessage = (e) => {
+    if (e.data.reqId !== undefined && e.data.reqId !== requestId) return; // stale (mode/tier changed since)
     if (e.data.status === "ok") {
       onPuzzleGenerated(e.data);
     } else {
@@ -104,16 +106,30 @@ try {
       generateLocalPuzzle();
     }
   };
+  // A worker that fails to load would otherwise leave the board on "generating" forever
+  worker.onerror = (err) => {
+    console.warn("Web Worker failed, generating locally:", err.message || err);
+    worker = null;
+    generateLocalPuzzle();
+  };
 } catch (err) {
   console.warn("Web Worker unavailable, generating locally:", err);
 }
 
+function dailySeed() {
+  const today = new Date().toISOString().slice(0, 10);
+  return today.split("-").reduce((acc, part) => acc * 31 + parseInt(part, 10), 0);
+}
+
 function requestNewPuzzle() {
+  requestId++;
+  modalVictory.hidden = true;
   loadingEl.hidden = false;
   isSolved = false;
   selectedIdx = null;
   hintTargetIdx = null;
   hintStage = 0;
+  hintCurrentInfo = null;
   hintsUsed = 0;
   mistakesCount = 0;
   isAssisted = false;
@@ -122,11 +138,7 @@ function requestNewPuzzle() {
   undoStack = [];
   redoStack = [];
 
-  let seed = undefined;
-  if (currentMode === "daily") {
-    const today = new Date().toISOString().slice(0, 10);
-    seed = today.split("-").reduce((acc, part) => acc * 31 + parseInt(part, 10), 0);
-  }
+  const seed = currentMode === "daily" ? dailySeed() : undefined;
 
   if (worker) {
     worker.postMessage({
@@ -134,17 +146,20 @@ function requestNewPuzzle() {
       tier: currentTier,
       mode: currentMode,
       seed,
+      reqId: requestId,
     });
   } else {
-    setTimeout(generateLocalPuzzle, 50);
+    const id = requestId;
+    setTimeout(() => {
+      if (id === requestId) generateLocalPuzzle();
+    }, 50);
   }
 }
 
 function generateLocalPuzzle() {
   let rng = Math.random;
   if (currentMode === "daily") {
-    const today = new Date().toISOString().slice(0, 10);
-    let s = today.split("-").reduce((acc, part) => acc * 31 + parseInt(part, 10), 0);
+    let s = dailySeed();
     rng = () => {
       s = (s * 9301 + 49297) % 233280;
       return s / 233280;
@@ -177,7 +192,7 @@ function onPuzzleGenerated(data) {
 
   startTimer();
   renderBoard();
-  hintBoxEl.textContent = `Generated unique ${data.targetTier} puzzle (${data.clues} clues). Required: ${data.technique}.`;
+  hintBoxEl.textContent = `Generated unique ${data.targetTier} puzzle (${data.clues} clues). Logic rating: ${data.technique || data.targetTier}.`;
 }
 
 // -------------------------------------------------------------
@@ -326,7 +341,6 @@ function applyKillerCageStyles(cell, i, cages) {
 
 function selectCell(index) {
   selectedIdx = index;
-  hintTargetIdx = null;
   renderBoard();
 }
 
@@ -365,6 +379,7 @@ function enterDigit(num) {
   const prevCands = [...candidatesGrid[selectedIdx]];
 
   if (pencilMode) {
+    if (prevVal !== 0) return; // pencil marks only go in empty cells
     // Toggle pencil candidate
     const idx = candidatesGrid[selectedIdx].indexOf(num);
     if (idx === -1) {
@@ -456,26 +471,35 @@ function recalcAutoCandidates() {
 // -------------------------------------------------------------
 
 window.addEventListener("keydown", (e) => {
+  // Typing in the footer terminal / the tier select must not edit the grid
+  if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (!modalVictory.hidden) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod) {
+    const k = e.key.toLowerCase();
+    if (k === "z" && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+    } else if (k === "y" || (k === "z" && e.shiftKey)) {
+      e.preventDefault();
+      redo();
+    }
+    return;
+  }
+  if (e.altKey) return;
   if (e.key >= "1" && e.key <= "9") {
     enterDigit(parseInt(e.key, 10));
   } else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") {
+    e.preventDefault();
     clearCell();
   } else if (e.key === "p" || e.key === "P") {
     togglePencilMode();
-  } else if (e.key === "ArrowLeft") {
-    moveSelection(0, -1);
-  } else if (e.key === "ArrowRight") {
-    moveSelection(0, 1);
-  } else if (e.key === "ArrowUp") {
-    moveSelection(-1, 0);
-  } else if (e.key === "ArrowDown") {
-    moveSelection(1, 0);
-  } else if ((e.ctrlKey || e.metaKey) && e.key === "z") {
-    e.preventDefault();
-    undo();
-  } else if ((e.ctrlKey || e.metaKey) && e.key === "y") {
-    e.preventDefault();
-    redo();
+  } else if (e.key.startsWith("Arrow")) {
+    e.preventDefault(); // move the cursor, not the page
+    if (e.key === "ArrowLeft") moveSelection(0, -1);
+    else if (e.key === "ArrowRight") moveSelection(0, 1);
+    else if (e.key === "ArrowUp") moveSelection(-1, 0);
+    else if (e.key === "ArrowDown") moveSelection(1, 0);
   }
 });
 
@@ -533,7 +557,7 @@ function pushHistory(action) {
 }
 
 function undo() {
-  if (undoStack.length === 0) return;
+  if (undoStack.length === 0 || isSolved) return;
   const action = undoStack.pop();
   redoStack.push(action);
 
@@ -546,12 +570,13 @@ function undo() {
     candidatesGrid[action.index] = action.prevCands;
   }
 
+  if (autoCandidates) recalcAutoCandidates();
   playKeypressBeep();
   renderBoard();
 }
 
 function redo() {
-  if (redoStack.length === 0) return;
+  if (redoStack.length === 0 || isSolved) return;
   const action = redoStack.pop();
   undoStack.push(action);
 
@@ -564,8 +589,10 @@ function redo() {
     candidatesGrid[action.index] = [];
   }
 
+  if (autoCandidates) recalcAutoCandidates();
   playKeypressBeep();
   renderBoard();
+  checkWinCondition();
 }
 
 btnUndo?.addEventListener("click", undo);
@@ -609,20 +636,25 @@ btnHint?.addEventListener("click", () => {
     updateTimerDisplay();
 
     hintStage = 1;
-    hintCurrentInfo = { r, c, box, val: correctVal };
+    hintCurrentInfo = { idx: hintTargetIdx, r, c, box, val: correctVal };
     hintBoxEl.textContent = `[HINT 1/3]: Deductive technique available in Box ${box}, Row ${r}, Col ${c}. (Press Hint again to target cell).`;
     playTone(550, 0.12, "triangle", 0.3);
   } else if (hintStage === 1) {
     // Stage 2: Highlight the cell
     hintStage = 2;
-    selectedIdx = hintTargetIdx;
+    hintTargetIdx = hintCurrentInfo.idx;
+    selectedIdx = hintCurrentInfo.idx;
     hintBoxEl.textContent = `[HINT 2/3]: Cell at R${hintCurrentInfo.r}C${hintCurrentInfo.c} targeted. (Press Hint again to reveal digit).`;
     playTone(700, 0.12, "triangle", 0.3);
   } else if (hintStage === 2) {
-    // Stage 3: Fill the digit
+    // Stage 3: Fill the digit (recorded in history so Undo stays coherent)
     hintStage = 0;
-    currentGrid[hintTargetIdx] = hintCurrentInfo.val;
-    candidatesGrid[hintTargetIdx] = [];
+    const idx = hintCurrentInfo.idx;
+    pushHistory({ type: "value", index: idx, prevVal: currentGrid[idx], newVal: hintCurrentInfo.val });
+    currentGrid[idx] = hintCurrentInfo.val;
+    candidatesGrid[idx] = [];
+    eliminateCandidateFromPeers(idx, hintCurrentInfo.val);
+    if (autoCandidates) recalcAutoCandidates();
     hintBoxEl.textContent = `[HINT 3/3]: Filled ${hintCurrentInfo.val} at R${hintCurrentInfo.r}C${hintCurrentInfo.c}.`;
     hintTargetIdx = null;
     playKeypressBeep();
@@ -633,6 +665,7 @@ btnHint?.addEventListener("click", () => {
 });
 
 btnCheck?.addEventListener("click", () => {
+  if (isSolved) return;
   isAssisted = true;
   let wrongCount = 0;
   for (let i = 0; i < 81; i++) {
@@ -656,6 +689,7 @@ btnCheck?.addEventListener("click", () => {
 // -------------------------------------------------------------
 
 function checkWinCondition() {
+  if (isSolved) return;
   for (let i = 0; i < 81; i++) {
     if (currentGrid[i] !== solutionGrid[i]) return;
   }
@@ -676,6 +710,7 @@ function checkWinCondition() {
     perfect: hintsUsed === 0 && mistakesCount === 0,
     assisted: isAssisted,
   });
+  recordTierTime(currentTier, timerSeconds);
 
   // Update records display
   updateRecordsPanel();
@@ -691,17 +726,26 @@ function checkWinCondition() {
 
 btnShare?.addEventListener("click", () => {
   const dateStr = new Date().toISOString().slice(0, 10);
-  const shareText = `SYS://TIMESINK.NET — GRIDLOCK SUDOKU\n` +
+  // 3x3 card: one square per box — red for each mistake, yellow for each hint, green otherwise
+  const squares = Array(9).fill("🟩");
+  let k = 0;
+  for (let m = 0; m < Math.min(9, mistakesCount); m++) squares[k++] = "🟥";
+  for (let h = 0; h < hintsUsed && k < 9; h++) squares[k++] = "🟨";
+  const card = [0, 3, 6].map((r) => squares.slice(r, r + 3).join("")).join("\n");
+  const shareText = `SYS://TIMESINK.NET — GRIDLOCK SUDOKU${currentMode === "daily" ? ` // DAILY ${dateStr}` : ""}\n` +
     `Mode: ${currentMode.toUpperCase()} | Tier: ${currentTier}\n` +
     `Time: ${timerEl.textContent} | Score: ${calculateScore()} PTS\n` +
     `Hints: ${hintsUsed}/3 | Mistakes: ${mistakesCount}\n` +
-    `🟩🟩🟩\n🟩🟩🟩\n🟩🟩🟩`;
+    card;
 
-  navigator.clipboard.writeText(shareText).then(() => {
-    toast({ title: "COPIED TO CLIPBOARD", body: "Share your terminal solve!" });
-  }).catch(() => {
-    toast({ title: "SHARE", body: shareText });
-  });
+  const fallback = () => toast({ title: "SHARE", body: shareText });
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(shareText).then(() => {
+      toast({ title: "COPIED TO CLIPBOARD", body: "Share your terminal solve!" });
+    }).catch(fallback);
+  } else {
+    fallback();
+  }
 });
 
 btnNextPuzzle?.addEventListener("click", () => {
@@ -729,14 +773,42 @@ selectTier?.addEventListener("change", (e) => {
 
 btnNewPuzzle?.addEventListener("click", requestNewPuzzle);
 
+// Fastest solve per tier (the arcade score table only keeps one overall best)
+const PB_KEY = "timesink:gridlock:pb";
+
+function readTierTimes() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PB_KEY) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function recordTierTime(tier, seconds) {
+  const times = readTierTimes();
+  if (!(Number(times[tier]) > 0) || seconds < times[tier]) {
+    times[tier] = seconds;
+    try {
+      localStorage.setItem(PB_KEY, JSON.stringify(times));
+    } catch {}
+  }
+}
+
 function updateRecordsPanel() {
+  const times = readTierTimes();
+  // Seed from the legacy single-best record so an existing PB isn't lost
   const rec = loadGameScore("gridlock");
-  if (rec && rec.tier) {
-    const el = document.getElementById(`pb-${rec.tier}`);
-    if (el) el.textContent = rec.label || `${rec.time}s`;
+  if (rec && rec.tier && Number(rec.time) > 0 && !(Number(times[rec.tier]) > 0)) times[rec.tier] = Number(rec.time);
+  for (const tier of ["Rookie", "Standard", "Hard", "Expert", "Nightmare"]) {
+    const el = document.getElementById(`pb-${tier}`);
+    const t = Number(times[tier]);
+    if (el) el.textContent = t > 0 ? `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}` : "--:--";
   }
 }
 
 // Initialize
+if (selectTier) selectTier.value = currentTier; // the dropdown must show the tier actually being played
 updateRecordsPanel();
 requestNewPuzzle();
+

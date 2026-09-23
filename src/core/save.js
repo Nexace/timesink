@@ -5,7 +5,12 @@
 
 import { saveScore, getBestScore } from "/shared/scores.js";
 
+// Accepts either (slug, score, label, meta) or (slug, { score, label, ...meta }).
 export function saveGameScore(slug, score, label = "", meta = {}) {
+  if (score && typeof score === "object") {
+    const { score: value, label: objLabel, ...rest } = score;
+    return saveScore(slug, value, objLabel ?? label, { ...rest, ...meta });
+  }
   return saveScore(slug, score, label, meta);
 }
 

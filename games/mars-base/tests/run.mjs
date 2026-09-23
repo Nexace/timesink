@@ -169,6 +169,20 @@ t("save round-trip preserves the game", () => {
   assert.equal(hashGame(g2), hashGame(g), "continues identically after load");
 });
 
+t("saves made on the original 384-tile map still load on that map", () => {
+  const g = createGame({ seed: 15, mode: "campaign" });
+  assert.equal(g.world.w, 1024, "new games use the big map");
+  const data = JSON.parse(JSON.stringify(serialize(g)));
+  delete data.worldW;
+  delete data.worldH;
+  data.explored = rleEncode(new Uint8Array(384 * 384));
+  data.structs = [];
+  const g2 = deserialize(data);
+  assert.ok(g2);
+  assert.equal(g2.world.w, 384);
+  assert.equal(worldHash(g2.world), worldHash(generateWorld(15, { w: 384, h: 384 })));
+});
+
 t("deserialize rejects garbage and wrong versions", () => {
   assert.equal(deserialize(null), null);
   assert.equal(deserialize({ version: 1 }), null);

@@ -9,7 +9,10 @@ export function getBestScore(slug) {
   try {
     const raw = localStorage.getItem(`${STORAGE_PREFIX}:${slug}`);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const rec = JSON.parse(raw);
+    // Older builds stored object scores as "[object Object]"; treat those as no record.
+    if (!rec || rec.score === "[object Object]" || rec.label === "[object Object]") return null;
+    return rec;
   } catch {
     return null;
   }

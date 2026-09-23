@@ -72,13 +72,13 @@
 
         <!-- MAIN BATTLEFIELD CANVAS -->
         <div class="ic-canvas-container" id="ic-container">
-          <canvas id="ic-canvas" width="1280" height="720"></canvas>
+          <canvas id="ic-canvas" width="1920" height="800"></canvas>
 
           <!-- Camera jump shortcuts -->
           <div class="ic-jump-bar">
-            <button type="button" class="ic-btn-jump" id="btn-jump-player">[1] ALLIED HULL</button>
-            <button type="button" class="ic-btn-jump" id="btn-jump-mid">[2] MIDFIELD</button>
-            <button type="button" class="ic-btn-jump" id="btn-jump-enemy">[3] ENEMY HULL</button>
+            <button type="button" class="ic-btn-jump" id="btn-jump-player">◀ ALLIED HULL</button>
+            <button type="button" class="ic-btn-jump" id="btn-jump-mid">MIDFIELD</button>
+            <button type="button" class="ic-btn-jump" id="btn-jump-enemy">ENEMY HULL ▶</button>
           </div>
 
           <!-- Boss Taunt Banner -->
@@ -99,9 +99,10 @@
 
           <!-- Right-Click Context Menu -->
           <div class="ic-context-menu" id="context-menu" style="display: none;">
+            <span class="ic-context-title" id="ctx-title">BUILDING</span>
+            <div class="ic-context-units" id="ctx-units" hidden></div>
             <button type="button" class="ic-context-btn" id="ctx-repair">REPAIR WITH DRONE</button>
-            <button type="button" class="ic-context-btn" id="ctx-priority">CYCLE TARGET</button>
-            <button type="button" class="ic-context-btn ic-context-btn--danger" id="ctx-sell">DECONSTRUCT / SELL</button>
+            <button type="button" class="ic-context-btn ic-context-btn--danger" id="ctx-sell">DEMOLISH</button>
           </div>
 
           <!-- Modals (Tech Lab, Result, Sector Map) -->
@@ -195,24 +196,24 @@
         <!-- CONSOLE SHORTCUTS -->
         <div class="console">
           <span class="console__group">
-            <span class="console__label">TABS</span>
-            <span class="kbd">1</span><span class="kbd">2</span><span class="kbd">3</span><span class="kbd">4</span><span class="kbd">5</span>
+            <span class="console__label">BUILD</span>
+            <span class="kbd">1–5</span> TABS <span class="kbd">CLICK SLOT</span> PLACE <span class="kbd">SHIFT</span> KEEP CARD
+          </span>
+          <span class="console__group">
+            <span class="console__label">COMMAND</span>
+            <span class="kbd">CLICK ENEMY BUILDING</span> TARGET <span class="kbd">CLICK OWN BUILDING</span> REPAIR · PRODUCTION · DEMOLISH
           </span>
           <span class="console__group">
             <span class="console__label">CAMERA</span>
-            <span class="kbd">DRAG / WHEEL</span>
+            <span class="kbd">DRAG</span> <span class="kbd">WHEEL</span> <span class="kbd">A/D</span> <span class="kbd">Z X C</span> <span class="kbd">MINIMAP</span>
           </span>
           <span class="console__group">
-            <span class="console__label">ACTIONS</span>
-            <span class="kbd">CLICK PLACE</span> <span class="kbd">R-CLICK REPAIR/SELL</span>
-          </span>
-          <span class="console__group">
-            <span class="console__label">SPEED</span>
-            <span class="kbd">SPACE</span>
+            <span class="console__label">TIME</span>
+            <span class="kbd">SPACE</span> PAUSE <span class="kbd">F</span> SPEED
           </span>
           <span class="console__group">
             <span class="console__label">MENU</span>
-            <span class="kbd">T</span> <span class="kbd">ESC</span>
+            <span class="kbd">T</span> TECH <span class="kbd">ESC</span>
           </span>
         </div>
       </div>

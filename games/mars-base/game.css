@@ -913,6 +913,22 @@
   font-size: 15px;
   color: var(--mb-dim);
 }
+/* The highlighted first entry (Continue / New campaign): keep the primary fill so its dark
+   label stays readable — the dark menu background above made it black-on-black. */
+.mb-title__menu .btn--primary {
+  background: var(--mb-orange);
+  border-color: var(--mb-orange);
+  color: #140806;
+}
+.mb-title__menu .btn--primary small {
+  color: rgba(20, 8, 6, 0.72);
+}
+.mb-title__menu .btn--primary:hover:not(:disabled),
+.mb-title__menu .btn--primary:focus-visible {
+  background: var(--cream);
+  border-color: var(--cream);
+  color: #140806;
+}
 .mb-title__fame {
   font-family: var(--font-body);
   color: var(--mb-dim);

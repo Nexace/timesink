@@ -26,6 +26,7 @@ export const MISSIONS = [
       "10.0.0.15": {
         hostname: "research-node.local",
         type: "workstation",
+        locked: true,
         ports: [22, 80],
         crackedPorts: [],
         privilege: "guest",
@@ -67,12 +68,13 @@ export const MISSIONS = [
       "192.168.4.25": {
         hostname: "db-ledger.bank",
         type: "database",
+        locked: true,
         ports: [80, 443],
         crackedPorts: [],
         privilege: "guest",
         files: {
           "hint.txt": "The encryption shift matches the atomic number of Boron (B = 5).\nUse command: decrypt ledger.enc 5",
-          "ledger.enc": "YWNjb3VudF9zd2lmdF90cmFuc2Zlcg== // QPEJ{HUTKNWR_GFSP_YWFQVNJW_882}", // Shift 5 of: CODE{CONFIRM_BANK_TRANSFER_882}
+          "ledger.enc": "HTIJ{HTSKNWR_GFSP_YWFSXKJW_882}", // Shift 5 of: CODE{CONFIRM_BANK_TRANSFER_882}
           "audit.log": "INTRUSION AUDIT LOG:\n[AUTH EVENT] External connection logged from gateway proxy.\nExecute 'shred audit.log' to sanitize forensic traces.",
         },
       },
@@ -191,12 +193,13 @@ export const MISSIONS = [
       "10.99.99.1": {
         hostname: "core-mainframe.mil",
         type: "mainframe",
+        locked: true,
         ports: [22, 443, 8080],
         crackedPorts: [],
         privilege: "guest",
         files: {
           "security.nfo": "MILITARY DEFENSE CORE - LEVEL 5\nDecryption shift matches the 7 deadly sins (shift 7).\nDecrypt security.enc with 'decrypt security.enc 7'.\nElevate to root with exploit, then execute 'plant rootkit'.",
-          "security.enc": "YVVA{ZHAHO_WYLCPT_THZALY_RF8}", // shift 7 of: ROOT{SATAN_PREVIEW_MASTER_KY8}
+          "security.enc": "YVVA{ZHAHU_WYLCPLD_THZALY_RF8}", // shift 7 of: ROOT{SATAN_PREVIEW_MASTER_KY8}
           "audit.log": "IDS LOG: Active threat detection enabled. 4-second poll interval.\nUse 'shred audit.log' to suppress counter-intrusion signals.",
         },
       },
@@ -283,6 +286,7 @@ export function createGameState(missionIdx = 0) {
     isCleared: false,
     isFailed: false,
     logsWiped: false,
+    ledgerDecrypted: false,
   };
 }
 
@@ -352,6 +356,18 @@ export function getAutocompleteSuggestions(inputLine, state) {
   }
 
   return [];
+}
+
+// Nodes flagged `locked` hide their filesystem until a service port has been cracked.
+function isLockedOut(node) {
+  return Boolean(node && node.locked && !(node.crackedPorts && node.crackedPorts.length) && node.privilege !== "root");
+}
+
+function lockedMessage(node) {
+  return {
+    text: `[-] Permission denied on ${node.hostname}. Authenticate first: 'crack <port>' (open ports: ${node.ports.join(", ")}).`,
+    cls: "rk-line--err",
+  };
 }
 
 /**
@@ -605,7 +621,7 @@ export function executeCommand(rawCmd, state) {
         const actual = knockPorts.join(" ");
         if (expected === actual) {
           sound = "good";
-          targetHost.ports.push(targetHost.guardedPort);
+          if (!targetHost.ports.includes(targetHost.guardedPort)) targetHost.ports.push(targetHost.guardedPort);
           lines.push({ text: `[*] Transmitting SYN packet sequence: [${knockPorts.join(", ")}]...`, cls: "rk-line--dim" });
           lines.push({ text: `[+] FIREWALL KNOCK VERIFIED! Guarded Port ${targetHost.guardedPort} UNLOCKED!` });
         } else {
@@ -656,6 +672,11 @@ export function executeCommand(rawCmd, state) {
         sound = "error";
         break;
       }
+      if (isLockedOut(activeNode)) {
+        lines.push(lockedMessage(activeNode));
+        sound = "deny";
+        break;
+      }
       const files = activeNode ? activeNode.files : state.nodes[state.mission.gatewayIp]?.files;
       if (files && files[target]) {
         sound = "good";
@@ -676,6 +697,11 @@ export function executeCommand(rawCmd, state) {
         sound = "error";
         break;
       }
+      if (isLockedOut(activeNode)) {
+        lines.push(lockedMessage(activeNode));
+        sound = "deny";
+        break;
+      }
       const files = activeNode ? activeNode.files : {};
       if (files && files[file]) {
         const plain = caesarDecrypt(files[file], shift);
@@ -685,6 +711,7 @@ export function executeCommand(rawCmd, state) {
 
         // Mission 2 check
         if (state.missionIdx === 1 && shift === 5 && file === "ledger.enc") {
+          state.ledgerDecrypted = true;
           lines.push({ text: "[+] Financial transaction ledger extracted! Shred audit.log to finalize mission." });
         }
         // Mission 6 check
@@ -744,7 +771,12 @@ export function executeCommand(rawCmd, state) {
     case "override":
     case "run": {
       const target = (args[0] || "").toLowerCase();
-      // Mission 3: SCADA override
+      // Mission 3: SCADA override (only once the knock has unsealed Modbus port 502)
+      if (state.missionIdx === 2 && state.connectedIp === "172.16.88.50" && !activeNode.ports.includes(activeNode.guardedPort)) {
+        sound = "deny";
+        lines.push({ text: `[-] Modbus port ${activeNode.guardedPort} is firewalled. Read the router's firewall.conf and execute the knock sequence first.`, cls: "rk-line--err" });
+        break;
+      }
       if (state.missionIdx === 2 && state.connectedIp === "172.16.88.50") {
         sound = "win";
         missionCleared = true;
@@ -819,6 +851,16 @@ export function executeCommand(rawCmd, state) {
         sound = "error";
         break;
       }
+      if (isLockedOut(activeNode)) {
+        lines.push(lockedMessage(activeNode));
+        sound = "deny";
+        break;
+      }
+      if (state.missionIdx === 1 && state.connectedIp === "192.168.4.25" && file === "audit.log" && !state.ledgerDecrypted && activeNode.files[file]) {
+        lines.push({ text: "[-] Hold on: extract the ledger (decrypt ledger.enc <shift>) before wiping the audit trail.", cls: "rk-line--warn" });
+        sound = "deny";
+        break;
+      }
       if (activeNode && activeNode.files && activeNode.files[file]) {
         delete activeNode.files[file];
         sound = "good";
@@ -828,7 +870,7 @@ export function executeCommand(rawCmd, state) {
         lines.push({ text: `[+] File securely shredded. Forensic trail sanitized! Trace reduced by 25%.` });
 
         // Mission 2 condition: ledger decrypted and audit shredded
-        if (state.missionIdx === 1 && state.connectedIp === "192.168.4.25") {
+        if (state.missionIdx === 1 && state.connectedIp === "192.168.4.25" && file === "audit.log" && state.ledgerDecrypted) {
           sound = "win";
           missionCleared = true;
           lines.push({ text: `[+] MISSION COMPLETE: Ledger extracted and audit trails erased with zero forensic trace!`, cls: "rk-line--success" });
@@ -841,6 +883,11 @@ export function executeCommand(rawCmd, state) {
     }
 
     case "ls": {
+      if (isLockedOut(activeNode)) {
+        lines.push(lockedMessage(activeNode));
+        sound = "deny";
+        break;
+      }
       const files = activeNode ? activeNode.files : state.nodes[state.mission.gatewayIp]?.files;
       if (files && Object.keys(files).length > 0) {
         const entries = Object.keys(files).map((f) => {
@@ -861,6 +908,11 @@ export function executeCommand(rawCmd, state) {
       if (!file) {
         lines.push({ text: "Usage: cat <filename>", cls: "rk-line--err" });
         sound = "error";
+        break;
+      }
+      if (isLockedOut(activeNode)) {
+        lines.push(lockedMessage(activeNode));
+        sound = "deny";
         break;
       }
       const files = activeNode ? activeNode.files : state.nodes[state.mission.gatewayIp]?.files;

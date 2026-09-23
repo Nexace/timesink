@@ -57,7 +57,8 @@ export function generateWorld(seed, { w = WORLD_W, h = WORLD_H } = {}) {
   }
 
   // 3. Craters
-  const craterCount = 28;
+  const big = w > 384 || h > 384;
+  const craterCount = big ? Math.round((28 * w * h) / (384 * 384)) : 28;
   for (let i = 0; i < craterCount; i += 1) {
     const cx = rng.int(10, w - 10);
     const cy = rng.int(10, h - 10);
@@ -202,8 +203,14 @@ export function generateWorld(seed, { w = WORLD_W, h = WORLD_H } = {}) {
     ].map((c) => ({ ...c, d: Math.hypot(c.x - start.x, c.y - start.y) }));
     corners.sort((a, b) => b.d - a.d);
     const c = corners[rng.int(0, 1)];
-    const x = c.x + rng.int(-6, 6);
-    const y = c.y + rng.int(-6, 6);
+    let x = c.x + rng.int(-6, 6);
+    let y = c.y + rng.int(-6, 6);
+    if (big) {
+      const dd = Math.hypot(x - start.x, y - start.y);
+      const k = Math.min(1, 300 / dd);
+      x = Math.round(start.x + (x - start.x) * k);
+      y = Math.round(start.y + (y - start.y) * k);
+    }
     clear(x, y, 5);
     nodes[idx(x, y)] = N.MAV;
     addPoi("mav", "Schiaparelli MAV Pad", x, y);
@@ -241,6 +248,44 @@ export function generateWorld(seed, { w = WORLD_W, h = WORLD_H } = {}) {
     clear(p.x, p.y, 2);
     for (let k = 0; k < 4; k += 1) place(p.x + rng.int(-2, 2), p.y + rng.int(-2, 2), N.SAMPLE);
     addPoi("science", "Science Site", p.x, p.y);
+  }
+
+  // 5b. The frontier: the bigger map is worth exploring — more caches, science sites, wrecks and tubes
+  if (big) {
+    const far = Math.min(w, h) * 0.46;
+    const lavaTube = (p) => {
+      for (let y = p.y - 4; y <= p.y + 4; y += 1) {
+        for (let x = p.x - 6; x <= p.x + 6; x += 1) {
+          if (!inb(x, y)) continue;
+          const edge = Math.abs(y - p.y) === 4 || Math.abs(x - p.x) === 6;
+          terrain[idx(x, y)] = edge ? T.BASALT : T.TUBE;
+          nodes[idx(x, y)] = 0;
+        }
+      }
+      const ex = p.x + (start.x < p.x ? -6 : 6);
+      for (let y = p.y - 1; y <= p.y + 1; y += 1) if (inb(ex, y)) terrain[idx(ex, y)] = T.TUBE;
+      for (let k = 0; k < 4; k += 1) place(p.x + rng.int(-4, 4), p.y + rng.int(-2, 2), k % 2 ? N.RARE : N.SAMPLE);
+      addPoi("tube", "Lava Tube", p.x, p.y);
+    };
+    for (let i = 0; i < 2; i += 1) lavaTube(spot(170, far));
+    for (let i = 0; i < 10; i += 1) {
+      const p = spot(170, far);
+      clear(p.x, p.y, 1);
+      nodes[idx(p.x, p.y)] = N.CACHE;
+      addPoi("cache", "Supply Cache", p.x, p.y);
+    }
+    for (let i = 0; i < 6; i += 1) {
+      const p = spot(160, far);
+      clear(p.x, p.y, 2);
+      for (let k = 0; k < 5; k += 1) place(p.x + rng.int(-2, 2), p.y + rng.int(-2, 2), N.SAMPLE);
+      addPoi("science", "Science Site", p.x, p.y);
+    }
+    for (let i = 0; i < 4; i += 1) {
+      const p = spot(150, far);
+      clear(p.x, p.y, 3);
+      for (let k = 0; k < 10; k += 1) place(p.x + rng.int(-4, 4), p.y + rng.int(-4, 4), k % 4 === 0 ? N.HYDRAZINE : N.SCRAP);
+      addPoi("wreck", "Probe Wreck", p.x, p.y);
+    }
   }
 
   // 6. Guarantee reachability: carve ramps from anything unreachable toward the start.

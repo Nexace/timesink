@@ -1,3 +1,8 @@
+/* Stage uses nearly the full window width */
+main.wrap.stage-page {
+  --game-content-w: min(1900px, calc(100vw - 24px));
+}
+
 /* ORE RUNNER — Newtonian Asteroid Miner Styles */
 :root {
   --orange-glow: rgba(255, 119, 0, 0.45);
@@ -10,15 +15,16 @@
   align-items: center;
   gap: var(--s-3);
   width: 100%;
-  max-width: min(1440px, 100%);
+  max-width: min(1880px, 100%);
   margin: 0 auto;
 }
 
 .or-canvas-container {
   position: relative;
-  width: 100%;
+  /* Width follows the height cap so the 16:9 canvas is never stretched on short windows */
+  width: min(100%, calc(max(420px, 100vh - 250px) * 16 / 9));
+  margin-inline: auto;
   aspect-ratio: 16 / 9;
-  max-height: min(80vh, 760px);
   background: #050302;
   border: 2px solid var(--accent, #ff7700);
   border-radius: var(--radius-md, 6px);
@@ -114,4 +120,14 @@
   text-shadow: 0 0 16px #ff7700;
   letter-spacing: 0.15em;
   margin: 0;
+}
+
+/* Phones: shrink the whole HUD to fit the canvas instead of letting it spill past the edge */
+@media (max-width: 600px) {
+  .or-hud {
+    right: auto;
+    width: calc((100% - 12px) / 0.62);
+    transform: scale(0.62);
+    transform-origin: top left;
+  }
 }

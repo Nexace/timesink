@@ -16,6 +16,8 @@ import { initShell, escapeHtml, toast } from "/shared/shell.js";
 import { createGameLoop, clamp, lerp } from "/src/core/engine.js";
 import { playTone, playLaser, playExplosion, sfx } from "/src/core/audio.js";
 import { saveGameScore, loadGameScore } from "/src/core/save.js";
+import { glow, tinted, vignette, scanlines } from "/src/core/gfx.js";
+import { buildSkyArt, platformSprite, drawSky } from "./art.js";
 
 initShell({ crumb: "SkyDoodle" });
 
@@ -51,6 +53,7 @@ let gameState = "PLAYING"; // "CALIBRATING", "PLAYING", "GAMEOVER"
 let cameraY = 0;
 let maxCameraY = 0;
 let score = 0;
+let bonusScore = 0; // points from squashing monsters, kept on top of climbed height
 let monstersSquashed = 0;
 let highScore = 0;
 
@@ -82,7 +85,12 @@ const player = {
   },
   hasShield() {
     return this.powerups.shield > 0;
-  }
+  },
+  // Jetpack flight (plus a short grace after it cuts out) makes the doodler immune to every hazard
+  isJetpacking() {
+    return this.powerups.jetpack > 0 || this.jetpackGrace > 0;
+  },
+  jetpackGrace: 0
 };
 
 // World Entities
@@ -116,6 +124,9 @@ if (prevScoreRec && typeof prevScoreRec.score === "number") {
 // -------------------------------------------------------------
 
 window.addEventListener("keydown", (e) => {
+  if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.code === "ArrowLeft" || e.code === "ArrowRight") e.preventDefault();
   if (e.code === "ArrowLeft" || e.code === "KeyA") keys.left = true;
   if (e.code === "ArrowRight" || e.code === "KeyD") keys.right = true;
   if (e.code === "Space") {
@@ -156,10 +167,14 @@ const modalPerm = document.getElementById("modal-permission");
 const modalCalib = document.getElementById("modal-calibrate");
 
 function checkGyroSupport() {
+  // Tilt steering only makes sense on touch devices; desktops go straight to keyboard play.
+  const isTouchDevice = window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 1;
+  if (!isTouchDevice) return;
   if (typeof DeviceOrientationEvent !== "undefined") {
     if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      // iOS requires explicit permission
+      // iOS requires explicit permission (the climb waits until the player chooses)
       modalPerm.hidden = false;
+      gameState = "CALIBRATING";
     } else {
       window.addEventListener("deviceorientation", handleOrientation);
       // Show calibration on mobile touches
@@ -181,14 +196,17 @@ document.getElementById("btn-enable-tilt")?.addEventListener("click", async () =
       gameState = "CALIBRATING";
     } else {
       modalPerm.hidden = true;
+      gameState = "PLAYING";
     }
   } catch {
     modalPerm.hidden = true;
+    gameState = "PLAYING";
   }
 });
 
 document.getElementById("btn-cancel-permission")?.addEventListener("click", () => {
   modalPerm.hidden = true;
+  gameState = "PLAYING";
 });
 
 document.getElementById("btn-set-zero")?.addEventListener("click", () => {
@@ -221,6 +239,10 @@ leftZone?.addEventListener("pointerleave", () => {
   touchSteerLeft = false;
   leftZone.classList.remove("active");
 });
+leftZone?.addEventListener("pointercancel", () => {
+  touchSteerLeft = false;
+  leftZone.classList.remove("active");
+});
 
 rightZone?.addEventListener("pointerdown", (e) => {
   e.preventDefault();
@@ -233,6 +255,10 @@ rightZone?.addEventListener("pointerup", () => {
   rightZone.classList.remove("active");
 });
 rightZone?.addEventListener("pointerleave", () => {
+  touchSteerRight = false;
+  rightZone.classList.remove("active");
+});
+rightZone?.addEventListener("pointercancel", () => {
   touchSteerRight = false;
   rightZone.classList.remove("active");
 });
@@ -253,6 +279,7 @@ function resetWorld() {
   cameraY = 0;
   maxCameraY = 0;
   score = 0;
+  bonusScore = 0;
   monstersSquashed = 0;
   platforms = [];
   projectiles = [];
@@ -288,6 +315,7 @@ function resetWorld() {
   player.squash = 1.0;
   player.powerups.propeller = 0;
   player.powerups.jetpack = 0;
+  player.jetpackGrace = 0;
   player.powerups.shield = 0;
   player.powerups.repellent = 0;
 }
@@ -402,8 +430,6 @@ function spawnEnemy(x, y, height) {
   let type = "monster";
   if (height > 1000 && r < 0.28) {
     type = "ufo";
-  } else if (height > 1500 && r < 0.48) {
-    type = "blackhole";
   }
 
   enemies.push({
@@ -411,8 +437,8 @@ function spawnEnemy(x, y, height) {
     x: clamp(x, 40, W - 40),
     y,
     type,
-    width: type === "ufo" ? 44 : (type === "blackhole" ? 36 : 38),
-    height: type === "ufo" ? 24 : (type === "blackhole" ? 36 : 32),
+    width: type === "ufo" ? 44 : 38,
+    height: type === "ufo" ? 24 : 32,
     vx: type === "monster" ? (Math.random() > 0.5 ? 60 : -60) : (type === "ufo" ? 90 : 0),
     alive: true,
     bobTimer: Math.random() * Math.PI * 2,
@@ -454,8 +480,10 @@ function update(dt) {
     }
   }
 
+  if (player.jetpackGrace > 0) player.jetpackGrace -= dt;
   if (player.powerups.jetpack > 0) {
     player.powerups.jetpack -= dt;
+    if (player.powerups.jetpack <= 0) player.jetpackGrace = 0.8;
     player.vy = -860;
     createSpark(player.x - 6, player.y - 14, "#ff7700");
     createSpark(player.x + 6, player.y - 14, "#ffdd00");
@@ -521,10 +549,8 @@ function update(dt) {
   if (targetCam > cameraY) {
     cameraY = Math.max(cameraY, lerp(cameraY, targetCam, 1 - Math.exp(-24 * dt)));
   }
-  if (cameraY > maxCameraY) {
-    maxCameraY = cameraY;
-    score = Math.floor(maxCameraY);
-  }
+  if (cameraY > maxCameraY) maxCameraY = cameraY;
+  score = Math.floor(maxCameraY) + bonusScore;
 
   // Fall off bottom check
   if (player.y < cameraY - 40) {
@@ -565,7 +591,7 @@ function update(dt) {
         playExplosion({ duration: 0.35, lowpass: 420 });
         p.broken = true;
         // Check if player is caught in detonation
-        if (Math.hypot(player.x - (p.x + p.width / 2), player.y - p.y) < 65) {
+        if (Math.hypot(player.x - (p.x + p.width / 2), player.y - p.y) < 65 && !player.isJetpacking()) {
           if (player.hasShield()) {
             player.powerups.shield = 0;
             createBurst(player.x, player.y, "#00f0ff", 14);
@@ -592,7 +618,7 @@ function update(dt) {
         player.y = padTop + player.height / 2;
         player.squash = 0.72; // Tactile bounce deformation!
         // Landed on platform!
-        if (p.type === "spike") {
+        if (p.type === "spike" && !player.isJetpacking()) {
           if (player.hasShield()) {
             player.powerups.shield = 0;
             player.vy = BOUNCE_SPEED;
@@ -665,22 +691,8 @@ function update(dt) {
       if (e.x < 40 || e.x > W - 40) e.vx = -e.vx;
       // UFO tractor beam checks
       if (Math.abs(player.x - e.x) < 24 && player.y < e.y && player.y > e.y - 180) {
-        if (!player.hasShield()) {
+        if (!player.hasShield() && !player.isJetpacking()) {
           triggerGameOver("ABDUCTED BY UFO");
-          return;
-        }
-      }
-    } else if (e.type === "blackhole") {
-      // Gravitational pull
-      const dx = e.x - player.x;
-      const dy = e.y - player.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist < 150) {
-        const force = (150 - dist) * 12;
-        player.x += (dx / dist) * force * dt;
-        player.y += (dy / dist) * force * dt;
-        if (dist < 18) {
-          triggerGameOver("SUCKED INTO BLACK HOLE");
           return;
         }
       }
@@ -693,24 +705,33 @@ function update(dt) {
         pr.y = 999999; // destroy bullet
         createBurst(e.x, e.y, "#ff3333", 14);
         playExplosion({ duration: 0.25, lowpass: 500 });
-        score += 50;
+        bonusScore += 50;
         monstersSquashed++;
       }
     });
 
     // Player vs Enemy Collision
-    if (e.alive && e.type !== "blackhole") {
+    if (e.alive) {
       const dx = Math.abs(player.x - e.x);
       const dy = player.y - e.y;
 
       if (dx < (player.width + e.width) / 2 - 4 && Math.abs(dy) < (player.height + e.height) / 2 - 4) {
+        if (player.isJetpacking()) {
+          // Jetpack rams straight through anything in its way
+          e.alive = false;
+          createBurst(e.x, e.y, "#ff7700", 16);
+          playExplosion({ duration: 0.2 });
+          bonusScore += 50;
+          monstersSquashed++;
+          return;
+        }
         // Head stomp condition (falling down and landing on top of head)
         if (player.vy > 0 && dy > 6 && e.type === "monster") {
           e.alive = false;
           player.vy = BOUNCE_SPEED * 1.1;
           createBurst(e.x, e.y, "#22c55e", 10);
           playTone(280, 0.15, "triangle", 0.4);
-          score += 50;
+          bonusScore += 50;
           monstersSquashed++;
         } else {
           // Side or bottom contact
@@ -743,7 +764,7 @@ function update(dt) {
 
   // Update UI HUD
   document.getElementById("hud-score").textContent = `${score.toString().padStart(4, "0")} M`;
-  document.getElementById("hud-tier").textContent = getProgressionTier(score);
+  document.getElementById("hud-tier").textContent = getProgressionTier(Math.floor(maxCameraY));
   document.getElementById("hud-best").textContent = `${Math.max(score, highScore).toString().padStart(4, "0")} M`;
 
   // Render Powerup Badges
@@ -794,9 +815,10 @@ function updateChiptuneMusic(dt) {
     musicTimer = 0;
     musicStep = (musicStep + 1) % 8;
 
-    const tier = getProgressionTier(score);
+    const tier = getProgressionTier(Math.floor(maxCameraY));
 
     // Layer 1: Bass note (all tiers)
+
     playTone(BASS_NOTES[musicStep], 0.08, "triangle", 0.08);
 
     // Layer 2: Lead melody (Tier Sky+)
@@ -820,313 +842,195 @@ function updateChiptuneMusic(dt) {
 // RENDERING
 // -------------------------------------------------------------
 
+const skyArt = buildSkyArt();
+let shownTier = "NOTEBOOK";
+let fadeFromTier = null;
+let tierFade = 1;
+let lastRenderT = performance.now();
+
 function render() {
+  const now = performance.now();
+  const rdt = Math.min(0.05, (now - lastRenderT) / 1000);
+  lastRenderT = now;
+  const t = now / 1000;
+  ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, W, H);
 
-  // Background Theme by Progression Tier
-  const tier = getProgressionTier(score);
-  renderBackgroundTheme(tier);
+  // Background theme by height climbed, cross-fading between tiers
+  const tier = getProgressionTier(Math.floor(maxCameraY));
+  if (tier !== shownTier) {
+    fadeFromTier = shownTier;
+    shownTier = tier;
+    tierFade = 0;
+  }
+  if (tierFade < 1) tierFade = Math.min(1, tierFade + rdt / 1.5);
+  if (fadeFromTier && tierFade < 1) {
+    drawSky(ctx, skyArt, fadeFromTier, cameraY, W, H, t);
+    ctx.globalAlpha = tierFade;
+    drawSky(ctx, skyArt, shownTier, cameraY, W, H, t);
+    ctx.globalAlpha = 1;
+  } else {
+    drawSky(ctx, skyArt, shownTier, cameraY, W, H, t);
+  }
 
   // Ghost High Score Markers
   renderGhostMarkers();
 
-  // Draw Platforms
-  platforms.forEach(p => {
+  // Platforms
+  platforms.forEach((p) => {
     const screenY = H - (p.y - cameraY);
     if (screenY < -30 || screenY > H + 30) return;
-
     ctx.save();
-    if (p.fadeActive) {
-      ctx.globalAlpha = clamp(p.fadeAlpha, 0, 1);
+    if (p.fadeActive) ctx.globalAlpha = clamp(p.fadeAlpha, 0, 1);
+    const img = platformSprite(skyArt, p.type, p.width);
+    const y = Math.round(screenY - p.height / 2 - (p.type === "spike" ? 2 : 1));
+    // Soft drop shadow beneath floating platforms
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.fillRect(Math.round(p.x) + 3, y + img.height, p.width - 6, 3);
+    if (p.type === "blast" && p.blastTimer !== null) {
+      glow(ctx, p.x + p.width / 2, screenY, 40, "#ff3b3b", 0.4 + Math.sin(t * 30) * 0.3);
+      ctx.drawImage(Math.floor(t * 10) % 2 ? tinted(img, "#ffffff") : img, Math.round(p.x), y);
+    } else {
+      ctx.drawImage(img, Math.round(p.x), y);
     }
+    if (p.type === "moving") glow(ctx, p.x + p.width / 2, y + 14, 22, "#38bdf8", 0.35);
+    if (p.type === "disappearing") glow(ctx, p.x + p.width / 2, screenY, 30, "#a855f7", 0.25);
 
-    // Platform Body
-    if (p.type === "static") {
-      ctx.fillStyle = "#22c55e";
-      ctx.strokeStyle = "#15803d";
-      ctx.lineWidth = 2;
-      roundRect(ctx, p.x, screenY - p.height / 2, p.width, p.height, 4, true, true);
-    } else if (p.type === "moving") {
-      ctx.fillStyle = "#3b82f6";
-      ctx.strokeStyle = "#1d4ed8";
-      ctx.lineWidth = 2;
-      roundRect(ctx, p.x, screenY - p.height / 2, p.width, p.height, 4, true, true);
-    } else if (p.type === "breakable") {
-      ctx.fillStyle = "#a16207";
-      ctx.strokeStyle = "#713f12";
-      ctx.lineWidth = 2;
-      roundRect(ctx, p.x, screenY - p.height / 2, p.width, p.height, 3, true, true);
-      // Crack lines
-      ctx.strokeStyle = "#451a03";
-      ctx.beginPath();
-      ctx.moveTo(p.x + 10, screenY - 4);
-      ctx.lineTo(p.x + 24, screenY + 4);
-      ctx.lineTo(p.x + 36, screenY - 2);
-      ctx.stroke();
-    } else if (p.type === "disappearing") {
-      ctx.fillStyle = "#a855f7";
-      ctx.strokeStyle = "#7e22ce";
-      ctx.lineWidth = 2;
-      roundRect(ctx, p.x, screenY - p.height / 2, p.width, p.height, 4, true, true);
-    } else if (p.type === "spike") {
-      ctx.fillStyle = "#64748b";
-      ctx.fillRect(p.x, screenY, p.width, p.height / 2);
-      // Spike teeth
-      ctx.fillStyle = "#e2e8f0";
-      for (let sx = p.x; sx < p.x + p.width - 6; sx += 10) {
-        ctx.beginPath();
-        ctx.moveTo(sx, screenY);
-        ctx.lineTo(sx + 5, screenY - 8);
-        ctx.lineTo(sx + 10, screenY);
-        ctx.fill();
-      }
-    } else if (p.type === "blast") {
-      ctx.fillStyle = p.blastTimer !== null ? (Math.floor(Date.now() / 100) % 2 ? "#ff0000" : "#ffffff") : "#ef4444";
-      ctx.strokeStyle = "#991b1b";
-      ctx.lineWidth = 2;
-      roundRect(ctx, p.x, screenY - p.height / 2, p.width, p.height, 4, true, true);
-      // TNT text
-      ctx.fillStyle = "#fff";
-      ctx.font = '8px "Press Start 2P", monospace';
-      ctx.fillText("TNT", p.x + p.width / 2 - 10, screenY + 3);
-    }
-
-    // Draw Spring or Trampoline
+    // Spring / trampoline / power-up
+    const cx = p.x + p.width / 2;
+    const top = screenY - p.height / 2;
     if (p.hasSpring) {
-      ctx.strokeStyle = "#f59e0b";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      const sx = p.x + p.width / 2;
-      const sy = screenY - p.height / 2;
-      ctx.moveTo(sx - 6, sy);
-      ctx.lineTo(sx + 6, sy - 3);
-      ctx.lineTo(sx - 6, sy - 6);
-      ctx.lineTo(sx + 6, sy - 9);
-      ctx.stroke();
+      ctx.drawImage(skyArt.spring, Math.round(cx - skyArt.spring.width / 2), Math.round(top - skyArt.spring.height + 2));
     } else if (p.hasTrampoline) {
-      ctx.fillStyle = "#ec4899";
-      const sx = p.x + p.width / 2;
-      const sy = screenY - p.height / 2;
-      ctx.fillRect(sx - 14, sy - 4, 28, 4);
-      ctx.fillStyle = "#475569";
-      ctx.fillRect(sx - 12, sy, 4, 4);
-      ctx.fillRect(sx + 8, sy, 4, 4);
+      ctx.drawImage(skyArt.tramp, Math.round(cx - skyArt.tramp.width / 2), Math.round(top - skyArt.tramp.height + 2));
     } else if (p.hasPowerup) {
-      // Floating powerup badge
-      renderPowerupIcon(ctx, p.hasPowerup, p.x + p.width / 2, screenY - 14);
+      renderPowerupIcon(ctx, p.hasPowerup, cx, top - 16 + Math.sin(t * 4 + p.x) * 2);
     }
-
     ctx.restore();
   });
 
-  // Draw Enemies
-  enemies.forEach(e => {
+  // Enemies
+  enemies.forEach((e) => {
     if (!e.alive) return;
     const screenY = H - (e.y - cameraY);
-
     if (e.type === "monster") {
-      // Pixel Monster
-      ctx.fillStyle = "#ef4444";
-      ctx.fillRect(e.x - 16, screenY - 16, 32, 28);
-      // Eyes & Horns
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(e.x - 10, screenY - 12, 6, 6);
-      ctx.fillRect(e.x + 4, screenY - 12, 6, 6);
-      ctx.fillStyle = "#000";
-      ctx.fillRect(e.x - 8, screenY - 10, 3, 3);
-      ctx.fillRect(e.x + 6, screenY - 10, 3, 3);
-      ctx.fillStyle = "#ffd700";
-      ctx.fillRect(e.x - 14, screenY - 22, 4, 6);
-      ctx.fillRect(e.x + 10, screenY - 22, 4, 6);
+      const img = skyArt.monster[Math.floor(t * 4 + e.x) % 2];
+      const bob = Math.round(Math.sin(t * 5 + e.x) * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.beginPath();
+      ctx.ellipse(e.x, screenY + 16, 14, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.drawImage(img, Math.round(e.x - img.width / 2), Math.round(screenY - img.height / 2 + bob));
     } else if (e.type === "ufo") {
-      // UFO + Tractor Beam
-      ctx.save();
-      ctx.fillStyle = "rgba(0, 240, 255, 0.18)";
+      // Tractor beam cone
+      const beam = ctx.createLinearGradient(0, screenY, 0, screenY + 140);
+      beam.addColorStop(0, "rgba(0, 240, 255, 0.35)");
+      beam.addColorStop(1, "rgba(0, 240, 255, 0)");
+      ctx.fillStyle = beam;
       ctx.beginPath();
       ctx.moveTo(e.x - 10, screenY + 4);
       ctx.lineTo(e.x + 10, screenY + 4);
       ctx.lineTo(e.x + 36, screenY + 140);
       ctx.lineTo(e.x - 36, screenY + 140);
+      ctx.closePath();
       ctx.fill();
+      // Saucer: metal disc, glass dome, chasing lights
+      ctx.fillStyle = "#475569";
+      ctx.beginPath();
+      ctx.ellipse(e.x, screenY + 2, 24, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#94a3b8";
+      ctx.beginPath();
+      ctx.ellipse(e.x, screenY, 24, 6, 0, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = "rgba(125, 211, 252, 0.85)";
+      ctx.beginPath();
+      ctx.ellipse(e.x, screenY - 4, 11, 8, 0, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = "#86efac";
+      ctx.fillRect(Math.round(e.x - 3), Math.round(screenY - 8), 6, 4);
+      for (let k = 0; k < 6; k++) {
+        const on = (k + Math.floor(t * 10)) % 3 === 0;
+        ctx.fillStyle = on ? "#fde047" : "#854d0e";
+        ctx.fillRect(Math.round(e.x - 20 + k * 8), Math.round(screenY + 3), 3, 2);
+      }
 
-      // Saucer
-      ctx.fillStyle = "#64748b";
-      ctx.beginPath();
-      ctx.ellipse(e.x, screenY, 22, 8, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#38bdf8";
-      ctx.beginPath();
-      ctx.ellipse(e.x, screenY - 4, 10, 6, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    } else if (e.type === "blackhole") {
-      // Black hole vortex
-      ctx.save();
-      ctx.fillStyle = "#020617";
-      ctx.beginPath();
-      ctx.arc(e.x, screenY, 18, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#a855f7";
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-      ctx.restore();
     }
   });
 
-  // Draw Projectiles
-  ctx.fillStyle = "#eab308";
-  projectiles.forEach(pr => {
+  // Projectiles (glowing spit-balls)
+  projectiles.forEach((pr) => {
     const screenY = H - (pr.y - cameraY);
+    glow(ctx, pr.x, screenY, pr.radius * 3, "#eab308", 0.5);
+    ctx.fillStyle = "#fde047";
     ctx.beginPath();
     ctx.arc(pr.x, screenY, pr.radius, 0, Math.PI * 2);
     ctx.fill();
   });
 
-  // Draw Particles
-  particles.forEach(p => {
+  // Particles
+  particles.forEach((p) => {
     const screenY = H - (p.y - cameraY);
+    ctx.globalAlpha = clamp((p.life || 0.3) / 0.3, 0, 1);
     ctx.fillStyle = p.color;
-    ctx.fillRect(p.x, screenY, p.size, p.size);
+    ctx.fillRect(Math.round(p.x), Math.round(screenY), Math.round(p.size), Math.round(p.size));
   });
+  ctx.globalAlpha = 1;
 
-  // Draw Player
-  renderPlayer();
+  renderPlayer(t);
+
+  vignette(ctx, W, H, shownTier === "SKY" ? 0.25 : 0.45);
+  scanlines(ctx, W, H, 0.05);
 }
 
-function renderPlayer() {
+function renderPlayer(t) {
   const screenY = H - (player.y - cameraY);
   ctx.save();
   ctx.translate(player.x, screenY);
 
-  const sq = player.squash || 1.0;
-  ctx.scale(2 - sq, sq);
-
-  if (player.facingLeft) {
-    ctx.scale(-1, 1);
-  }
-
-  // Energy Shield Aura
+  // Shield bubble
   if (player.hasShield()) {
-    ctx.strokeStyle = "#38bdf8";
-    ctx.lineWidth = 2.5;
+    glow(ctx, 0, 0, 34, "#38bdf8", 0.35);
+    ctx.strokeStyle = `rgba(125, 211, 252, ${0.6 + Math.sin(t * 8) * 0.2})`;
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, 26, 0, Math.PI * 2);
     ctx.stroke();
   }
 
-  // Doodle Character Body
-  ctx.fillStyle = "#84cc16";
-  ctx.strokeStyle = "#365314";
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, -14, -14, 28, 26, 6, true, true);
+  const sq = player.squash || 1.0;
+  ctx.scale(2 - sq, sq);
+  if (player.facingLeft) ctx.scale(-1, 1);
 
-  // Snout
-  roundRect(ctx, 10, -8, 10, 8, 3, true, true);
-
-  // Eyes
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-  ctx.arc(-2, -6, 3, 0, Math.PI * 2);
-  ctx.arc(6, -6, 3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#000000";
-  ctx.beginPath();
-  ctx.arc(-1, -6, 1.2, 0, Math.PI * 2);
-  ctx.arc(7, -6, 1.2, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 4 Little Legs
-  ctx.fillStyle = "#65a30d";
-  ctx.fillRect(-12, 12, 4, 6);
-  ctx.fillRect(-5, 12, 4, 5);
-  ctx.fillRect(2, 12, 4, 5);
-  ctx.fillRect(9, 12, 4, 6);
-
-  // Propeller Hat
-  if (player.powerups.propeller > 0) {
-    ctx.fillStyle = "#f59e0b";
-    ctx.fillRect(-6, -18, 12, 4);
-    ctx.fillStyle = "#ef4444";
-    const propW = Math.sin(Date.now() / 30) * 16;
-    ctx.fillRect(-propW / 2, -22, propW, 3);
-  }
-
-  // Jetpack
+  // Jetpack (behind the body)
   if (player.powerups.jetpack > 0) {
     ctx.fillStyle = "#475569";
-    ctx.fillRect(-22, -10, 8, 18);
-    // Exhaust Flame
+    ctx.fillRect(-22, -10, 9, 18);
+    ctx.fillStyle = "#94a3b8";
+    ctx.fillRect(-22, -10, 9, 2);
+    const fl = 10 + Math.random() * 10;
     ctx.fillStyle = "#ff7700";
-    ctx.fillRect(-20, 8, 4, 8 + Math.random() * 6);
+    ctx.fillRect(-20, 8, 5, fl);
+    ctx.fillStyle = "#ffe066";
+    ctx.fillRect(-19, 8, 3, fl * 0.6);
   }
 
+  const img = skyArt.doodler;
+  ctx.drawImage(img, -img.width / 2, -img.height / 2 - 2);
+
+  // Propeller hat
+  if (player.powerups.propeller > 0) {
+    ctx.fillStyle = "#f59e0b";
+    ctx.fillRect(-7, -20, 14, 5);
+    ctx.fillStyle = "#b45309";
+    ctx.fillRect(-7, -16, 14, 1);
+    const propW = Math.sin(t * 40) * 18;
+    ctx.fillStyle = "#ef4444";
+    ctx.fillRect(-propW / 2, -24, propW, 3);
+    ctx.fillStyle = "#1f2937";
+    ctx.fillRect(-1, -24, 2, 4);
+  }
   ctx.restore();
-}
-
-function renderBackgroundTheme(tier) {
-  if (tier === "NOTEBOOK") {
-    ctx.fillStyle = "#060b14";
-    ctx.fillRect(0, 0, W, H);
-    // Dark blueprint / grid lines
-    ctx.strokeStyle = "rgba(56, 189, 248, 0.12)";
-    ctx.lineWidth = 1;
-    const offset = Math.floor(cameraY % 24);
-    for (let y = -offset; y < H; y += 24) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(W, y);
-      ctx.stroke();
-    }
-    // Red left margin line
-    ctx.strokeStyle = "rgba(244, 63, 94, 0.4)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(44, 0);
-    ctx.lineTo(44, H);
-    ctx.stroke();
-  } else if (tier === "SKY") {
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, "#0a192f");
-    grad.addColorStop(1, "#172a45");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-    // Fluffy clouds with soft glow
-    ctx.fillStyle = "rgba(56, 189, 248, 0.12)";
-    ctx.beginPath();
-    ctx.arc(80, 140, 28, 0, Math.PI * 2);
-    ctx.arc(110, 130, 36, 0, Math.PI * 2);
-    ctx.arc(140, 140, 26, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (tier === "SUNSET") {
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, "#31103f");
-    grad.addColorStop(0.6, "#7e22ce");
-    grad.addColorStop(1, "#f97316");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-  } else if (tier === "NIGHT") {
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, "#030712");
-    grad.addColorStop(1, "#1e1b4b");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-    // Stars
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(50, 80, 2, 2);
-    ctx.fillRect(140, 220, 2, 2);
-    ctx.fillRect(360, 140, 2, 2);
-    ctx.fillRect(280, 420, 2, 2);
-  } else {
-    // Deep Space
-    ctx.fillStyle = "#02040a";
-    ctx.fillRect(0, 0, W, H);
-    // Nebulae
-    const grad = ctx.createRadialGradient(240, 360, 40, 240, 360, 220);
-    grad.addColorStop(0, "rgba(99, 102, 241, 0.2)");
-    grad.addColorStop(1, "transparent");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-  }
 }
 
 function renderGhostMarkers() {
@@ -1148,23 +1052,10 @@ function renderGhostMarkers() {
 }
 
 function renderPowerupIcon(ctx, type, x, y) {
-  if (type === "shield") {
-    ctx.fillStyle = "#38bdf8";
-    ctx.beginPath();
-    ctx.arc(x, y, 7, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (type === "propeller") {
-    ctx.fillStyle = "#f59e0b";
-    ctx.fillRect(x - 5, y - 4, 10, 8);
-  } else if (type === "jetpack") {
-    ctx.fillStyle = "#ff7700";
-    ctx.fillRect(x - 4, y - 6, 8, 12);
-  } else if (type === "repellent") {
-    ctx.fillStyle = "#39ff14";
-    ctx.beginPath();
-    ctx.arc(x, y, 6, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  const img = skyArt.icons[type];
+  if (!img) return;
+  glow(ctx, x, y, 16, type === "repellent" ? "#39ff14" : type === "shield" ? "#38bdf8" : "#f59e0b", 0.35);
+  ctx.drawImage(img, Math.round(x - img.width / 2), Math.round(y - img.height / 2));
 }
 
 function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
@@ -1213,6 +1104,8 @@ function createSpark(x, y, color) {
 
 function triggerGameOver(reason) {
   if (gameState === "GAMEOVER") return;
+  // Nothing can hurt a jetpacking doodler (falling off the bottom still counts)
+  if (player.isJetpacking() && reason !== "FELL INTO THE VOID") return;
   gameState = "GAMEOVER";
   playExplosion({ duration: 0.45, lowpass: 300 });
 
@@ -1238,6 +1131,13 @@ function restartGame() {
 
 resetWorld();
 checkGyroSupport();
+
+// Debug handle for automated visual checks
+window.__skydoodle = {
+  player,
+  get state() { return gameState; },
+  showTier(h) { maxCameraY = Math.max(maxCameraY, h); }
+};
 
 const loop = createGameLoop({
   update,

@@ -5,7 +5,11 @@ import {
   getMoonPhaseName,
   BASIC_DIET_RULES,
   ATOMIC_NUMBERS,
-  ROMAN_VALS
+  ROMAN_VALS,
+  calorieTotals,
+  calorieEntries,
+  findNonVegan,
+  FOOD_EMOJI_RE
 } from './engine.js';
 
 describe('The Diet Game Rule Engine', () => {
@@ -66,5 +70,35 @@ describe('The Diet Game Rule Engine', () => {
     assert.equal(ATOMIC_NUMBERS.O, 8);
     assert.equal(ATOMIC_NUMBERS.NA, 11);
     assert.equal(ATOMIC_NUMBERS.FE, 26);
+  });
+});
+
+describe('Calories, vegan check and food emoji', () => {
+  it('treats minus / burned amounts as negative and sums food separately', () => {
+    const t = 'pizza 50 cal\nburger 50 cal\ncarrot 200 cal\ntofu 500 cal\norange 100 cal\nsteak 900 cal\ntiramisu -900 cal';
+    const c = calorieTotals(t);
+    assert.equal(c.food, 1800);
+    assert.equal(c.burned, 900);
+    assert.equal(c.net, 900);
+    assert.deepEqual(calorieEntries('burned 300 kcal, minus 50 cal, rice 200 calories'), [-300, -50, 200]);
+    // A hyphen straight after a digit is a range, not a minus
+    assert.deepEqual(calorieEntries('200-300 cal'), [300]);
+  });
+
+  it('flags animal foods but allows plant-based versions', () => {
+    for (const t of ['steak', 'pizza', 'burger', 'hamburger', 'tiramisu', 'ice cream', 'paneer', 'egg']) assert.ok(findNonVegan(t), t);
+    for (const t of ['tofu steak', 'plant-based steak', 'plant based steak', 'veggie burger', 'oat milk', 'vegan cheesecake', 'peanut butter', 'sorbet', 'sweet potato'])
+      assert.equal(findNonVegan(t), null, t);
+  });
+
+  it('parses D and M in Roman numerals', () => {
+    assert.equal(parseRoman('MIX'), 1009);
+    assert.equal(parseRoman('CD'), 400);
+    assert.equal(parseRoman('MCMXC'), 1990);
+  });
+
+  it('recognises fruit and veg emoji but not fire', () => {
+    for (const e of ['🍎', '🍇', '🍊', '🍌', '🥑', '🥦', '🌽', '🍄', '🫐']) assert.ok(FOOD_EMOJI_RE.test(e), e);
+    assert.equal(FOOD_EMOJI_RE.test('🔥'), false);
   });
 });

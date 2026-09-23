@@ -304,3 +304,82 @@
   justify-content: center;
   flex-wrap: wrap;
 }
+
+/* ---------- Paper résumé on a clipboard ---------- */
+.resume-textarea {
+  --rg-line: 27px;
+  background-color: #f4efe3;
+  background-image:
+    linear-gradient(90deg, transparent 0 54px, rgba(220, 60, 70, 0.55) 54px 56px, transparent 56px),
+    repeating-linear-gradient(180deg, transparent 0 calc(var(--rg-line) - 1px), rgba(70, 110, 190, 0.28) calc(var(--rg-line) - 1px) var(--rg-line)),
+    radial-gradient(ellipse at 20% 10%, rgba(255, 255, 255, 0.6), transparent 60%),
+    linear-gradient(180deg, #faf6ec, #eee7d6);
+  background-position: 0 0, 0 14px, 0 0, 0 0;
+  background-attachment: local;
+  color: #1d2230;
+  border: 1px solid #c9bfa9;
+  padding: 14px 18px 14px 68px;
+  box-shadow:
+    0 2px 0 #d6ccb6,
+    0 4px 0 #c4b89e,
+    0 16px 30px rgba(0, 0, 0, 0.55);
+  caret-color: #b3261e;
+}
+
+.resume-textarea::placeholder {
+  color: rgba(40, 50, 70, 0.45);
+}
+
+.resume-textarea:focus {
+  border-color: #b8923a;
+  box-shadow:
+    0 2px 0 #d6ccb6,
+    0 4px 0 #c4b89e,
+    0 16px 30px rgba(0, 0, 0, 0.55),
+    0 0 0 2px rgba(255, 215, 0, 0.45);
+}
+
+/* Clipboard board + clip behind the paper */
+#resume-input {
+  margin-top: 18px;
+}
+.resume-textarea + .editor-stats {
+  margin-top: 12px;
+}
+.panel__body:has(> #resume-input) {
+  position: relative;
+  background:
+    repeating-linear-gradient(95deg, rgba(0, 0, 0, 0.12) 0 3px, transparent 3px 22px),
+    linear-gradient(180deg, #6b4526, #4a2e17);
+  border-radius: 0 0 6px 6px;
+}
+.panel__body:has(> #resume-input)::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 120px;
+  height: 26px;
+  margin-left: -60px;
+  border-radius: 6px 6px 3px 3px;
+  background: linear-gradient(180deg, #e6ebf2, #9aa6b6 60%, #6b7584);
+  box-shadow: 0 3px 0 #3a414c, inset 0 1px 0 #ffffff;
+  z-index: 2;
+}
+
+/* ---------- HR bot on a glowing CRT monitor ---------- */
+.hr-face {
+  position: relative;
+  display: block;
+  padding: 18px 10px;
+  text-align: center;
+  border-radius: 14px;
+  background:
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.28) 0 2px, transparent 2px 4px),
+    radial-gradient(ellipse at 50% 45%, #1d2a12 0%, #0a1006 70%, #030502 100%);
+  border: 6px solid #3a3f48;
+  box-shadow:
+    inset 0 0 22px rgba(255, 215, 0, 0.18),
+    0 0 0 2px #1a1d22,
+    0 6px 0 #22262d;
+}

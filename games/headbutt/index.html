@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>HEADBUTT — SYS://TIMESINK.NET</title>
-    <meta name="description" content="Side-view 2D physics car battler. Land a hit on the bot's exposed driver head to win. 12 vehicles, 8 enhanced arenas, Player vs Bot AI." />
+    <meta name="description" content="Drive Ahead-style physics car battler: bonk the other driver's helmet with your car. 8 cars, 8 arenas, bots from Easy to Insane or a friend on the same keyboard." />
     <meta name="theme-color" content="#09030a" />
     <link rel="stylesheet" href="/shared/tokens.css" />
     <link rel="stylesheet" href="/shared/base.css" />
@@ -23,7 +23,8 @@
 
       <div class="hb-screen">
         <div class="hb-canvas-container">
-          <canvas id="hb-canvas" width="1280" height="720"></canvas>
+          <canvas id="hb-canvas" width="1280" height="720" tabindex="0" aria-label="Arena"></canvas>
+          <div class="hb-overlay" id="hb-overlay" role="dialog" aria-label="Headbutt menu"></div>
         </div>
         <div class="console">
           <span class="console__group">
@@ -33,24 +34,20 @@
             <span class="kbd">←</span><span class="kbd">→</span>
           </span>
           <span class="console__group">
-            <span class="console__label">JUMP</span>
+            <span class="console__label">FLIP</span>
+            <span>DRIVE KEYS IN THE AIR</span>
+          </span>
+          <span class="console__group">
+            <span class="console__label">BOOST</span>
             <span class="kbd">W</span> <span class="kbd">↑</span> <span class="kbd">SPACE</span>
           </span>
           <span class="console__group">
-            <span class="console__label">AIR PITCH</span>
-            <span class="kbd">A</span><span class="kbd">D</span>
-          </span>
-          <span class="console__group">
-            <span class="console__label">OPPONENT</span>
-            <span class="kbd">BOT AI</span>
+            <span class="console__label">VS FRIEND</span>
+            <span>P1 A D W • P2 ← → ↑</span>
           </span>
           <span class="console__group">
             <span class="console__label">START</span>
-            <span class="kbd">SPACE</span> <span class="kbd">ENTER</span>
-          </span>
-          <span class="console__group">
-            <span class="console__label">GARAGE</span>
-            <span class="kbd">G</span>
+            <span class="kbd">ENTER</span>
           </span>
           <span class="console__group">
             <span class="console__label">PAUSE</span>

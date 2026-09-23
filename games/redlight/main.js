@@ -103,6 +103,11 @@ function init() {
 }
 
 function resetTree() {
+  // A completed endurance set starts fresh on the next pass.
+  if (mode === "endurance" && enduranceStreak >= 10) {
+    enduranceStreak = 0;
+    if (statStreak) statStreak.textContent = `0 / 10`;
+  }
   // Clear all pending timers
   if (stageTimeoutTimer) clearTimeout(stageTimeoutTimer);
   countdownTimers.forEach(t => clearTimeout(t));
@@ -138,6 +143,10 @@ function resetTree() {
 
 function handleKeyDown(e) {
   if (e.repeat) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // Don't hijack typing in the footer terminal or keyboard use of the mode/tree dropdowns.
+  if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (document.querySelector(".modal-backdrop")) return;
 
   if (mode === "versus") {
     if (e.code === "KeyA") {
@@ -343,6 +352,18 @@ function dropGreen() {
   sfx.treeGreen();
   stagePrompt.textContent = "GO! GO! LAUNCH NOW!";
   subPrompt.textContent = mode === "versus" ? "P1: [A] | P2: [L]" : "PRESS [SPACE]";
+  // A racer who never leaves the line is scored a 2.000s "no-show" so the round always ends.
+  const tNoShow = setTimeout(() => {
+    if (state !== "GREEN") return;
+    if (mode === "versus") {
+      if (p1Reaction === null) p1Reaction = 2;
+      if (p2Reaction === null) p2Reaction = 2;
+    } else {
+      p1Reaction = 2;
+    }
+    finishRun();
+  }, 2000);
+  countdownTimers.push(tNoShow);
 }
 
 function triggerRedLight(fouledEntity, reason) {
@@ -373,7 +394,11 @@ function triggerRedLight(fouledEntity, reason) {
   }
 
   stagePrompt.textContent = "RED LIGHT FOUL!";
-  subPrompt.textContent = `${reason}. Press SPACE to try again.`;
+  subPrompt.textContent = `${reason}. Press ${mode === "versus" ? "[A] or [L]" : "SPACE"} to try again.`;
+  if (mode === "versus" && (fouledEntity === "p1" || fouledEntity === "p2")) {
+    // In a head-to-head, the first racer to red-light hands the win to the other lane.
+    stagePrompt.textContent = `${fouledEntity === "p1" ? "P1" : "P2"} RED-LIT — ${fouledEntity === "p1" ? "P2" : "P1"} WINS!`;
+  }
 
   // Timeslip update
   tsRt.textContent = "-.000";
@@ -398,8 +423,16 @@ function finishRun() {
   let rt = p1Reaction;
   let winnerText = "";
 
+  if (countdownTimers.length) {
+    countdownTimers.forEach((t) => clearTimeout(t));
+    countdownTimers = [];
+  }
+
   if (mode === "versus") {
-    if (p1Reaction < p2Reaction) {
+    if (p1Reaction === p2Reaction) {
+      winnerText = "DEAD HEAT — A PERFECT TIE!";
+      rt = p1Reaction;
+    } else if (p1Reaction < p2Reaction) {
       const margin = ((p2Reaction - p1Reaction) * 1000).toFixed(0);
       winnerText = `P1 WINS BY ${margin} MS!`;
       rt = p1Reaction;
@@ -409,7 +442,7 @@ function finishRun() {
       rt = p2Reaction;
     }
     stagePrompt.textContent = winnerText;
-    subPrompt.textContent = `P1: ${p1Reaction.toFixed(3)}s | P2: ${p2Reaction.toFixed(3)}s. Press key to reset.`;
+    subPrompt.textContent = `P1: ${p1Reaction.toFixed(3)}s | P2: ${p2Reaction.toFixed(3)}s. Press [A] or [L] to reset.`;
   } else {
     stagePrompt.textContent = `REACTION TIME: ${rt.toFixed(3)} SECONDS`;
     subPrompt.textContent = "Press [SPACE] to line up again.";
@@ -439,8 +472,8 @@ function finishRun() {
   tsRank.textContent = `RANK: ${rank}`;
   tsStatus.textContent = mode === "versus" ? winnerText : "CLEAN PASS - SANCTION APPROVED";
 
-  // Rolling Average
-  if (mode !== "versus") {
+  // Rolling Average (a no-show isn't a real reaction, so it isn't logged)
+  if (mode !== "versus" && rt < 2) {
     recentRuns.push(rt);
     if (recentRuns.length > 10) recentRuns.shift();
     const sum = recentRuns.reduce((a, b) => a + b, 0);
@@ -456,7 +489,11 @@ function finishRun() {
   }
 
   // Endurance Mode
-  if (mode === "endurance") {
+  if (mode === "endurance" && rt >= 2) {
+    enduranceStreak = 0;
+    if (statStreak) statStreak.textContent = `0 / 10`;
+    subPrompt.textContent = "No launch detected — endurance streak reset. Press [SPACE] to line up again.";
+  } else if (mode === "endurance") {
     enduranceStreak += 1;
     if (statStreak) statStreak.textContent = `${enduranceStreak} / 10`;
     if (enduranceStreak >= 10) {

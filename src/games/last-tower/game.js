@@ -9,6 +9,8 @@ import { initShell, escapeHtml, toast } from "/shared/shell.js";
 import { createGameLoop, createInputManager, clamp, lerp, dist, aStar } from "/src/core/engine.js";
 import { playLaser, playCannon, playHit, playExplosion, playCoin, playWarningBeep, playTone, sfx } from "/src/core/audio.js";
 import { saveGameScore } from "/src/core/save.js";
+import { createParticles, vignette, scanlines, glow } from "/src/core/gfx.js";
+import { buildField, buildRoad, drawPad, drawPortal, drawCitadel } from "./art.js";
 
 initShell({ crumb: "Last Tower" });
 
@@ -48,6 +50,15 @@ let selectedTowerType = "gatling";
 let inspectingTower = null;
 let gameSpeed = 1; // 1X, 2X, 3X
 let screenShake = 0;
+let gameOver = false;
+let gridVersion = 0; // bumped whenever towers change, for the placement preview cache
+let hoverTile = null; // { x, y } under the mouse
+let hoverCache = null; // { key, pathOk }
+const scheduled = []; // delayed sim events (salvos, barrage strikes) — tick in game time, freeze on pause
+
+function schedule(delay, fn) {
+  scheduled.push({ t: delay, fn });
+}
 
 // Commander Tactical Abilities
 const COMMANDER_ABILITIES = {
@@ -226,17 +237,38 @@ export const ENEMY_SPECS = {
 
 // Validate whether a valid path exists from spawn to exit
 export function validatePath(testGrid) {
-  const g = testGrid || grid;
-  const path = aStar({
-    start: SPAWN_TILE,
+  return pathFrom(SPAWN_TILE.x, SPAWN_TILE.y, testGrid || grid);
+}
+
+function pathFrom(gx, gy, g = grid) {
+  return aStar({
+    start: { x: gx, y: gy },
     goal: EXIT_TILE,
     cols: COLS,
     rows: ROWS,
-    isWalkable: (x, y) => {
-      return g[y * COLS + x] === 0;
-    }
+    isWalkable: (x, y) => g[y * COLS + x] === 0
   });
-  return path;
+}
+
+function creepTile(c) {
+  return {
+    x: clamp(Math.floor(c.x / TILE_W), 0, COLS - 1),
+    y: clamp(Math.floor(c.y / TILE_H), 0, ROWS - 1)
+  };
+}
+
+// Cheap placement checks (no pathfinding): bounds, reserved tiles, existing towers, creeps standing there.
+function quickPlacementBlock(gx, gy) {
+  if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return "OUT OF BOUNDS";
+  if ((gx === SPAWN_TILE.x && gy === SPAWN_TILE.y) || (gx === EXIT_TILE.x && gy === EXIT_TILE.y)) return "PROTECTED ZONE";
+  if (grid[gy * COLS + gx] === 1) return "OCCUPIED";
+  const blockedByCreep = creeps.some((c) => {
+    if (c.isFlyer) return false;
+    const t = creepTile(c);
+    return t.x === gx && t.y === gy;
+  });
+  if (blockedByCreep) return "HOSTILE ON TILE";
+  return null;
 }
 
 let currentMasterPath = validatePath(grid);
@@ -255,6 +287,8 @@ canvas.addEventListener("click", (e) => {
   const rect = canvas.getBoundingClientRect();
   const clickX = (e.clientX - rect.left) * (canvas.width / rect.width);
   const clickY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+  if (gameOver) return;
 
   // If clicking outside grid
   const gx = Math.floor(clickX / TILE_W);
@@ -277,10 +311,51 @@ canvas.addEventListener("click", (e) => {
   buildTowerAt(gx, gy);
 });
 
+// Hover preview: which tile the cursor is over.
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const gx = Math.floor(x / TILE_W);
+  const gy = Math.floor(y / TILE_H);
+  hoverTile = gx >= 0 && gx < COLS && gy >= 0 && gy < ROWS ? { x: gx, y: gy } : null;
+});
+canvas.addEventListener("mouseleave", () => {
+  hoverTile = null;
+});
+// Right-click clears the tower inspector.
+canvas.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  if (inspectingTower) {
+    inspectingTower = null;
+    updateInspectorUI();
+  }
+});
+
+// Re-route every ground creep from wherever it stands (after the maze changes).
+function repathCreeps() {
+  creeps.forEach((c) => {
+    if (c.isFlyer) return;
+    const t = creepTile(c);
+    const p = pathFrom(t.x, t.y);
+    if (p && p.length > 0) {
+      c.path = p;
+      c.pathIndex = 0;
+    }
+  });
+}
+
 export function buildTowerAt(gx, gy) {
-  if ((gx === SPAWN_TILE.x && gy === SPAWN_TILE.y) || (gx === EXIT_TILE.x && gy === EXIT_TILE.y)) {
+  if (gameOver) return false;
+  const block = quickPlacementBlock(gx, gy);
+  if (block) {
     sfx.deny();
-    toast({ title: "PROTECTED ZONE", body: "Cannot build on spawn gate or Last Tower citadel!", icon: "alert" });
+    const body = block === "PROTECTED ZONE"
+      ? "Cannot build on spawn gate or Last Tower citadel!"
+      : block === "HOSTILE ON TILE"
+        ? "An invader is standing there. Wait for the tile to clear."
+        : "That tile is not buildable.";
+    toast({ title: block, body, icon: "alert" });
     return false;
   }
 
@@ -291,12 +366,17 @@ export function buildTowerAt(gx, gy) {
     return false;
   }
 
-  // Check illegal blocking
+  // Check illegal blocking: spawn must reach the citadel, and so must every ground invader on the field.
   const tempGrid = new Uint8Array(grid);
   tempGrid[gy * COLS + gx] = 1;
   const newPath = validatePath(tempGrid);
+  const trapsCreep = !!newPath && creeps.some((c) => {
+    if (c.isFlyer) return false;
+    const t = creepTile(c);
+    return !pathFrom(t.x, t.y, tempGrid);
+  });
 
-  if (!newPath) {
+  if (!newPath || trapsCreep) {
     playWarningBeep();
     sfx.deny();
     toast({ title: "ILLEGAL PLACEMENT", body: "Citadel defense doctrine: You must leave an open maze path!", icon: "alert" });
@@ -305,6 +385,7 @@ export function buildTowerAt(gx, gy) {
 
   // Placement valid
   grid[gy * COLS + gx] = 1;
+  gridVersion++;
   currentMasterPath = newPath;
   gold -= spec.cost;
 
@@ -329,29 +410,13 @@ export function buildTowerAt(gx, gy) {
   updateInspectorUI();
 
   // Recalculate path for all active creeps
-  creeps.forEach((c) => {
-    if (!c.isFlyer) {
-      const creepGx = clamp(Math.floor(c.x / TILE_W), 0, COLS - 1);
-      const creepGy = clamp(Math.floor(c.y / TILE_H), 0, ROWS - 1);
-      const pathFromCreep = aStar({
-        start: { x: creepGx, y: creepGy },
-        goal: EXIT_TILE,
-        cols: COLS,
-        rows: ROWS,
-        isWalkable: (x, y) => grid[y * COLS + x] === 0
-      });
-      if (pathFromCreep && pathFromCreep.length > 0) {
-        c.path = pathFromCreep;
-        c.pathIndex = 0;
-      }
-    }
-  });
+  repathCreeps();
 
   return true;
 }
 
 export function upgradeInspectedTower() {
-  if (!inspectingTower) return;
+  if (!inspectingTower || gameOver) return;
   const upgradeCost = Math.round(inspectingTower.cost * (1 + inspectingTower.level * 0.8));
   if (inspectingTower.level >= 3) {
     sfx.deny();
@@ -379,15 +444,17 @@ export function upgradeInspectedTower() {
 }
 
 export function sellInspectedTower() {
-  if (!inspectingTower) return;
+  if (!inspectingTower || gameOver) return;
   const refund = Math.floor(inspectingTower.totalInvested * 0.7);
   gold += refund;
 
   grid[inspectingTower.y * COLS + inspectingTower.x] = 0;
+  gridVersion++;
   const idx = towers.indexOf(inspectingTower);
   if (idx !== -1) towers.splice(idx, 1);
 
   currentMasterPath = validatePath(grid);
+  repathCreeps(); // a freshly opened gap may be a shortcut
   inspectingTower = null;
   playCoin();
   toast({ title: "TOWER RECYCLED", body: `+${refund} Gold recovered (70% value)` });
@@ -399,7 +466,7 @@ export function sellInspectedTower() {
 // Tactical Commander Abilities
 export function triggerOrbitalBarrage() {
   const ab = COMMANDER_ABILITIES.barrage;
-  if (ab.cd > 0 || gold < ab.cost) {
+  if (gameOver || ab.cd > 0 || gold < ab.cost) {
     sfx.deny();
     return;
   }
@@ -411,7 +478,7 @@ export function triggerOrbitalBarrage() {
 
   // Strike 5 random creeps or strategic path nodes
   for (let s = 0; s < 5; s++) {
-    setTimeout(() => {
+    schedule(s * 0.22, () => {
       let targetX = (COLS * 0.4 + Math.random() * COLS * 0.4) * TILE_W;
       let targetY = (ROWS * 0.3 + Math.random() * ROWS * 0.4) * TILE_H;
 
@@ -422,32 +489,33 @@ export function triggerOrbitalBarrage() {
       }
 
       // Spawn blast crater decal
-      decals.push({ x: targetX, y: targetY, r: 24, alpha: 0.85, type: "crater" });
+      decals.push({ x: targetX, y: targetY, r: 24, alpha: 0.85, life: 10, maxLife: 10, type: "crater" });
       playExplosion({ duration: 0.8, lowpass: 200 });
+      explosionFx(targetX, targetY, true);
+      screenShake = Math.max(screenShake, 8);
 
       // Damage nearby creeps
-      creeps.forEach((cr) => {
+      for (const cr of [...creeps]) {
         if (dist(targetX, targetY, cr.x, cr.y) < 70) {
-          cr.hp -= 110;
           floatingTexts.push({ x: cr.x, y: cr.y - 10, text: "-110 CRIT!", color: "#ffea00", life: 1.0 });
-          if (cr.hp <= 0) killCreep(cr);
+          damageCreep(cr, 110);
         }
-      });
-    }, s * 220);
+      }
+    });
   }
   updateHUD();
 }
 
 export function triggerEMPShock() {
   const ab = COMMANDER_ABILITIES.emp;
-  if (ab.cd > 0 || gold < ab.cost) {
+  if (gameOver || ab.cd > 0 || gold < ab.cost) {
     sfx.deny();
     return;
   }
   gold -= ab.cost;
   ab.cd = ab.cdMax;
   sfx.laser();
-  playTone(480, "sawtooth", 0.4, 0.2);
+  playTone(480, 0.4, "sawtooth", 0.2);
   toast({ title: "EMP SHOCKWAVE FIRED!", body: "All cybernetic invaders disabled for 3.5s!", icon: "bolt" });
 
   // Paralyze every creep on field
@@ -463,6 +531,7 @@ export function triggerEMPShock() {
     radius: 10,
     maxRadius: 1100,
     life: 0.6,
+    maxLife: 0.6,
     type: "emp_ring"
   });
 
@@ -471,7 +540,7 @@ export function triggerEMPShock() {
 
 export function triggerCoreOverdrive() {
   const ab = COMMANDER_ABILITIES.overdrive;
-  if (ab.cd > 0 || gold < ab.cost) {
+  if (gameOver || ab.cd > 0 || gold < ab.cost) {
     sfx.deny();
     return;
   }
@@ -479,17 +548,19 @@ export function triggerCoreOverdrive() {
   ab.cd = ab.cdMax;
   ab.activeTime = 7.0;
   sfx.powerup();
-  playTone(600, "triangle", 0.6, 0.25);
+  playTone(600, 0.6, "triangle", 0.25);
   toast({ title: "CORE OVERDRIVE ACTIVE!", body: "+60% Fire Rate & Damage across all weapon systems!", icon: "fire" });
   updateHUD();
 }
 
 // Wave Spawning System
 export function callEarlyWave() {
+  if (gameOver) return;
   if (creepsToSpawn.length > 0 || creeps.length > 0) {
     toast({ title: "COMBAT IN PROGRESS", body: "Clear the current invading wave before calling next wave!" });
     return;
   }
+  if (waveTimer <= 0) return; // already called; the wave launches next frame
   // Early call bonus: +20% gold reward
   const bonus = Math.round(15 + currentWave * 6);
   gold += bonus;
@@ -528,13 +599,18 @@ function startWave() {
   spawnInterval = 0.85;
 }
 
-export function spawnCreep(type) {
+export function spawnCreep(type, at = null) {
   const spec = ENEMY_SPECS[type];
-  const hpMult = 1.0 + (currentWave - 1) * 0.18;
+  const hpMult = 1.0 + (Math.max(1, currentWave) - 1) * 0.18;
+  let path = null;
+  if (!spec.isFlyer) {
+    const fromHere = at ? pathFrom(creepTile(at).x, creepTile(at).y) : null;
+    path = fromHere || [...(currentMasterPath || [])];
+  }
 
   const creep = {
-    x: (SPAWN_TILE.x + 0.5) * TILE_W,
-    y: (SPAWN_TILE.y + 0.5) * TILE_H,
+    x: at ? at.x : (SPAWN_TILE.x + 0.5) * TILE_W,
+    y: at ? at.y : (SPAWN_TILE.y + 0.5) * TILE_H,
     vx: 1,
     vy: 0,
     type,
@@ -544,6 +620,8 @@ export function spawnCreep(type) {
     baseSpeed: spec.speed,
     armor: spec.armor || 0,
     reward: spec.reward,
+    color: spec.color,
+    heals: !!spec.heals,
     isFlyer: spec.isFlyer,
     isBoss: !!spec.isBoss,
     scale: spec.scale,
@@ -555,7 +633,8 @@ export function spawnCreep(type) {
     freezeTime: 0,
     stunTime: 0,
     healCd: 0,
-    path: spec.isFlyer ? null : [...currentMasterPath]
+    dead: false,
+    path
   };
 
   creeps.push(creep);
@@ -568,8 +647,9 @@ export function getTowerTarget(tower) {
   const ty = (tower.y + 0.5) * TILE_H;
 
   const inRange = creeps.filter((c) => {
-    return dist(tx, ty, c.x, c.y) <= spec.range;
+    return !c.dead && dist(tx, ty, c.x, c.y) <= spec.range;
   });
+
 
   if (inRange.length === 0) return null;
 
@@ -604,6 +684,13 @@ function fireTower(t, target) {
   const dmg = Math.round(spec.dmg * dmgMult);
 
   t.recoil = 1.0;
+  // Muzzle flash at the barrel tip
+  if (t.type === "gatling" || t.type === "cannon" || t.type === "sniper" || t.type === "missile") {
+    const mx = tx + Math.cos(t.turretAngle) * 17;
+    const my = ty + Math.sin(t.turretAngle) * 17;
+    fx.spawn({ x: mx, y: my, life: 0.08, size: t.type === "gatling" ? 10 : 18, color: spec.color, kind: "glow", alpha: 0.9 });
+    if (t.type !== "gatling") fx.burst(mx, my, { count: 4, speed: 60, life: 0.5, size: 4, grow: 10, color: "#6b6b6b", kind: "smoke", angle: t.turretAngle, spread: 0.8 });
+  }
 
   // 1. Vulkan Gatling
   if (t.type === "gatling") {
@@ -630,8 +717,6 @@ function fireTower(t, target) {
 
   // 2. Thermal Laser
   else if (t.type === "laser") {
-    const netDmg = Math.round(dmg * Math.max(0.2, 1.0 - (target.armor * 0.5)));
-    target.hp -= netDmg;
     projectiles.push({
       x1: tx,
       y1: ty,
@@ -653,7 +738,7 @@ function fireTower(t, target) {
         type: "spark"
       });
     }
-    if (target.hp <= 0) killCreep(target);
+    damageCreep(target, dmg, "energy");
   }
 
   // 3. Siege Mortar
@@ -676,63 +761,52 @@ function fireTower(t, target) {
 
   // 4. Tesla Coil
   else if (t.type === "tesla") {
-    let hitCount = 0;
-    let currTarget = target;
+    // Arcs hop to the nearest un-struck invader, `chains` strikes in total.
     const chainTargets = [target];
+    let from = { x: tx, y: ty };
+    let curr = target;
 
-    while (hitCount < spec.chains) {
-      currTarget.hp -= dmg;
-      if (currTarget.hp <= 0) killCreep(currTarget);
+    for (let hop = 0; hop < spec.chains && curr; hop++) {
+      projectiles.push({ x1: from.x, y1: from.y, x2: curr.x, y2: curr.y, life: 0.16, maxLife: 0.16, type: "lightning" });
+      from = { x: curr.x, y: curr.y };
+      damageCreep(curr, dmg);
 
-      // Find next closest creep not yet chained
-      const next = creeps.find((c) => !chainTargets.includes(c) && dist(currTarget.x, currTarget.y, c.x, c.y) < 110);
-      if (!next) break;
-
-      projectiles.push({
-        x1: currTarget.x,
-        y1: currTarget.y,
-        x2: next.x,
-        y2: next.y,
-        life: 0.16,
-        type: "lightning"
-      });
-
-      chainTargets.push(next);
-      currTarget = next;
-      hitCount++;
+      let next = null;
+      let best = 110;
+      for (const c of creeps) {
+        if (c.dead || chainTargets.includes(c)) continue;
+        const d = dist(from.x, from.y, c.x, c.y);
+        if (d < best) {
+          best = d;
+          next = c;
+        }
+      }
+      if (next) chainTargets.push(next);
+      curr = next;
     }
 
-    projectiles.push({
-      x1: tx,
-      y1: ty,
-      x2: target.x,
-      y2: target.y,
-      life: 0.16,
-      type: "lightning"
-    });
-
-    playTone(320, "sawtooth", 0.2, 0.08);
+    playTone(320, 0.2, "sawtooth", 0.08);
   }
 
   // 5. Cryo Blaster
   else if (t.type === "cryo") {
-    creeps.forEach((c) => {
+    for (const c of [...creeps]) {
       if (dist(tx, ty, c.x, c.y) <= spec.range) {
-        c.hp -= dmg;
         c.freezeTime = 2.8 + t.level * 0.4;
-        if (c.hp <= 0) killCreep(c);
+        damageCreep(c, dmg);
       }
-    });
+    }
 
     projectiles.push({
       x: tx,
       y: ty,
       radius: spec.range,
       life: 0.28,
+      maxLife: 0.28,
       type: "frost_pulse"
     });
 
-    playTone(210, "sine", 0.18, 0.06);
+    playTone(210, 0.18, "sine", 0.06);
   }
 
   // 6. Mag-Rail Sniper
@@ -742,15 +816,14 @@ function fireTower(t, target) {
     const endX = tx + Math.cos(angle) * 1200;
     const endY = ty + Math.sin(angle) * 1200;
 
-    creeps.forEach((c) => {
+    for (const c of [...creeps]) {
       // Distance from creep to ray
       const dRay = distToSegment({ x: c.x, y: c.y }, { x: tx, y: ty }, { x: endX, y: endY });
       if (dRay < 18) {
-        c.hp -= dmg;
         floatingTexts.push({ x: c.x, y: c.y - 10, text: `-${dmg} RAIL!`, color: "#ff3344", life: 0.9 });
-        if (c.hp <= 0) killCreep(c);
+        damageCreep(c, dmg);
       }
-    });
+    }
 
     projectiles.push({
       x1: tx,
@@ -758,6 +831,7 @@ function fireTower(t, target) {
       x2: endX,
       y2: endY,
       life: 0.24,
+      maxLife: 0.24,
       type: "rail"
     });
 
@@ -767,12 +841,12 @@ function fireTower(t, target) {
   // 7. Swarm Rockets
   else if (t.type === "missile") {
     for (let s = 0; s < spec.salvo; s++) {
-      setTimeout(() => {
-        if (!target) return;
+      schedule(s * 0.11, () => {
+        if (!towers.includes(t)) return; // recycled mid-salvo
         projectiles.push({
           x: tx + (Math.random() - 0.5) * 14,
           y: ty + (Math.random() - 0.5) * 14,
-          target,
+          target: target.dead ? null : target,
           speed: 340,
           angle: t.turretAngle + (Math.random() - 0.5) * 0.8,
           turnRate: 4.8,
@@ -781,7 +855,7 @@ function fireTower(t, target) {
           type: "rocket"
         });
         playLaser();
-      }, s * 110);
+      });
     }
   }
 
@@ -799,21 +873,17 @@ function fireTower(t, target) {
       dmg,
       type: "acid_blob"
     });
-    playTone(160, "sawtooth", 0.2, 0.07);
+    playTone(160, 0.2, "sawtooth", 0.07);
   }
 
   // 9. Sonic Disruptor
   else if (t.type === "sonic") {
-    creeps.forEach((c) => {
+    for (const c of [...creeps]) {
       if (dist(tx, ty, c.x, c.y) <= spec.range) {
-        c.hp -= dmg;
-        // Knockback along movement path
-        c.pathProgress = Math.max(0, c.pathProgress - spec.knockback);
-        c.x -= Math.cos(t.turretAngle) * spec.knockback * 0.5;
-        c.y -= Math.sin(t.turretAngle) * spec.knockback * 0.5;
-        if (c.hp <= 0) killCreep(c);
+        knockBack(c, spec.knockback);
+        damageCreep(c, dmg);
       }
-    });
+    }
 
     projectiles.push({
       x: tx,
@@ -821,10 +891,11 @@ function fireTower(t, target) {
       radius: 10,
       maxRadius: spec.range,
       life: 0.35,
+      maxLife: 0.35,
       type: "sonic_wave"
     });
 
-    playTone(90, "triangle", 0.3, 0.12);
+    playTone(90, 0.3, "triangle", 0.12);
   }
 }
 
@@ -837,7 +908,55 @@ function distToSegment(p, v, w) {
   return dist(p.x, p.y, v.x + t * (w.x - v.x), v.y + t * (w.y - v.y));
 }
 
+// Push an invader back the way it came. Ground troops slide back along their own path segment
+// (never through towers); flyers drift straight back along their heading.
+function knockBack(c, amount) {
+  c.pathProgress = Math.max(0, c.pathProgress - amount);
+  c.stunTime = Math.max(c.stunTime, 0.12); // brief stagger
+  if (c.isFlyer) {
+    c.x = clamp(c.x - c.vx * amount, 4, canvas.width - 4);
+    c.y = clamp(c.y - c.vy * amount, 4, ROWS * TILE_H - 4);
+    return;
+  }
+  const prev = c.path && c.pathIndex > 0 ? c.path[c.pathIndex - 1] : null;
+  if (!prev) return;
+  const px = (prev.x + 0.5) * TILE_W;
+  const py = (prev.y + 0.5) * TILE_H;
+  const d = dist(c.x, c.y, px, py);
+  if (d <= amount) {
+    c.x = px;
+    c.y = py;
+  } else {
+    c.x += ((px - c.x) / d) * amount;
+    c.y += ((py - c.y) / d) * amount;
+  }
+}
+
+// Every source of damage goes through here: armor, cryo brittleness, acid corrosion, one payout per kill.
+//   kind "physical": full armor applies; "energy": half armor; "true": ignores armor.
+function damageCreep(c, amount, kind = "true") {
+  if (!c || c.dead) return 0;
+  let mult = c.freezeTime > 0 ? 1.3 : 1.0; // frozen = brittle
+  const armor = Math.max(0, (c.armor || 0) - (c.acidStacks || 0) * 0.1); // acid melts armor
+  if (kind === "physical") mult *= Math.max(0.1, 1 - armor);
+  else if (kind === "energy") mult *= Math.max(0.2, 1 - armor * 0.5);
+  const dealt = amount * mult;
+  c.hp -= dealt;
+  if (c.hp <= 0) killCreep(c);
+  return dealt;
+}
+
+function explosionFx(x, y, big = false) {
+  fx.burst(x, y, { count: big ? 26 : 14, speed: big ? 220 : 150, life: 0.5, size: 3, color: "#ffd166", color2: "#ff5a1f", kind: "pixel", gravity: 120, drag: 0.9 });
+  fx.burst(x, y, { count: big ? 8 : 4, speed: 40, life: 0.9, size: 6, grow: 18, color: "#3a3430", kind: "smoke", gravity: -30 });
+  fx.spawn({ x, y, life: 0.25, size: big ? 60 : 36, color: "#ff8a3d", kind: "glow", alpha: 0.8 });
+}
+
 function killCreep(c) {
+  if (c.dead) return;
+  c.dead = true;
+  fx.burst(c.x, c.y, { count: c.isBoss ? 40 : 12, speed: c.isBoss ? 220 : 140, life: 0.6, size: 3, color: c.color || "#8a97b1", color2: "#1e293b", kind: "shard", vr: 10, gravity: 260, drag: 0.92 });
+  fx.burst(c.x, c.y, { count: 6, speed: 180, life: 0.3, size: 2, color: "#7df9ff", kind: "spark" });
   const idx = creeps.indexOf(c);
   if (idx !== -1) creeps.splice(idx, 1);
 
@@ -857,16 +976,16 @@ function killCreep(c) {
   if (c.isBoss) {
     screenShake = 12;
     playExplosion({ duration: 1.4, lowpass: 160 });
-    toast({ title: "GOLIATH HAS FALLEN!", body: "+120 Gold! Mini cyber-runners emerging!", icon: "trophy" });
+    toast({ title: "GOLIATH HAS FALLEN!", body: `+${c.reward} Gold! Mini cyber-runners emerging!`, icon: "trophy" });
     for (let i = 0; i < 4; i++) {
-      spawnCreep("runner");
+      spawnCreep("runner", { x: c.x + (Math.random() - 0.5) * 16, y: c.y + (Math.random() - 0.5) * 16 });
     }
   }
 }
 
 // Main Game Update
 function update(rawDt) {
-  const dt = rawDt * gameSpeed;
+  if (gameOver) return;
 
   if (screenShake > 0) {
     screenShake = Math.max(0, screenShake - rawDt * 24);
@@ -877,6 +996,26 @@ function update(rawDt) {
     const ab = COMMANDER_ABILITIES[k];
     if (ab.cd > 0) ab.cd = Math.max(0, ab.cd - rawDt);
     if (ab.activeTime > 0) ab.activeTime = Math.max(0, ab.activeTime - rawDt);
+  }
+
+  // Game speed runs extra full simulation steps rather than one giant step, so fast bullets and
+  // homing rockets can't tunnel past their targets at 2X / 3X.
+  const step = Math.min(rawDt, 1 / 30);
+  for (let s = 0; s < gameSpeed && !gameOver; s++) simulate(step);
+  fx.update(Math.min(rawDt, 0.05) * gameSpeed);
+
+  updateHUD();
+}
+
+function simulate(dt) {
+  // Delayed events (missile salvos, barrage strikes)
+  for (let i = scheduled.length - 1; i >= 0; i--) {
+    const ev = scheduled[i];
+    ev.t -= dt;
+    if (ev.t <= 0) {
+      scheduled.splice(i, 1);
+      ev.fn();
+    }
   }
 
   // Wave Timer & Spawn Queue
@@ -903,19 +1042,23 @@ function update(rawDt) {
   // Update Decals (Blast craters, acid pools)
   for (let i = decals.length - 1; i >= 0; i--) {
     const d = decals[i];
+    d.life -= dt;
     if (d.type === "acid_pool") {
-      d.life -= dt;
-      // Damage creeps standing in acid
-      creeps.forEach((c) => {
-        if (dist(d.x, d.y, c.x, c.y) < d.r) {
-          c.acidStacks = Math.min(3, c.acidStacks + 1);
+      // Damage creeps wading through acid (flyers pass over it); stacks build over ~1.5s
+      for (const c of [...creeps]) {
+        if (!c.isFlyer && dist(d.x, d.y, c.x, c.y) < d.r) {
+          c.acidStacks = Math.min(3, c.acidStacks + dt * 2);
           c.acidTimer = 3.0;
-          c.hp -= 14 * dt;
-          if (c.hp <= 0) killCreep(c);
+          damageCreep(c, 14 * dt);
         }
-      });
-      if (d.life <= 0) decals.splice(i, 1);
+      }
     }
+    if (d.life <= 0) decals.splice(i, 1);
+  }
+  // Keep the floor readable: only the newest craters linger
+  let craters = 0;
+  for (let i = decals.length - 1; i >= 0; i--) {
+    if (decals[i].type === "crater" && ++craters > 40) decals.splice(i, 1);
   }
 
   // Update Creeps
@@ -931,11 +1074,8 @@ function update(rawDt) {
     if (c.freezeTime > 0) c.freezeTime -= dt;
     if (c.acidTimer > 0) {
       c.acidTimer -= dt;
-      c.hp -= c.acidStacks * 6 * dt;
-      if (c.hp <= 0) {
-        killCreep(c);
-        continue;
-      }
+      damageCreep(c, c.acidStacks * 6 * dt);
+      if (c.dead) continue;
     } else {
       c.acidStacks = 0;
     }
@@ -982,10 +1122,15 @@ function update(rawDt) {
 
     // Check Breach into The Last Tower Core!
     if (dist(c.x, c.y, (EXIT_TILE.x + 0.5) * TILE_W, (EXIT_TILE.y + 0.5) * TILE_H) < 22) {
-      lives--;
+      lives = Math.max(0, lives - (c.isBoss ? 5 : 1));
       screenShake = 10;
       playHit({ isCritical: true });
-      toast({ title: "CORE BREACHED!", body: "An invader compromised the Last Tower!", icon: "skull" });
+      toast({
+        title: "CORE BREACHED!",
+        body: c.isBoss ? `The Goliath smashed the core! ${lives} shields left` : `An invader reached the core! ${lives} shields left`,
+        icon: "skull"
+      });
+      c.dead = true;
       creeps.splice(i, 1);
 
       if (lives <= 0) {
@@ -1028,20 +1173,33 @@ function update(rawDt) {
     const p = projectiles[i];
 
     if (p.type === "bullet") {
-      const ang = Math.atan2(p.target.y - p.y, p.target.x - p.x);
-      p.x += Math.cos(ang) * p.speed * dt;
-      p.y += Math.sin(ang) * p.speed * dt;
-
-      if (dist(p.x, p.y, p.target.x, p.target.y) < 14) {
-        const netDmg = Math.round(p.dmg * Math.max(0.1, 1.0 - (p.target.armor || 0)));
-        p.target.hp -= netDmg;
-        if (p.target.hp <= 0) killCreep(p.target);
+      if (!p.target || p.target.dead) {
+        projectiles.splice(i, 1); // target already gone
+        continue;
+      }
+      const d = dist(p.x, p.y, p.target.x, p.target.y);
+      const stepLen = p.speed * dt;
+      if (d <= Math.max(14, stepLen)) {
+        damageCreep(p.target, p.dmg, "physical");
         projectiles.splice(i, 1);
+      } else {
+        p.x += ((p.target.x - p.x) / d) * stepLen;
+        p.y += ((p.target.y - p.y) / d) * stepLen;
       }
     } else if (p.type === "rocket") {
       p.life -= dt;
-      if (!p.target || p.target.hp <= 0) {
-        p.target = creeps[0] || null;
+      if (!p.target || p.target.dead) {
+        // Re-acquire the nearest invader
+        let best = null;
+        let bestD = Infinity;
+        for (const c of creeps) {
+          const d = dist(p.x, p.y, c.x, c.y);
+          if (d < bestD) {
+            bestD = d;
+            best = c;
+          }
+        }
+        p.target = best;
       }
       if (p.target) {
         const targetAng = Math.atan2(p.target.y - p.y, p.target.x - p.x);
@@ -1065,14 +1223,12 @@ function update(rawDt) {
         type: "smoke"
       });
 
-      if (p.target && dist(p.x, p.y, p.target.x, p.target.y) < 16) {
+      if (p.target && dist(p.x, p.y, p.target.x, p.target.y) < Math.max(16, p.speed * dt)) {
         playExplosion({ duration: 0.4, lowpass: 320 });
-        creeps.forEach((c) => {
-          if (dist(p.x, p.y, c.x, c.y) < 36) {
-            c.hp -= p.dmg;
-            if (c.hp <= 0) killCreep(c);
-          }
-        });
+        explosionFx(p.x, p.y, false);
+        for (const c of [...creeps]) {
+          if (dist(p.x, p.y, c.x, c.y) < 36) damageCreep(c, p.dmg);
+        }
         projectiles.splice(i, 1);
       } else if (p.life <= 0) {
         projectiles.splice(i, 1);
@@ -1085,14 +1241,12 @@ function update(rawDt) {
 
       if (p.life <= 0) {
         playExplosion({ duration: 0.65, lowpass: 220 });
+        explosionFx(p.targetX, p.targetY, true);
         screenShake = 6;
-        decals.push({ x: p.targetX, y: p.targetY, r: 20, alpha: 0.7, type: "crater" });
-        creeps.forEach((c) => {
-          if (dist(p.targetX, p.targetY, c.x, c.y) <= p.splash) {
-            c.hp -= p.dmg;
-            if (c.hp <= 0) killCreep(c);
-          }
-        });
+        decals.push({ x: p.targetX, y: p.targetY, r: 20, alpha: 0.7, life: 8, maxLife: 8, type: "crater" });
+        for (const c of [...creeps]) {
+          if (dist(p.targetX, p.targetY, c.x, c.y) <= p.splash) damageCreep(c, p.dmg);
+        }
         projectiles.splice(i, 1);
       }
     } else if (p.type === "acid_blob") {
@@ -1102,12 +1256,17 @@ function update(rawDt) {
       p.y = lerp(p.startY, p.targetY, progress);
 
       if (p.life <= 0) {
-        // Spawn lingering acid puddle
+        // Splash on impact, then a lingering acid puddle
+        for (const c of [...creeps]) {
+          if (!c.isFlyer && dist(p.targetX, p.targetY, c.x, c.y) < 28) damageCreep(c, p.dmg);
+        }
         decals.push({ x: p.targetX, y: p.targetY, r: 28, life: 5.0, maxLife: 5.0, type: "acid_pool" });
         projectiles.splice(i, 1);
       }
     } else {
       p.life -= dt;
+      const k = p.maxLife ? 1 - Math.max(0, p.life) / p.maxLife : 1;
+      if (p.type === "emp_ring" || p.type === "sonic_wave") p.radius = lerp(10, p.maxRadius, k);
       if (p.life <= 0) projectiles.splice(i, 1);
     }
   }
@@ -1132,12 +1291,23 @@ function update(rawDt) {
     ft.y -= 18 * dt;
     if (ft.life <= 0) floatingTexts.splice(i, 1);
   }
-
-  updateHUD();
+  if (floatingTexts.length > 80) floatingTexts.splice(0, floatingTexts.length - 80);
 }
 
+
 // Render Engine
+// Cached battlefield layers + effects
+const fieldTex = buildField(canvas.width, canvas.height, COLS, ROWS, TILE_W, TILE_H);
+let roadTex = null;
+let roadVersion = -1;
+const fx = createParticles(700);
+
 function render() {
+  const time = performance.now() / 1000;
+  if (roadVersion !== gridVersion || !roadTex) {
+    roadTex = buildRoad(canvas.width, canvas.height, currentMasterPath, TILE_W, TILE_H);
+    roadVersion = gridVersion;
+  }
   ctx.save();
 
   // Screen shake
@@ -1147,34 +1317,19 @@ function render() {
     ctx.translate(ox, oy);
   }
 
-  // 1. High-Tech Cyber Defense Grid Floor
-  ctx.fillStyle = "#020a05";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Grid Lines & Subtle Pulse
-  ctx.strokeStyle = "rgba(0, 230, 118, 0.08)";
-  ctx.lineWidth = 1;
-  for (let x = 0; x <= COLS; x++) {
-    ctx.beginPath();
-    ctx.moveTo(x * TILE_W, 0);
-    ctx.lineTo(x * TILE_W, ROWS * TILE_H);
-    ctx.stroke();
-  }
-  for (let y = 0; y <= ROWS; y++) {
-    ctx.beginPath();
-    ctx.moveTo(0, y * TILE_H);
-    ctx.lineTo(COLS * TILE_W, y * TILE_H);
-    ctx.stroke();
-  }
+  // 1. Textured wasteland + the dirt road the invaders march along
+  ctx.drawImage(fieldTex, 0, 0);
+  ctx.drawImage(roadTex, 0, 0);
 
   // 2. Render Decals (Blast Craters & Acid Puddles)
   decals.forEach((d) => {
     if (d.type === "crater") {
-      ctx.fillStyle = `rgba(10, 5, 2, ${d.alpha || 0.6})`;
+      const fade = d.maxLife ? clamp(d.life / 2, 0, 1) : 1; // fade out over the last 2s
+      ctx.fillStyle = `rgba(10, 5, 2, ${(d.alpha || 0.6) * fade})`;
       ctx.beginPath();
       ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "rgba(255, 120, 0, 0.3)";
+      ctx.strokeStyle = `rgba(255, 120, 0, ${0.3 * fade})`;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     } else if (d.type === "acid_pool") {
@@ -1189,27 +1344,16 @@ function render() {
     }
   });
 
-  // 3. Spawn Portal & THE LAST TOWER CITADEL (Exit Tile)
-  // Spawn Gate
-  const sx = SPAWN_TILE.x * TILE_W;
-  const sy = SPAWN_TILE.y * TILE_H;
-  ctx.fillStyle = "rgba(255, 23, 68, 0.25)";
-  ctx.fillRect(sx, sy, TILE_W, TILE_H);
-  ctx.strokeStyle = "#ff1744";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(sx, sy, TILE_W, TILE_H);
-  ctx.fillStyle = "#ff1744";
-  ctx.font = '8px "Press Start 2P", monospace';
-  ctx.fillText("SPAWN", sx + 4, sy + TILE_H / 2 + 3);
+  // 3. Spawn portal & the Last Tower citadel
+  drawPortal(ctx, (SPAWN_TILE.x + 0.5) * TILE_W, (SPAWN_TILE.y + 0.5) * TILE_H, time);
+  drawCitadel(ctx, (EXIT_TILE.x + 0.5) * TILE_W, (EXIT_TILE.y + 0.5) * TILE_H, time, lives, maxLives);
 
-  // The Last Tower Citadel (Exit Tile)
-  drawLastTowerCitadel((EXIT_TILE.x + 0.5) * TILE_W, (EXIT_TILE.y + 0.5) * TILE_H);
-
-  // 4. Projected A* Path Line
+  // 4. Marching route markers show which way the invaders will walk
   if (currentMasterPath && currentMasterPath.length > 1) {
-    ctx.strokeStyle = "rgba(0, 230, 118, 0.22)";
-    ctx.lineWidth = 3;
-    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = "rgba(255, 200, 80, 0.28)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 9]);
+    ctx.lineDashOffset = -time * 24;
     ctx.beginPath();
     currentMasterPath.forEach((node, idx) => {
       const nx = (node.x + 0.5) * TILE_W;
@@ -1219,6 +1363,7 @@ function render() {
     });
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
   }
 
   // 5. Render Ejected Shell Casings on Floor
@@ -1231,6 +1376,9 @@ function render() {
 
   // 6. Draw Detailed Weapon Platforms
   towers.forEach((t) => drawDetailedTower(t));
+
+  // 6b. Placement preview under the cursor
+  drawPlacementPreview();
 
   // 7. Draw Creeps (Detailed Humanoid Invaders)
   creeps.forEach((c) => drawHumanoidCreep(c));
@@ -1255,52 +1403,71 @@ function render() {
     }
   });
 
-  // 10. Draw Floating Combat Text
+  fx.draw(ctx);
+
+  // 10. Draw Floating Combat Text (hard drop shadow)
+  ctx.font = '9px "Press Start 2P", monospace';
+  ctx.textAlign = "center";
   floatingTexts.forEach((ft) => {
+    ctx.globalAlpha = clamp(ft.life / 0.3, 0, 1);
+    ctx.fillStyle = "#000000";
+    ctx.fillText(ft.text, ft.x + 1, ft.y + 1);
     ctx.fillStyle = ft.color || "#ffffff";
-    ctx.font = '9px "Press Start 2P", monospace';
-    ctx.textAlign = "center";
     ctx.fillText(ft.text, ft.x, ft.y);
   });
+  ctx.globalAlpha = 1;
+  ctx.textAlign = "left";
 
   ctx.restore();
+
+  // Overdrive tint, low-shield warning, screen treatments
+  if (COMMANDER_ABILITIES.overdrive.activeTime > 0) {
+    ctx.fillStyle = `rgba(255, 120, 0, ${0.06 + Math.sin(time * 8) * 0.03})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  if (lives <= 5 && !gameOver) vignette(ctx, canvas.width, canvas.height, 0.3 + Math.sin(time * 5) * 0.1, "#8a0012");
+  vignette(ctx, canvas.width, canvas.height, 0.45);
+  scanlines(ctx, canvas.width, canvas.height, 0.05);
 }
 
-// Detailed Citadel Rendering for Exit
-function drawLastTowerCitadel(cx, cy) {
+// Ghost of the selected tower on the hovered tile: green = buildable, red = blocked / can't afford.
+function drawPlacementPreview() {
+  if (!hoverTile || gameOver) return;
+  const { x: gx, y: gy } = hoverTile;
+  if (towers.some((t) => t.x === gx && t.y === gy)) return; // hovering a tower = inspect, no ghost
+
+  const block = quickPlacementBlock(gx, gy);
+  const key = `${gx},${gy},${gridVersion}`;
+  if (!hoverCache || hoverCache.key !== key) {
+    let pathOk = false;
+    if (!block || block === "HOSTILE ON TILE") {
+      const tempGrid = new Uint8Array(grid);
+      tempGrid[gy * COLS + gx] = 1;
+      pathOk = !!validatePath(tempGrid);
+    }
+    hoverCache = { key, pathOk };
+  }
+
+  const spec = TOWER_SPECS[selectedTowerType];
+  const ok = hoverCache.pathOk && !block && gold >= spec.cost;
+  const px = gx * TILE_W;
+  const py = gy * TILE_H;
+  const col = ok ? "0, 230, 118" : "255, 23, 68";
+
   ctx.save();
-  ctx.translate(cx, cy);
-
-  // Outer fortified wall
-  ctx.fillStyle = "#051f11";
-  ctx.strokeStyle = "#00e676";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(-TILE_W * 0.45, -TILE_H * 0.45, TILE_W * 0.9, TILE_H * 0.9);
-  ctx.fillRect(-TILE_W * 0.45, -TILE_H * 0.45, TILE_W * 0.9, TILE_H * 0.9);
-
-  // Rotating Fusion Rings
-  const time = Date.now() * 0.003;
-  ctx.strokeStyle = "rgba(0, 240, 255, 0.7)";
+  ctx.fillStyle = `rgba(${col}, 0.18)`;
+  ctx.fillRect(px + 1, py + 1, TILE_W - 2, TILE_H - 2);
+  ctx.strokeStyle = `rgba(${col}, 0.9)`;
   ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.arc(0, 0, 14, time, time + Math.PI * 1.5);
-  ctx.stroke();
-
-  // Core Glowing Sphere
-  ctx.fillStyle = lives < 6 ? "#ff1744" : "#00f0ff";
-  ctx.shadowColor = ctx.fillStyle;
-  ctx.shadowBlur = 12;
-  ctx.beginPath();
-  ctx.arc(0, 0, 7, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-
-  // Label
-  ctx.fillStyle = "#ffffff";
-  ctx.font = '7px "VT323", monospace';
-  ctx.textAlign = "center";
-  ctx.fillText("THE LAST TOWER", 0, -17);
-
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(px + 1.5, py + 1.5, TILE_W - 3, TILE_H - 3);
+  ctx.setLineDash([]);
+  if (ok && spec.range < 1000) {
+    ctx.strokeStyle = `rgba(${col}, 0.3)`;
+    ctx.beginPath();
+    ctx.arc(px + TILE_W / 2, py + TILE_H / 2, spec.range, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -1468,19 +1635,13 @@ function drawDetailedTower(t) {
 
   ctx.save();
 
-  // 1. Reinforced Steel Base Plate
-  ctx.fillStyle = "#0c1f14";
-  ctx.fillRect(tx + 2, ty + 2, TILE_W - 4, TILE_H - 4);
-  ctx.strokeStyle = spec.color;
-  ctx.lineWidth = t === inspectingTower ? 2.5 : 1.2;
-  ctx.strokeRect(tx + 2, ty + 2, TILE_W - 4, TILE_H - 4);
-
-  // Corner Rivets
-  ctx.fillStyle = "#8a97b1";
-  ctx.fillRect(tx + 3, ty + 3, 2, 2);
-  ctx.fillRect(tx + TILE_W - 5, ty + 3, 2, 2);
-  ctx.fillRect(tx + 3, ty + TILE_H - 5, 2, 2);
-  ctx.fillRect(tx + TILE_W - 5, ty + TILE_H - 5, 2, 2);
+  // 1. Concrete emplacement pad
+  drawPad(ctx, tx, ty, TILE_W, TILE_H, spec.color, t === inspectingTower);
+  // Turret drop shadow
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.beginPath();
+  ctx.ellipse(cx + 3, cy + 4, 10 + t.level, 7 + t.level, 0, 0, Math.PI * 2);
+  ctx.fill();
 
   // Level Pips
   for (let l = 0; l < t.level; l++) {
@@ -1576,8 +1737,8 @@ function drawDetailedTower(t) {
 
   ctx.restore();
 
-  // Range preview on inspected tower
-  if (t === inspectingTower) {
+  // Range preview on inspected tower (the rail sniper covers the whole map, so no ring)
+  if (t === inspectingTower && spec.range < 1000) {
     ctx.strokeStyle = "rgba(0, 230, 118, 0.3)";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -1623,13 +1784,14 @@ function drawProjectiles() {
       ctx.fillRect(-5, -2, 10, 4);
       ctx.restore();
     } else if (p.type === "frost_pulse") {
-      ctx.strokeStyle = "rgba(0, 191, 165, 0.7)";
+      const k = clamp(p.life / (p.maxLife || 0.28), 0, 1);
+      ctx.strokeStyle = `rgba(0, 191, 165, ${0.7 * k})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.radius * (1 - k * 0.6), 0, Math.PI * 2);
       ctx.stroke();
     } else if (p.type === "rail") {
-      ctx.strokeStyle = "#ff3344";
+      ctx.strokeStyle = `rgba(255, 51, 68, ${clamp(p.life / (p.maxLife || 0.24), 0, 1)})`;
       ctx.lineWidth = 3.5;
       ctx.beginPath();
       ctx.moveTo(p.x1, p.y1);
@@ -1641,28 +1803,31 @@ function drawProjectiles() {
       ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
       ctx.fill();
     } else if (p.type === "sonic_wave") {
-      ctx.strokeStyle = "rgba(255, 0, 127, 0.6)";
+      ctx.strokeStyle = `rgba(255, 0, 127, ${0.7 * clamp(p.life / (p.maxLife || 0.35), 0, 1)})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
       ctx.stroke();
     } else if (p.type === "emp_ring") {
-      ctx.strokeStyle = "rgba(0, 240, 255, 0.75)";
+      ctx.strokeStyle = `rgba(0, 240, 255, ${0.75 * clamp(p.life / (p.maxLife || 0.6), 0, 1)})`;
       ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
       ctx.stroke();
-      p.radius += 1200 * (1 / 60);
     }
   });
 }
 
 function handleGameOver() {
+  if (gameOver) return;
+  gameOver = true;
+  scheduled.length = 0;
+  hoverTile = null;
+  inspectingTower = null;
+  updateInspectorUI();
+  updateHUD();
   playExplosion({ duration: 1.6, lowpass: 120 });
-  saveGameScore("last-tower", {
-    score: currentWave,
-    label: `DEFENDED ${currentWave} WAVES // ${towers.length} TOWERS`
-  });
+  saveGameScore("last-tower", currentWave, `DEFENDED ${currentWave} WAVES // ${towers.length} TOWERS`);
 
   const modal = document.getElementById("lt-death-modal");
   if (modal) {
@@ -1683,11 +1848,29 @@ function updateHUD() {
   const speedBtn = document.getElementById("btn-speed-toggle");
 
   if (goldEl) goldEl.textContent = `${gold} G`;
-  if (livesEl) livesEl.textContent = `${lives} / ${maxLives}`;
+  if (livesEl) {
+    livesEl.textContent = `${lives} / ${maxLives}`;
+    livesEl.style.color = lives <= 5 ? "#ff1744" : lives <= 10 ? "#ffd700" : "#00e676";
+  }
   if (waveEl) waveEl.textContent = `WAVE ${currentWave}`;
   if (timerEl) {
-    timerEl.textContent = creepsToSpawn.length > 0 || creeps.length > 0 ? "IN COMBAT" : `NEXT: ${Math.ceil(waveTimer)}s`;
+    timerEl.textContent = gameOver
+      ? "CORE LOST"
+      : creepsToSpawn.length > 0 || creeps.length > 0
+        ? `IN COMBAT · ${creeps.length + creepsToSpawn.length} LEFT`
+        : `NEXT: ${Math.max(0, Math.ceil(waveTimer))}s`;
   }
+  const btnWave = document.getElementById("btn-call-wave");
+  if (btnWave) btnWave.disabled = gameOver || creepsToSpawn.length > 0 || creeps.length > 0;
+
+  // Dim tower buttons the treasury can't pay for
+  document.querySelectorAll(".tower-btn").forEach((b) => {
+    const spec = TOWER_SPECS[b.dataset.tower];
+    b.classList.toggle("is-poor", !!spec && gold < spec.cost);
+  });
+
+  // Keep the inspector's upgrade button / stats honest as gold and overdrive change
+  if (inspectingTower) updateInspectorUI(false);
   if (speedBtn) speedBtn.textContent = `SPEED: ${gameSpeed}X [Z]`;
 
   // Update Commander buttons state & cooldowns
@@ -1712,7 +1895,7 @@ function updateHUD() {
   }
 }
 
-function updateInspectorUI() {
+function updateInspectorUI(full = true) {
   const inspector = document.getElementById("lt-inspector");
   if (!inspector) return;
 
@@ -1736,21 +1919,22 @@ function updateInspectorUI() {
   const refund = Math.floor(inspectingTower.totalInvested * 0.7);
 
   if (nameEl) nameEl.textContent = `${spec.name.toUpperCase()} [LVL ${inspectingTower.level}]`;
-  if (statsEl) statsEl.textContent = `DMG: ${dmg} | RATE: ${rate}s | RNG: ${spec.range} | ${spec.desc}`;
-  if (prioritySel) prioritySel.value = inspectingTower.priority || "FIRST";
+  if (statsEl) {
+    const statsText = `DMG: ${dmg} | RATE: ${rate}s | RNG: ${spec.range >= 1000 ? "MAP" : spec.range} | ${spec.desc}`;
+    if (statsEl.textContent !== statsText) statsEl.textContent = statsText;
+  }
+  // Only on a full refresh: rewriting the value every frame would fight an open dropdown.
+  if (full && prioritySel) prioritySel.value = inspectingTower.priority || "FIRST";
 
   if (btnUpgrade) {
-    if (inspectingTower.level >= 3) {
-      btnUpgrade.textContent = "MAX LEVEL";
-      btnUpgrade.disabled = true;
-    } else {
-      btnUpgrade.textContent = `UPGRADE (${upCost} G)`;
-      btnUpgrade.disabled = gold < upCost;
-    }
+    const label = inspectingTower.level >= 3 ? "MAX LEVEL" : `UPGRADE (${upCost} G)`;
+    if (btnUpgrade.textContent !== label) btnUpgrade.textContent = label;
+    btnUpgrade.disabled = inspectingTower.level >= 3 || gold < upCost;
   }
 
   if (btnSell) {
-    btnSell.textContent = `RECYCLE (+${refund} G)`;
+    const label = `RECYCLE (+${refund} G)`;
+    if (btnSell.textContent !== label) btnSell.textContent = label;
   }
 }
 
@@ -1760,6 +1944,7 @@ document.querySelectorAll(".tower-btn").forEach((btn) => {
     document.querySelectorAll(".tower-btn").forEach((b) => b.classList.remove("selected"));
     btn.classList.add("selected");
     selectedTowerType = btn.dataset.tower;
+    hoverCache = null;
     sfx.click();
   });
 });
@@ -1778,13 +1963,13 @@ if (btnCallWave) btnCallWave.addEventListener("click", callEarlyWave);
 if (btnUpgrade) btnUpgrade.addEventListener("click", upgradeInspectedTower);
 if (btnSell) btnSell.addEventListener("click", sellInspectedTower);
 
-if (btnSpeed) {
-  btnSpeed.addEventListener("click", () => {
-    gameSpeed = gameSpeed === 1 ? 2 : (gameSpeed === 2 ? 3 : 1);
-    sfx.click();
-    updateHUD();
-  });
+function cycleSpeed() {
+  gameSpeed = gameSpeed === 1 ? 2 : (gameSpeed === 2 ? 3 : 1);
+  sfx.click();
+  updateHUD();
 }
+
+if (btnSpeed) btnSpeed.addEventListener("click", cycleSpeed);
 
 if (prioritySel) {
   prioritySel.addEventListener("change", (e) => {
@@ -1801,15 +1986,15 @@ if (btnCmdOverdrive) btnCmdOverdrive.addEventListener("click", triggerCoreOverdr
 
 // Hotkeys for Tactical Abilities & Speed
 window.addEventListener("keydown", (e) => {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (document.querySelector(".modal-backdrop") || gameOver || loop.isPaused()) return;
   if (e.code === "Digit1") triggerOrbitalBarrage();
   else if (e.code === "Digit2") triggerEMPShock();
   else if (e.code === "Digit3") triggerCoreOverdrive();
-  else if (e.code === "KeyZ") {
-    gameSpeed = gameSpeed === 1 ? 2 : (gameSpeed === 2 ? 3 : 1);
-    sfx.click();
-    updateHUD();
-  }
+  else if (e.code === "KeyZ") cycleSpeed();
 });
+
 
 // Start Game Loop
 const loop = createGameLoop({

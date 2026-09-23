@@ -9,6 +9,7 @@ import { initShell, escapeHtml, toast } from "/shared/shell.js";
 import { createGameLoop, createInputManager, clamp, lerp, dist, angleDiff } from "/src/core/engine.js";
 import { playCannon, playLaser, playExplosion, playLockTone, playWarningBeep, sfx } from "/src/core/audio.js";
 import { saveGameScore } from "/src/core/save.js";
+import { noiseTile, patternOf, vignette, scanlines, glow } from "/src/core/gfx.js";
 
 import {
   AIRCRAFT_ROSTER,
@@ -37,6 +38,22 @@ const canvas = document.getElementById("av-canvas");
 const ctx = canvas.getContext("2d");
 canvas.width = 960;
 canvas.height = 540;
+
+// Granite texture for the foreground massif (tileable, world-anchored via a pattern)
+const ROCK_TEX = noiseTile(192, {
+  base: "#2a3a4a",
+  seed: 41,
+  blotches: [
+    { color: "#415a70", alpha: 0.35, count: 10, min: 16, max: 40 },
+    { color: "#141d27", alpha: 0.45, count: 10, min: 14, max: 36 }
+  ],
+  speckles: [
+    { color: "#6b839a", density: 0.012 },
+    { color: "#0f161e", density: 0.02 },
+    { color: "#8aa2b8", density: 0.003, size: 2 }
+  ],
+  cracks: { color: "rgba(10, 16, 22, 0.8)", count: 14 }
+});
 
 // ── Terrain & World Generation ──
 const terrain = generateMountainTerrain(101);
@@ -167,19 +184,21 @@ function selectAircraft(id, silent = false) {
   const craft = AIRCRAFT_ROSTER[id];
   if (!craft) return;
 
+  // Swapping airframes keeps your damage state and ammo (no free mid-fight repair or rearm);
+  // the carrier fully rearms, refuels and patches you up between sorties (see startMission).
+  const hpRatio = player.maxHp > 0 ? clamp(player.hp / player.maxHp, 0, 1) : 1;
   currentAircraftId = id;
   player.type = id;
   player.maxHp = craft.hp;
-  player.hp = Math.min(player.hp, craft.hp);
-  if (!silent && player.hp < craft.hp * 0.5) player.hp = craft.hp; // repair on hangar swap
+  player.hp = Math.max(1, Math.round(craft.hp * hpRatio));
   player.damageResist = craft.damageResist || 0;
   player.cannonDmg = craft.cannonDmg;
   player.cannonExplosive = Boolean(craft.cannonExplosive);
   player.cannonFireRate = craft.cannonFireRate;
   player.cannonVelocity = craft.cannonVelocity;
-  player.missilesCount = Math.max(player.missilesCount, craft.missilesCount);
+  player.missilesCount = Math.min(player.missilesCount, craft.missilesCount);
   player.missileType = craft.missileType;
-  player.flaresCount = Math.max(player.flaresCount, craft.flaresCount);
+  player.flaresCount = Math.min(player.flaresCount, craft.flaresCount);
 
   // Update HUD
   const craftEl = document.getElementById("hud-craft");
@@ -261,6 +280,8 @@ const MISSIONS = [
 
 let currentMissionIndex = 0;
 let wingman = null;
+let missionClearTimer = -1; // >= 0 while the "airspace secured" beat plays before the next sortie
+let campaignComplete = false;
 
 // Entities
 const bullets = [];
@@ -280,7 +301,18 @@ const camera = {
 // Setup Mission
 function startMission(index) {
   currentMissionIndex = index;
+  missionClearTimer = -1;
   missionGraceTimer = 2.5; // Tactical grace timer: bandits hold fire for 2.5s
+
+  // Carrier turnaround: rearm, refuel, and patch the airframe between sorties
+  const craft = AIRCRAFT_ROSTER[player.type] || AIRCRAFT_ROSTER.f22;
+  player.missilesCount = craft.missilesCount;
+  player.flaresCount = craft.flaresCount;
+  player.fuel = 100;
+  player.hp = Math.min(player.maxHp, player.hp + Math.round(player.maxHp * 0.5));
+  player.selectedTarget = null;
+  player.lockTimer = 0;
+  player.hasLock = false;
   const m = MISSIONS[index];
   enemies.length = 0;
   bullets.length = 0;
@@ -297,7 +329,8 @@ function startMission(index) {
     angle: player.angle,
     speed: player.speed,
     hp: 120,
-    isAlive: true
+    isAlive: true,
+    gunCd: 1.5
   };
 
   // Spawn varied enemies with tactical opening distance
@@ -416,23 +449,31 @@ function setupHangarUI() {
   if (closeBtn) closeBtn.addEventListener("click", () => toggleHangar(false));
   if (launchBtn) launchBtn.addEventListener("click", () => toggleHangar(false));
 
-  // Global key listener for H and number keys 1-5
+  // Global key listener for H and number keys 1-5 (airframe keys only work inside the hangar)
   window.addEventListener("keydown", (ev) => {
-    if (ev.key === "h" || ev.key === "H") {
+    if (ev.target instanceof Element && ev.target.closest("input, textarea, select, [contenteditable]")) return;
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.repeat) return;
+    if (!player.isAlive) return;
+    if (ev.code === "KeyH") {
       toggleHangar();
     } else if (ev.key === "Escape" && isHangarOpen) {
+      ev.stopImmediatePropagation(); // close the hangar instead of also pausing
       toggleHangar(false);
-    } else if (ev.key >= "1" && ev.key <= "5") {
+    } else if (isHangarOpen && ev.key >= "1" && ev.key <= "5") {
       const rosterKeys = Object.keys(AIRCRAFT_ROSTER);
       const chosen = rosterKeys[parseInt(ev.key, 10) - 1];
-      if (chosen) selectAircraft(chosen);
+      if (chosen && chosen !== currentAircraftId) selectAircraft(chosen);
     }
   });
 }
 
 // ── Game Update Loop ──
 function update(dt) {
-  if (isHangarOpen || !player.isAlive) return;
+  if (isHangarOpen || !player.isAlive) {
+    input.clearJustPressed();
+    mouseAim.rightClicked = false;
+    return;
+  }
 
   missionGraceTimer = Math.max(0, missionGraceTimer - dt);
 
@@ -581,6 +622,7 @@ function update(dt) {
     deployCountermeasure();
     player.flareCooldown = 0.35;
   }
+  input.clearJustPressed(); // presses not consumed this frame must not fire later
 
   // RWR Warning Alarm check (Incoming Hostile Missiles)
   const incomingMissiles = missiles.filter((m) => !m.isPlayer && m.target === player && m.life > 0);
@@ -607,10 +649,14 @@ function update(dt) {
   updateEnemies(dt);
   updateWingman(dt);
 
-  // 8. Mission Progress Check
+  // 8. Mission Progress Check (fires once; the next sortie launches after a short beat)
   const aliveBandits = enemies.filter((e) => e.isAlive).length;
-  if (aliveBandits === 0 && enemies.length > 0) {
+  if (aliveBandits === 0 && enemies.length > 0 && missionClearTimer < 0 && !campaignComplete) {
     completeCurrentMission();
+  }
+  if (missionClearTimer >= 0) {
+    missionClearTimer -= dt;
+    if (missionClearTimer < 0) startMission(currentMissionIndex + 1);
   }
 
   // 9. Camera Smoothing & Shake
@@ -652,7 +698,7 @@ function launchMissile() {
   player.missilesCount--;
 
   playLaser({ pitch: 440, duration: 0.22 });
-  if (player.selectedTarget) {
+  if (player.selectedTarget && player.hasLock) {
     toast({
       title: `FOX TWO! [${player.missilesCount} LEFT]`,
       body: `Fired ${player.missileType} at ${player.selectedTarget.name}`,
@@ -672,7 +718,8 @@ function launchMissile() {
     angle: player.angle,
     speed: player.speed + 320,
     maxSpeed: 960,
-    target: player.selectedTarget || null,
+    // Seeker only guides with a full radar lock; otherwise it flies boresight
+    target: player.hasLock ? player.selectedTarget : null,
     type: player.missileType,
     life: 6.0,
     isPlayer: true
@@ -695,10 +742,27 @@ function deployCountermeasure() {
       vx: Math.cos(a) * (180 + Math.random() * 80),
       vy: Math.sin(a) * (180 + Math.random() * 80),
       life: 2.4,
-      type: "flare"
+      type: "flare",
+      owner: "player"
     });
   }
-  toast({ title: "FLARES POPPED", body: `${player.flaresCount} Remaining`, icon: "shield" });
+}
+
+// Bandits pop their own flares against an incoming player missile
+function deployEnemyFlares(e) {
+  e.flares--;
+  for (let i = 0; i < 4; i++) {
+    const a = e.angle + Math.PI + (Math.random() - 0.5) * 1.1;
+    countermeasures.push({
+      x: e.x,
+      y: e.y,
+      vx: Math.cos(a) * (160 + Math.random() * 80),
+      vy: Math.sin(a) * (160 + Math.random() * 80),
+      life: 2.2,
+      type: "flare",
+      owner: "enemy"
+    });
+  }
 }
 
 function updateRadarLock(dt) {
@@ -749,23 +813,24 @@ function updateBullets(dt) {
       b.life = 0;
     }
 
-    // Check hit against enemies
+    // Check hit against enemies (a round stops in the first airframe it hits)
     if (b.isPlayer && b.life > 0) {
-      enemies.forEach((e) => {
+      for (const e of enemies) {
         if (e.isAlive && dist(b.x, b.y, e.x, e.y) < 28) {
           e.hp -= b.dmg;
           b.life = 0;
-          playLaser({ pitch: 180, duration: 0.08 });
+          playLaser({ startFreq: 180, endFreq: 90, duration: 0.08 });
           if (b.isExplosive) {
             playExplosion({ duration: 0.3, lowpass: 400 });
           }
           if (e.hp <= 0) destroyEnemy(e);
+          break;
         }
-      });
+      }
     } else if (!b.isPlayer && b.life > 0) {
       // Check hit on player
       if (dist(b.x, b.y, player.x, player.y) < 20) {
-        const dmgTaken = Math.round(18 * (1 - player.damageResist));
+        const dmgTaken = Math.round((b.dmg || 18) * (1 - player.damageResist));
         player.hp -= dmgTaken;
         b.life = 0;
         camera.shake = 10;
@@ -784,13 +849,25 @@ function updateMissiles(dt) {
     m.life -= dt;
     m.speed = Math.min(m.maxSpeed, m.speed + dt * 320);
 
-    // Decoy check with flares
+    // A guided player missile closing on a bandit may provoke a flare dump (once per missile)
+    if (m.isPlayer && m.target && m.target.isAlive && !m.flareChecked && dist(m.x, m.y, m.target.x, m.target.y) < 380) {
+      m.flareChecked = true;
+      const odds = m.target.highGManeuvers ? 0.6 : 0.3;
+      if (m.target.flares > 0 && Math.random() < odds) deployEnemyFlares(m.target);
+    }
+
+    // Decoy check: only the OTHER side's flares can seduce a seeker
     let currentTarg = m.target;
-    countermeasures.forEach((cm) => {
-      if (dist(m.x, m.y, cm.x, cm.y) < 280) {
-        currentTarg = cm;
+    if (currentTarg) {
+      for (const cm of countermeasures) {
+        const hostileFlare = m.isPlayer ? cm.owner === "enemy" : cm.owner !== "enemy";
+        if (hostileFlare && dist(m.x, m.y, cm.x, cm.y) < 280) {
+          currentTarg = cm;
+          m.target = cm; // once seduced, the seeker stays on the decoy
+          break;
+        }
       }
-    });
+    }
 
     if (currentTarg && (currentTarg.isAlive || currentTarg.life > 0)) {
       const wantAngle = Math.atan2(currentTarg.y - m.y, currentTarg.x - m.x);
@@ -809,8 +886,8 @@ function updateMissiles(dt) {
     }
 
     // Detonation on target
-    if (m.isPlayer) {
-      enemies.forEach((e) => {
+    if (m.isPlayer && m.life > 0) {
+      for (const e of enemies) {
         if (e.isAlive && dist(m.x, m.y, e.x, e.y) < 30) {
           const missileDamage = m.type === "AGM-65 MAVERICK" ? 220 : 150;
           e.hp -= missileDamage;
@@ -818,9 +895,10 @@ function updateMissiles(dt) {
           camera.shake = 14;
           playExplosion({ duration: 1.0, lowpass: 200 });
           if (e.hp <= 0) destroyEnemy(e);
+          break;
         }
-      });
-    } else {
+      }
+    } else if (!m.isPlayer && m.life > 0) {
       if (dist(m.x, m.y, player.x, player.y) < 26) {
         const dmgTaken = Math.round(75 * (1 - player.damageResist));
         player.hp -= dmgTaken;
@@ -863,24 +941,31 @@ function updateEnemies(dt) {
     const d = dist(e.x, e.y, player.x, player.y);
     const toPlayer = Math.atan2(player.y - e.y, player.x - e.x);
 
+    // Steer along the SHORTEST way round (plain lerp on raw angles spun bandits the long way at ±180°)
+    const steer = (target, rate) => {
+      e.angle += angleDiff(target, e.angle) * Math.min(1, rate);
+      e.angle = Math.atan2(Math.sin(e.angle), Math.cos(e.angle));
+    };
+
     // AI Maneuvers based on Aircraft Class
     if (e.highGManeuvers) {
       // Ace: high-speed intercept and Cobra loops
       const wantAng = d > 450 ? toPlayer : e.angle + 0.6;
-      e.angle = lerp(e.angle, wantAng, dt * e.pitchRate);
+      steer(wantAng, dt * e.pitchRate);
       e.speed = 490;
     } else if (e.type === "tu160") {
-      // Bomber: steady flight path with gentle banks
-      e.angle = lerp(e.angle, toPlayer * 0.5, dt * 0.6);
+      // Bomber: steady flight path with gentle banks toward the fight
+      steer(toPlayer, dt * 0.3);
     } else {
       // General Pursuit
-      e.angle = lerp(e.angle, toPlayer, dt * e.pitchRate * 0.85);
+      steer(toPlayer, dt * e.pitchRate * 0.85);
     }
 
     // AI Mountain Collision Avoidance (Pulls up if near terrain)
     const eGPWS = checkGroundProximity(e.x, e.y, Math.sin(e.angle) * e.speed, terrain.points);
     if (eGPWS.warning) {
-      e.angle = lerp(e.angle, -Math.PI / 3, dt * 3.5); // pull nose up
+      const climbOut = Math.cos(e.angle) >= 0 ? -Math.PI / 3 : -Math.PI + Math.PI / 3; // keep heading, nose up
+      steer(climbOut, dt * 3.5);
     }
 
     // Terrain crash check for bandits!
@@ -958,6 +1043,34 @@ function updateWingman(dt) {
   wingman.x = lerp(wingman.x, targetX, dt * 3.5);
   wingman.y = lerp(wingman.y, targetY, dt * 3.5);
   wingman.angle = player.angle;
+
+  // Wingman covers you: short bursts at bandits in its forward cone
+  wingman.gunCd -= dt;
+  if (wingman.gunCd <= 0 && missionGraceTimer <= 0) {
+    const tgt = enemies.find((e) => {
+      if (!e.isAlive) return false;
+      const d = dist(wingman.x, wingman.y, e.x, e.y);
+      const off = Math.abs(angleDiff(Math.atan2(e.y - wingman.y, e.x - wingman.x), wingman.angle));
+      return d < 650 && off < 0.35;
+    });
+    if (tgt) {
+      wingman.gunCd = 0.7;
+      const a = Math.atan2(tgt.y - wingman.y, tgt.x - wingman.x);
+      const v = player.speed + 850;
+      bullets.push({
+        x: wingman.x + Math.cos(a) * 24,
+        y: wingman.y + Math.sin(a) * 24,
+        vx: Math.cos(a) * v,
+        vy: Math.sin(a) * v,
+        life: 1.0,
+        dmg: 10,
+        isExplosive: false,
+        isPlayer: true
+      });
+    } else {
+      wingman.gunCd = 0.25;
+    }
+  }
 }
 
 function destroyEnemy(e) {
@@ -981,46 +1094,73 @@ function completeCurrentMission() {
   });
 
   if (currentMissionIndex + 1 < MISSIONS.length) {
-    setTimeout(() => {
-      startMission(currentMissionIndex + 1);
-    }, 2800);
+    missionClearTimer = 2.8; // next sortie launches from update() (so it respects pause)
   } else {
     // Campaign Victory
-    saveGameScore("ace-vector", {
-      score: player.kills,
-      label: `TOP GUN ACE // ALL 8 MISSIONS // ${player.kills} KILLS`
-    });
+    campaignComplete = true;
+    saveGameScore("ace-vector", player.kills, `TOP GUN ACE // ALL 8 MISSIONS // ${player.kills} KILLS`);
     toast({
       title: "CAMPAIGN VICTORY!",
       body: "You cleared all 8 combat sorties and achieved Top Gun Ace status!",
       icon: "trophy"
     });
+    showDebrief("CAMPAIGN COMPLETE // TOP GUN", [
+      `<span style="color:#ffb700;">AIRFRAME: ${escapeHtml((AIRCRAFT_ROSTER[player.type] || {}).name || "FIGHTER")}</span>`,
+      `<span>ALL ${MISSIONS.length} SORTIES FLOWN</span>`,
+      `<span>CONFIRMED AIR-TO-AIR KILLS: ${player.kills}</span>`
+    ], "[ FLY THE CAMPAIGN AGAIN ]");
   }
 }
 
+function showDebrief(title, lines, retryLabel) {
+  const modal = document.getElementById("av-debrief-modal");
+  if (!modal) return;
+  const titleEl = modal.querySelector(".av-modal-title");
+  if (titleEl) titleEl.textContent = title;
+  const statsEl = document.getElementById("debrief-stats");
+  if (statsEl) statsEl.innerHTML = lines.join("");
+  const retryBtn = document.getElementById("btn-debrief-retry");
+  if (retryBtn) retryBtn.textContent = retryLabel;
+  modal.style.display = "flex";
+}
+
+// Relaunch after a shoot-down (same sortie) or after the campaign (from mission 1).
+function relaunch() {
+  const modal = document.getElementById("av-debrief-modal");
+  if (modal) modal.style.display = "none";
+  const fromStart = campaignComplete;
+  campaignComplete = false;
+  if (fromStart) player.kills = 0;
+  const craft = AIRCRAFT_ROSTER[player.type] || AIRCRAFT_ROSTER.f22;
+  Object.assign(player, {
+    x: 1800, y: 3200, vx: 380, vy: 0, angle: 0, speed: 380, throttle: 0.8,
+    hp: craft.hp, maxHp: craft.hp, isAlive: true, isStalled: false, wasSupersonic: false
+  });
+  player.vaporTrails.length = 0;
+  camera.x = player.x;
+  camera.y = player.y;
+  camera.shake = 0;
+  startMission(fromStart ? 0 : currentMissionIndex);
+}
+document.getElementById("btn-debrief-retry")?.addEventListener("click", relaunch);
+
 function killPlayer(reason) {
+  if (!player.isAlive) return;
   player.isAlive = false;
   camera.shake = 28;
   playExplosion({ duration: 1.6, lowpass: 130 });
-  saveGameScore("ace-vector", {
-    score: player.kills,
-    label: `M${currentMissionIndex + 1} // ${player.kills} KILLS`,
-    details: reason
+  saveGameScore("ace-vector", player.kills, `M${currentMissionIndex + 1} // ${player.kills} KILLS`, { details: reason });
+  ["gpws-warning", "rwr-warning", "stall-warning"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = "none";
   });
 
-  const modal = document.getElementById("av-debrief-modal");
-  if (modal) {
-    modal.style.display = "flex";
-    const statsEl = document.getElementById("debrief-stats");
-    if (statsEl) {
-      statsEl.innerHTML = `
-        <span style="color:#ffb700;">AIRFRAME: ${escapeHtml((AIRCRAFT_ROSTER[player.type] || {}).name || "FIGHTER")}</span>
-        <span>MISSION: ${escapeHtml(MISSIONS[currentMissionIndex].title)}</span>
-        <span>CONFIRMED AIR-TO-AIR KILLS: ${player.kills}</span>
-        <span style="color:#ff3333;">LOSS CAUSE: ${escapeHtml(reason.toUpperCase())}</span>
-      `;
-    }
-  }
+  showDebrief("MISSION DEBRIEFING", [
+    `<span style="color:#ffb700;">AIRFRAME: ${escapeHtml((AIRCRAFT_ROSTER[player.type] || {}).name || "FIGHTER")}</span>`,
+    `<span>MISSION: ${escapeHtml(MISSIONS[currentMissionIndex].title)}</span>`,
+    `<span>CONFIRMED AIR-TO-AIR KILLS: ${player.kills}</span>`,
+    `<span style="color:#ff3333;">LOSS CAUSE: ${escapeHtml(reason.toUpperCase())}</span>`
+  ], "[ RETRY SORTIE ]");
 }
 
 function updateHUD() {
@@ -1041,9 +1181,11 @@ function updateHUD() {
   }
 
   if (lockEl) {
-    lockEl.textContent = player.hasLock ? `RADAR LOCK [${player.missileType}]` : player.selectedTarget ? "TRACKING..." : "SEARCHING";
+    const ammo = ` // MSL ${player.missilesCount} • FLR ${player.flaresCount}`;
+    lockEl.textContent = (player.hasLock ? `RADAR LOCK [${player.missileType}]` : player.selectedTarget ? "TRACKING..." : "SEARCHING") + ammo;
     lockEl.style.color = player.hasLock ? "#ff3333" : "#ffb700";
   }
+
 
   if (stallEl) {
     stallEl.style.display = player.isStalled ? "block" : "none";
@@ -1248,6 +1390,13 @@ function render() {
   }
 
   ctx.restore();
+
+  // Screen treatments: damage vignette, lens vignette, CRT scanlines
+  if (player.isAlive && player.hp < player.maxHp * 0.35) {
+    vignette(ctx, canvas.width, canvas.height, 0.35 + Math.sin(performance.now() / 160) * 0.12, "#8a0012");
+  }
+  vignette(ctx, canvas.width, canvas.height, 0.45);
+  scanlines(ctx, canvas.width, canvas.height, 0.05);
 }
 
 // ── Background & Landscape Drawing ──
@@ -1318,69 +1467,94 @@ function drawCelestialSun(camX, camY) {
   ctx.restore();
 }
 
+// Filled snowcap: ridge line on top, a ragged lower edge whose depth grows with height above the snow line.
+function snowCap(pts, offset, snowLine, maxDepth, litCol, shadeCol) {
+  const dense = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const steps = Math.max(1, Math.ceil(Math.abs(b.x - a.x) / 18));
+    for (let k = 0; k < steps; k++) {
+      const u = k / steps;
+      dense.push({ x: a.x + (b.x - a.x) * u + offset, y: a.y + (b.y - a.y) * u });
+    }
+  }
+  if (!dense.length) return;
+  const depthAt = (p, i) => {
+    const d = Math.min(maxDepth, Math.max(0, (snowLine - p.y) * 0.85));
+    return d > 0 ? d + ((i * 7919) % 13) - 6 : 0;
+  };
+  ctx.beginPath();
+  dense.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  for (let i = dense.length - 1; i >= 0; i--) ctx.lineTo(dense[i].x, dense[i].y + depthAt(dense[i], i));
+  ctx.closePath();
+  ctx.fillStyle = shadeCol;
+  ctx.fill();
+  // Sun-lit faces: segments rising to the right are lit (sun is to the upper right)
+  ctx.fillStyle = litCol;
+  for (let i = 1; i < dense.length; i++) {
+    const p = dense[i];
+    const q = dense[i - 1];
+    if (p.y > q.y) continue;
+    const d = depthAt(p, i);
+    if (d <= 0) continue;
+    ctx.beginPath();
+    ctx.moveTo(q.x, q.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.lineTo(p.x, p.y + d);
+    ctx.lineTo(q.x, q.y + depthAt(q, i - 1));
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+// Distant ridges: gradient-filled silhouettes with rim light, snowy summits and atmospheric haze.
+function ridgeLayer(pointsArr, offset, fillTop, fillBot, rimCol, snowLine, hazeAlpha, camX) {
+  const vis = pointsArr.filter((pt) => pt.x + offset > camX - 400 && pt.x + offset < camX + canvas.width + 400);
+  if (vis.length < 2) return;
+  const trace = () => {
+    ctx.beginPath();
+    ctx.moveTo(vis[0].x + offset, SEA_LEVEL_Y);
+    vis.forEach((pt) => ctx.lineTo(pt.x + offset, pt.y));
+    ctx.lineTo(vis[vis.length - 1].x + offset, SEA_LEVEL_Y);
+    ctx.closePath();
+  };
+  const g = ctx.createLinearGradient(0, 3200, 0, SEA_LEVEL_Y);
+  g.addColorStop(0, fillTop);
+  g.addColorStop(1, fillBot);
+  trace();
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.save();
+  trace();
+  ctx.clip();
+  // Snowcaps, then rim light on the sun-facing slopes
+  snowCap(vis, offset, snowLine, 320, "rgba(240, 247, 255, 0.95)", "rgba(185, 205, 228, 0.95)");
+  ctx.lineJoin = "round";
+  for (let i = 1; i < vis.length; i++) {
+    const a = vis[i - 1];
+    const b = vis[i];
+    ctx.strokeStyle = b.y < a.y ? rimCol : "rgba(0,0,0,0.25)";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(a.x + offset, a.y);
+    ctx.lineTo(b.x + offset, b.y);
+    ctx.stroke();
+  }
+  // Haze thickening toward the sea
+  const hz = ctx.createLinearGradient(0, 3600, 0, SEA_LEVEL_Y);
+  hz.addColorStop(0, `rgba(120, 150, 185, 0)`);
+  hz.addColorStop(1, `rgba(120, 150, 185, ${hazeAlpha})`);
+  ctx.fillStyle = hz;
+  ctx.fillRect(camX - 400, 3000, canvas.width + 800, SEA_LEVEL_Y - 3000);
+  ctx.restore();
+}
+
 function drawParallaxRidges(camX, camY) {
   const distant = terrain.distantRidges;
   if (!distant) return;
-
-  // Layer 1: Far Horizon Alpine Ridge (Parallax 0.18x)
-  if (distant.far && distant.far.length > 0) {
-    ctx.save();
-    const farOffset = camX * 0.82;
-    ctx.fillStyle = "#0c1826";
-    ctx.beginPath();
-    ctx.moveTo(camX - 200, SEA_LEVEL_Y);
-    distant.far.forEach((pt, i) => {
-      const rx = pt.x + farOffset;
-      if (i === 0) ctx.lineTo(rx, pt.y);
-      else ctx.lineTo(rx, pt.y);
-    });
-    ctx.lineTo(camX + canvas.width + 400, SEA_LEVEL_Y);
-    ctx.closePath();
-    ctx.fill();
-
-    // Soft atmospheric mist layer atop far ridge
-    const mistGrad = ctx.createLinearGradient(0, 4200, 0, SEA_LEVEL_Y);
-    mistGrad.addColorStop(0, "rgba(20, 45, 70, 0.35)");
-    mistGrad.addColorStop(1, "rgba(8, 20, 32, 0)");
-    ctx.fillStyle = mistGrad;
-    ctx.fillRect(camX - 200, 4100, canvas.width + 400, SEA_LEVEL_Y - 4100);
-    ctx.restore();
-  }
-
-  // Layer 2: Mid-Distance Mountain Ridge (Parallax 0.45x)
-  if (distant.mid && distant.mid.length > 0) {
-    ctx.save();
-    const midOffset = camX * 0.55;
-    ctx.fillStyle = "#12263a";
-    ctx.strokeStyle = "#1e3d5c";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(camX - 200, SEA_LEVEL_Y);
-    distant.mid.forEach((pt, i) => {
-      const rx = pt.x + midOffset;
-      if (i === 0) ctx.lineTo(rx, pt.y);
-      else ctx.lineTo(rx, pt.y);
-    });
-    ctx.lineTo(camX + canvas.width + 400, SEA_LEVEL_Y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Mid snow patches
-    ctx.fillStyle = "#8baac7";
-    distant.mid.forEach((pt) => {
-      if (pt.y < 3800) {
-        const rx = pt.x + midOffset;
-        ctx.beginPath();
-        ctx.moveTo(rx, pt.y);
-        ctx.lineTo(rx - 25, pt.y + 32);
-        ctx.lineTo(rx + 25, pt.y + 32);
-        ctx.closePath();
-        ctx.fill();
-      }
-    });
-    ctx.restore();
-  }
+  if (distant.far && distant.far.length > 0) ridgeLayer(distant.far, camX * 0.82, "#243850", "#101b28", "rgba(170, 200, 230, 0.35)", 3900, 0.5, camX);
+  if (distant.mid && distant.mid.length > 0) ridgeLayer(distant.mid, camX * 0.55, "#1a2a3c", "#0a121c", "rgba(170, 200, 230, 0.45)", 3650, 0.35, camX);
 }
 
 function drawClouds(camX, camY) {
@@ -1422,78 +1596,47 @@ function drawForegroundTerrain(camX, camY) {
 
   ctx.save();
 
-  // 1. Mountain Base Silhouette with Gradient
-  const mountainGrad = ctx.createLinearGradient(0, 3600, 0, SEA_LEVEL_Y);
-  mountainGrad.addColorStop(0, "#233344");
-  mountainGrad.addColorStop(0.5, "#182330");
-  mountainGrad.addColorStop(1, "#0f1720");
-  ctx.fillStyle = mountainGrad;
-  ctx.strokeStyle = "#4a6888";
-  ctx.lineWidth = 2.5;
-
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, SEA_LEVEL_Y);
-  points.forEach((p) => {
-    ctx.lineTo(p.x, p.y);
-  });
-  ctx.lineTo(points[points.length - 1].x, SEA_LEVEL_Y);
-  ctx.closePath();
+  // 1. Rock massif: world-anchored rock texture + depth shading
+  const trace = () => {
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, SEA_LEVEL_Y);
+    points.forEach((p) => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(points[points.length - 1].x, SEA_LEVEL_Y);
+    ctx.closePath();
+  };
+  trace();
+  ctx.fillStyle = patternOf(ctx, ROCK_TEX);
   ctx.fill();
-  ctx.stroke();
+  ctx.save();
+  trace();
+  ctx.clip();
+  const depth = ctx.createLinearGradient(0, 3400, 0, SEA_LEVEL_Y);
+  depth.addColorStop(0, "rgba(60, 90, 120, 0.15)");
+  depth.addColorStop(1, "rgba(3, 8, 14, 0.75)");
+  ctx.fillStyle = depth;
+  ctx.fillRect(camX - 100, 3000, canvas.width + 200, SEA_LEVEL_Y - 3000);
 
-  // 2. Geological Rock Strata & Diagonal Contour Striations
-  ctx.strokeStyle = "rgba(90, 130, 170, 0.15)";
-  ctx.lineWidth = 1.2;
-  for (let i = 0; i < points.length - 1; i++) {
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    if (p1.type !== "water" || p2.type !== "water") {
-      const segW = p2.x - p1.x;
-      if (segW > 100 && (p1.x > camX - 300 && p2.x < camX + canvas.width + 300)) {
-        for (let s = 1; s <= 3; s++) {
-          const frac = s / 4;
-          const sx = p1.x + segW * frac;
-          const sy = p1.y + (p2.y - p1.y) * frac + 30;
-          ctx.beginPath();
-          ctx.moveTo(sx - 35, sy + 15);
-          ctx.lineTo(sx + 35, sy - 15);
-          ctx.stroke();
-        }
-      }
-    }
+  // 2. Snowcaps on the high ridges, rim light on sunward slopes
+  const visPts = points.filter((p) => p.x > camX - 700 && p.x < camX + canvas.width + 700);
+  snowCap(visPts, 0, 4150, 260, "#f4f9ff", "#c9dbee");
+  ctx.lineJoin = "round";
+  for (let i = 0; i < visPts.length - 1; i++) {
+    const p1 = visPts[i];
+    const p2 = visPts[i + 1];
+    ctx.strokeStyle = p2.y < p1.y ? "rgba(180, 210, 240, 0.55)" : "rgba(0, 0, 0, 0.35)";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
   }
+  ctx.restore();
 
-  // 3. Faceted Crisp Snowcaps
-  points.forEach((p) => {
-    if (p.type === "snow" || p.y < 4200) {
-      // Lit snow facet (sun on right)
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x + 36, p.y + 48);
-      ctx.lineTo(p.x, p.y + 54);
-      ctx.closePath();
-      ctx.fill();
-
-      // Shadowed snow facet (left side)
-      ctx.fillStyle = "#d0e4f2";
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x - 36, p.y + 48);
-      ctx.lineTo(p.x, p.y + 54);
-      ctx.closePath();
-      ctx.fill();
-
-      // Snowcap border highlight
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(p.x - 36, p.y + 48);
-      ctx.lineTo(p.x, p.y);
-      ctx.lineTo(p.x + 36, p.y + 48);
-      ctx.stroke();
-    }
-  });
+  // 3. Crisp outline
+  trace();
+  ctx.strokeStyle = "rgba(120, 160, 200, 0.5)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
 
   // 4. Multi-Tiered Evergreen Pine Trees
   terrain.trees.forEach((t) => {
@@ -1996,6 +2139,31 @@ function drawMouseAimReticle(camX, camY) {
 }
 
 // ── Vector Aircraft Renderers ──
+// Clip to the hull path that was just filled and add a lit gradient, panel lines and a glint.
+function shadeHull() {
+  ctx.save();
+  ctx.clip();
+  const g = ctx.createLinearGradient(0, -26, 0, 26);
+  g.addColorStop(0, "rgba(255, 255, 255, 0.3)");
+  g.addColorStop(0.45, "rgba(255, 255, 255, 0.05)");
+  g.addColorStop(1, "rgba(0, 0, 0, 0.5)");
+  ctx.fillStyle = g;
+  ctx.fillRect(-42, -32, 84, 64);
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(-26, 0);
+  ctx.lineTo(26, 0);
+  for (const px of [-14, -4, 8]) {
+    ctx.moveTo(px, -26);
+    ctx.lineTo(px, 26);
+  }
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+  ctx.fillRect(2, -4, 12, 1);
+  ctx.restore();
+}
+
 function drawPlayerAircraft(x, y, angle, type, afterburning, pitchInput, customColor = null) {
   const craft = AIRCRAFT_ROSTER[type] || AIRCRAFT_ROSTER.f22;
   const strokeColor = customColor || craft.color;
@@ -2006,6 +2174,7 @@ function drawPlayerAircraft(x, y, angle, type, afterburning, pitchInput, customC
 
   // 1. Afterburner Shock Plumes & Diamonds
   if (afterburning) {
+    glow(ctx, -30, 0, 26, "#ff8a3d", 0.55);
     // Outer flame cone
     ctx.fillStyle = "#ff6600";
     ctx.beginPath();
@@ -2036,7 +2205,7 @@ function drawPlayerAircraft(x, y, angle, type, afterburning, pitchInput, customC
   }
 
   // 2. Bespoke Silhouette by Aircraft Type
-  ctx.fillStyle = "#1b2430";
+  ctx.fillStyle = "#2c3a4c";
   ctx.strokeStyle = strokeColor;
   ctx.lineWidth = 1.8;
 
@@ -2060,6 +2229,7 @@ function drawPlayerAircraft(x, y, angle, type, afterburning, pitchInput, customC
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
 
     // Gold tinted stealth canopy
     ctx.fillStyle = "#00f0ff";
@@ -2088,6 +2258,7 @@ function drawPlayerAircraft(x, y, angle, type, afterburning, pitchInput, customC
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
 
     // Cockpit
     ctx.fillStyle = "#38ef7d";
@@ -2117,6 +2288,7 @@ function drawPlayerAircraft(x, y, angle, type, afterburning, pitchInput, customC
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
 
     // Twin High-Mounted Turbofan Nacelles
     ctx.fillStyle = "#2d3748";
@@ -2147,6 +2319,7 @@ function drawPlayerAircraft(x, y, angle, type, afterburning, pitchInput, customC
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
 
     // Large delta vertical tail fin
     ctx.fillStyle = strokeColor;
@@ -2173,6 +2346,7 @@ function drawPlayerAircraft(x, y, angle, type, afterburning, pitchInput, customC
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
 
     // Dual Ramjet Nacelles with Spike Cones
     ctx.fillStyle = "#ff0844";
@@ -2201,7 +2375,7 @@ function drawEnemyAircraft(e) {
   ctx.translate(e.x, e.y);
   ctx.rotate(e.angle);
 
-  ctx.fillStyle = "#221a22";
+  ctx.fillStyle = "#3a2a30";
   ctx.strokeStyle = e.color;
   ctx.lineWidth = 1.8;
 
@@ -2221,6 +2395,7 @@ function drawEnemyAircraft(e) {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
 
     // Nose intake shock cone
     ctx.fillStyle = e.color;
@@ -2245,6 +2420,7 @@ function drawEnemyAircraft(e) {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
 
     // Twin engine pods under wings
     ctx.fillStyle = "#555";
@@ -2274,6 +2450,7 @@ function drawEnemyAircraft(e) {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
 
     ctx.fillStyle = "#6c5ce7";
     ctx.beginPath();
@@ -2297,6 +2474,7 @@ function drawEnemyAircraft(e) {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
 
     // Twin Crimson Shock Cones
     ctx.fillStyle = "#ff0000";
@@ -2322,6 +2500,7 @@ function drawEnemyAircraft(e) {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    shadeHull();
   }
 
   // Bandit Health Bar

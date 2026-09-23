@@ -47,6 +47,7 @@ export function initShell({ crumb = null, showGameLinks = true, howToPlay = null
   crt.setAttribute("aria-hidden", "true");
 
   body.prepend(skip, cosmos, crt);
+  if (body.dataset.page === "game") setupFullscreen();
 
   const online = String(liveGames().length).padStart(2, "0");
   const total = String(games.length).padStart(2, "0");
@@ -820,8 +821,18 @@ export function toast(input = {}) {
   const stack = document.querySelector(".toast-stack");
   if (!stack) return null;
 
+  // The same message already on screen just gets its timer refreshed instead of stacking again
+  const key = `${title} ${body}`;
+  const existing = [...stack.children].find((c) => c.dataset.toastKey === key);
+  if (existing && typeof existing._restart === "function") return existing._restart(duration);
+
+  // Keep the stack short (games fire lots of these): the oldest message makes room
+  const maxVisible = document.body?.dataset.page === "game" ? 3 : 5;
+  while (stack.children.length >= maxVisible) stack.firstElementChild.remove();
+
   const el = document.createElement("div");
   el.className = "toast";
+  el.dataset.toastKey = key;
   el.innerHTML = `
     <span class="toast__icon">${icon(iconName)}</span>
     <span>
@@ -831,12 +842,17 @@ export function toast(input = {}) {
   `;
   stack.appendChild(el);
 
-  const ms = Number.isFinite(duration) ? Math.min(Math.max(0, duration), 2 ** 31 - 1) : 3400;
-  const timer = setTimeout(dismiss, ms);
+  const toMs = (d) => (Number.isFinite(d) ? Math.min(Math.max(0, d), 2 ** 31 - 1) : 3400);
+  let timer = setTimeout(dismiss, toMs(duration));
   function dismiss() {
     clearTimeout(timer);
     if (el.isConnected) el.remove();
   }
+  el._restart = (d) => {
+    clearTimeout(timer);
+    timer = setTimeout(dismiss, toMs(d));
+    return dismiss;
+  };
 
   return dismiss;
 }
@@ -984,4 +1000,42 @@ export function confirmDialog({
     ],
   });
   return result.then((value) => value === true);
+}
+
+
+// Every game page gets a FULLSCREEN toggle in its stage bar. It fullscreens the game's <main> (canvas,
+// HUD and controls together); Esc or the button leaves again. Pages with their own toggle keep it.
+function setupFullscreen() {
+  if (document.querySelector("[data-fullscreen-toggle]")) return;
+  const target = document.getElementById("main") || document.querySelector("main");
+  const el = document.documentElement;
+  const canFs = !!(el.requestFullscreen || el.webkitRequestFullscreen);
+  if (!target || !canFs) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "hbtn hbtn--fullscreen";
+  btn.dataset.fullscreenToggle = "";
+  btn.title = "Fullscreen (Esc to exit)";
+  const current = () => document.fullscreenElement || document.webkitFullscreenElement;
+  const sync = () => {
+    const on = current() === target;
+    btn.textContent = on ? "EXIT FULLSCREEN" : "⛶ FULLSCREEN";
+    btn.setAttribute("aria-pressed", String(on));
+    // Canvas games size themselves from the viewport; nudge them to re-measure
+    window.dispatchEvent(new Event("resize"));
+  };
+  btn.addEventListener("click", () => {
+    if (current()) (document.exitFullscreen || document.webkitExitFullscreen).call(document)?.catch?.(() => {});
+    else (target.requestFullscreen || target.webkitRequestFullscreen).call(target)?.catch?.(() => {});
+    btn.blur();
+  });
+  document.addEventListener("fullscreenchange", sync);
+  document.addEventListener("webkitfullscreenchange", sync);
+  sync();
+  const meta = document.querySelector(".stage-bar__meta");
+  if (meta) meta.append(btn);
+  else {
+    btn.classList.add("hbtn--fullscreen-float");
+    target.prepend(btn);
+  }
 }

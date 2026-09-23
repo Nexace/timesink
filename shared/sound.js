@@ -467,13 +467,22 @@ export const sfx = {
   },
 
   /**
-   * Logarithmic scale warp / zoom sweep (Scale Jump)
+   * Logarithmic scale warp / zoom sweep
    */
   warp: (up = true) => {
     const f1 = up ? 150 : 800;
     const f2 = up ? 800 : 150;
     blip({ freq: f1, freq2: f2, dur: 0.15, type: "sine", gain: 0.05 });
     pulse({ freq: f1, freq2: f2, dur: 0.14, duty: 0.25, gain: 0.035 });
+  },
+
+  /** Big victory beat (boss down, island taken) — the win arpeggio. */
+  fanfare: () => sfx.win(),
+
+  /** Soft two-step chirp for page navigation (scroll cues, section jumps). */
+  nav: () => {
+    blip({ freq: 660, dur: 0.05, type: "square", gain: 0.03 });
+    blip({ freq: 990, dur: 0.07, type: "square", gain: 0.03, delay: 0.05 });
   },
 
   /**

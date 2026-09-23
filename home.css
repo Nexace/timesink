@@ -404,7 +404,7 @@
     inset -3px -3px 4px rgba(25, 15, 2, 0.95);
 }
 
-/* Scale Jump / Ghost Lap - Slate Cyan Anodized Metallic Border */
+/* Ghost Lap - Slate Cyan Anodized Metallic Border */
 .card[data-accent="cyan"] .cartridge-chassis {
   background:
     radial-gradient(ellipse at 50% 0%, rgba(0, 240, 255, 0.2) 0%, transparent 60%),
@@ -810,10 +810,30 @@
 }
 
 .card__thumb-inner {
+  position: relative;
   width: 100%;
   height: 100%;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+}
+
+/* Gameplay capture laid over the drawn motif (which stays as the fallback) */
+.card__cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: auto;
+}
+.cartridge-screen__bezel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 2px, rgba(0, 0, 0, 0.16) 2px 3px),
+    radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
 }
 
 .card__radar {

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>GHOST LAP — SYS://TIMESINK.NET</title>
-    <meta name="description" content="Neon vector top-down time-trial racer with ghost replays, live delta, and track editor." />
+    <meta name="description" content="Top-down Formula racing on all 24 real calendar circuits: 10-car Grands Prix, 1v1 duels against six bot difficulties, and ghost time trials with track limits, DRS and sector timing." />
     <meta name="theme-color" content="#0B0E0B" />
     <link rel="stylesheet" href="/shared/tokens.css" />
     <link rel="stylesheet" href="/shared/base.css" />
@@ -15,156 +15,31 @@
     <main id="main" class="wrap game-screen">
       <div class="stage-bar">
         <a class="backlink" href="/">[&lt; ESCAPE TO DIRECTORY]</a>
-        <h1 class="stage-bar__title">GHOST LAP // NEON VECTOR RACER</h1>
+        <h1 class="stage-bar__title">GHOST LAP <span class="gl-sub">// GRAND PRIX</span></h1>
         <span class="stage-bar__meta">
-          <span>TRACK: <select id="track-select">
-            <optgroup label="F1 2025 CALENDAR CIRCUITS">
-              <option value="australia">01. AUSTRALIA (ALBERT PARK)</option>
-              <option value="china">02. CHINA (SHANGHAI)</option>
-              <option value="suzuka">03. JAPAN (SUZUKA)</option>
-              <option value="bahrain">04. BAHRAIN (SAKHIR)</option>
-              <option value="saudiarabia">05. SAUDI ARABIA (JEDDAH)</option>
-              <option value="miami">06. MIAMI (USA)</option>
-              <option value="imola">07. EMILIA-ROMAGNA (IMOLA)</option>
-              <option value="monaco">08. MONACO (CIRCUIT DE MONACO)</option>
-              <option value="spain">09. SPAIN (BARCELONA)</option>
-              <option value="montreal">10. CANADA (MONTREAL)</option>
-              <option value="redbullring">11. AUSTRIA (RED BULL RING)</option>
-              <option value="silverstone">12. GREAT BRITAIN (SILVERSTONE)</option>
-              <option value="spa">13. BELGIUM (SPA-FRANCORCHAMPS)</option>
-              <option value="hungary">14. HUNGARY (HUNGARORING)</option>
-              <option value="netherlands">15. NETHERLANDS (ZANDVOORT)</option>
-              <option value="monza" selected>16. ITALY (MONZA)</option>
-              <option value="azerbaijan">17. AZERBAIJAN (BAKU)</option>
-              <option value="singapore">18. SINGAPORE (MARINA BAY)</option>
-              <option value="usa">19. USA (AUSTIN / COTA)</option>
-              <option value="mexico">20. MEXICO (MEXICO CITY)</option>
-              <option value="interlagos">21. BRAZIL (INTERLAGOS)</option>
-              <option value="lasvegas">22. LAS VEGAS (STRIP CIRCUIT)</option>
-              <option value="qatar">23. QATAR (LUSAIL)</option>
-              <option value="abudhabi">24. ABU DHABI (YAS MARINA)</option>
-            </optgroup>
-            <optgroup label="CUSTOM CIRCUIT BUILDER">
-              <option value="custom">CUSTOM TRACK (EDITOR)</option>
-            </optgroup>
-          </select></span>
-          <button type="button" class="btn btn--ghost btn--sm" id="btn-toggle-racing-line">RACING LINE: [ON]</button>
-          <button type="button" class="btn btn--ghost btn--sm" id="btn-controls">CONTROLS</button>
-          <button type="button" class="btn btn--ghost btn--sm" id="btn-editor">TRACK EDITOR</button>
+          <span>SESSION T+<b data-session-clock>00:00</b></span>
         </span>
       </div>
 
-      <div class="gl-layout">
-        <section class="gl-canvas-card">
-          <div class="gl-hud">
-            <div class="hud-item">
-              <span class="hud-label">SPEED</span>
-              <span class="hud-val hud-speed" id="hud-speed">000 KM/H</span>
-            </div>
-            <div class="hud-item">
-              <span class="hud-label">BRAKE / GEAR</span>
-              <span class="hud-val hud-brake-status" id="hud-brake-status">READY</span>
-            </div>
-            <div class="hud-item">
-              <span class="hud-label">CURRENT LAP</span>
-              <span class="hud-val" id="hud-lap-time">00:00.000</span>
-            </div>
-            <div class="hud-item">
-              <span class="hud-label">VS GHOST</span>
-              <span class="hud-val" id="hud-delta">--.---</span>
-            </div>
-            <div class="hud-item">
-              <span class="hud-label">BEST LAP</span>
-              <span class="hud-val" id="hud-best-time">--:--.---</span>
-            </div>
-            <div class="hud-item">
-              <span class="hud-label">SESSION LAP</span>
-              <span class="hud-val" id="hud-lap-count">1 / 3</span>
-            </div>
+      <div class="gl-stage" id="stage">
+        <canvas id="race-canvas" width="1760" height="800" aria-label="Race view" tabindex="0"></canvas>
+        <div class="gl-touch" id="touch-pad" aria-hidden="true">
+          <div class="gl-touch__side">
+            <button type="button" data-key="left">&#9664;</button>
+            <button type="button" data-key="right">&#9654;</button>
           </div>
-
-          <div class="gl-canvas-wrap">
-            <canvas id="race-canvas" width="800" height="500"></canvas>
+          <div class="gl-touch__side">
+            <button type="button" data-key="drs">DRS</button>
+            <button type="button" data-key="ers">ERS</button>
+            <button type="button" data-key="brake">BRK</button>
+            <button type="button" data-key="up">GAS</button>
           </div>
-
-          <div class="gl-controls-hint" id="gl-controls-hint">
-            <span>[W / UP] ACCEL</span>
-            <span>[S / DOWN] BRAKE / REV</span>
-            <span>[SPACE] HANDBRAKE DRIFT</span>
-            <span>[R] RESTART</span>
-          </div>
-        </section>
-
-        <!-- Track Editor Panel (Hidden by default) -->
-        <aside class="gl-editor-aside" id="editor-aside" style="display: none;">
-          <div class="panel">
-            <div class="panel__head">
-              <h2 class="panel__title">TRACK EDITOR // CIRCUIT BUILDER</h2>
-              <button type="button" class="btn btn--ghost btn--sm guide-toggle-btn" id="btn-toggle-guide">HOW TO BUILD A TRACK ?</button>
-            </div>
-            <div class="panel__body editor-body">
-              <div class="editor-status-bar">
-                <span class="editor-points-badge" id="editor-points-count">NODES: [0 / MIN 4]</span>
-                <span class="editor-track-status" id="editor-track-status">Click canvas to place circuit nodes</span>
-              </div>
-
-              <!-- Track Building Guide (collapsible) -->
-              <div class="track-guide" id="track-guide">
-                <div class="track-guide__header">
-                  <span class="guide-title">HOW TO BUILD YOUR OWN TRACK</span>
-                  <span class="guide-sub">ARCHITECT A HIGH-SPEED NEON CIRCUIT IN 4 EASY STEPS</span>
-                </div>
-                <div class="guide-steps-grid">
-                  <div class="guide-step">
-                    <div class="step-num">01</div>
-                    <div class="step-content">
-                      <h4>SHAPE THE LOOP</h4>
-                      <p>Click around the canvas in order (clockwise or counter-clockwise). Ghost Lap links each point into a continuous glowing asphalt ribbon. You need at least <strong>4 nodes</strong> to form a closed racing loop.</p>
-                    </div>
-                  </div>
-                  <div class="guide-step">
-                    <div class="step-num">02</div>
-                    <div class="step-content">
-                      <h4>START / FINISH GRID</h4>
-                      <p><strong>Node #1</strong> automatically becomes the Start/Finish line (marked in gold). The car spawns facing toward <strong>Node #2</strong>, so make your first two points a straight launch runway!</p>
-                    </div>
-                  </div>
-                  <div class="guide-step">
-                    <div class="step-num">03</div>
-                    <div class="step-content">
-                      <h4>CHECKPOINT SECTORS</h4>
-                      <p>Checkpoints are auto-generated perpendicular to each sector (green gates). Complete all sectors in sequence to log valid lap times and challenge your personal ghost car.</p>
-                    </div>
-                  </div>
-                  <div class="guide-step">
-                    <div class="step-num">04</div>
-                    <div class="step-content">
-                      <h4>TEST &amp; REFINE</h4>
-                      <p>Use <strong>[UNDO POINT]</strong> to correct mistakes without starting over. Click <strong>[TEST DRIVE]</strong> to drop in and test apex drift lines, then click <strong>[SAVE &amp; RACE]</strong>!</p>
-                    </div>
-                  </div>
-                </div>
-                <div class="guide-tip">
-                  <span class="tip-badge">PRO TIP</span>
-                  <span>Avoid crossing track lines over each other. Wide sweeping corners before long straights produce the fastest lap records!</span>
-                </div>
-              </div>
-
-              <div class="editor-btn-row">
-                <button type="button" class="btn btn--sm" id="btn-undo-track">UNDO POINT</button>
-                <button type="button" class="btn btn--sm" id="btn-clear-track">CLEAR ALL</button>
-                <button type="button" class="btn btn--secondary btn--sm" id="btn-test-drive">TEST DRIVE</button>
-                <button type="button" class="btn btn--primary btn--sm" id="btn-save-track">SAVE &amp; RACE</button>
-              </div>
-
-              <div class="editor-btn-row">
-                <button type="button" class="btn btn--ghost btn--sm" id="btn-export-track">EXPORT CODE</button>
-                <button type="button" class="btn btn--ghost btn--sm" id="btn-import-track">IMPORT CODE</button>
-              </div>
-            </div>
-          </div>
-        </aside>
+        </div>
+        <div class="gl-overlay" id="overlay" role="dialog" aria-modal="false" aria-label="Ghost Lap menu"></div>
+        <p class="sr-only" aria-live="polite" id="race-announcer"></p>
       </div>
+
+      <div class="gl-controls-hint" id="gl-controls-hint"></div>
 
       <!-- Controls & Settings Modal -->
       <div class="gl-modal" id="modal-controls" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modal-controls-title">
@@ -194,7 +69,16 @@
                   <span class="setting-label">STEERING SENSITIVITY:</span>
                   <span class="slider-val" id="val-steer-sens">100%</span>
                 </div>
-                <input type="range" id="input-steer-sens" min="50" max="160" value="100" step="5" />
+                <input type="range" id="input-steer-sens" min="1" max="160" value="100" step="1" />
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-header">
+                  <span class="setting-label">ACCELERATION SENSITIVITY:</span>
+                  <span class="slider-val" id="val-accel-sens">60%</span>
+                </div>
+                <input type="range" id="input-accel-sens" min="25" max="100" value="60" step="5" />
+                <p class="slider-note">Lower = the throttle builds up gently and wheelspin is held back out of slow corners. Top speed is unchanged.</p>
               </div>
 
               <div class="slider-group">
@@ -207,10 +91,26 @@
 
               <div class="slider-group">
                 <div class="slider-header">
-                  <span class="setting-label">DRIFT ASSIST / GRIP:</span>
-                  <span class="slider-val" id="val-drift-assist">ON</span>
+                  <span class="setting-label">RACING LINE GUIDE:</span>
+                  <span class="slider-val" id="val-racing-line">ON</span>
                 </div>
-                <button type="button" class="btn btn--sm btn--toggle" id="btn-toggle-drift">DRIFT ASSIST: [ON]</button>
+                <button type="button" class="btn btn--sm btn--toggle" id="btn-toggle-line">RACING LINE: [ON]</button>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-header">
+                  <span class="setting-label">PLAYER MARKER RING:</span>
+                  <span class="slider-val" id="val-player-ring">OFF</span>
+                </div>
+                <button type="button" class="btn btn--sm btn--toggle" id="btn-toggle-ring">PLAYER RING: [OFF]</button>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-header">
+                  <span class="setting-label">SCREEN EDGE SHADING:</span>
+                  <span class="slider-val" id="val-edge-shade">ON</span>
+                </div>
+                <button type="button" class="btn btn--sm btn--toggle" id="btn-toggle-shade">EDGE SHADING: [ON]</button>
               </div>
             </div>
 

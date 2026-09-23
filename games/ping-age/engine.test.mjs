@@ -147,6 +147,6 @@ describe("Ping Age Engine Logic & Calculations", () => {
 
     assert.ok(text.includes("DIAL-UP NATIVE"), "Share card must contain era name");
     assert.ok(text.includes("ERA PURIST"), "Share card must contain badge");
-    assert.ok(text.includes("timesink.net"), "Share card must contain link");
+    assert.ok(text.includes("timesink.vercel.app/games/ping-age"), "Share card must contain link");
   });
 });

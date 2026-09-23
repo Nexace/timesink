@@ -152,8 +152,9 @@ export function updateVehiclePhysics(car, input, dt, options = {}) {
   const curForward = car.vx * forwardDirX + car.vy * forwardDirY;
   const curLateral = car.vx * normalDirX + car.vy * normalDirY;
 
-  const updatedForward = curForward * friction;
-  const updatedLateral = curLateral * lateralFriction;
+  const frameScale = dt * 60;
+  const updatedForward = curForward * Math.pow(friction, frameScale);
+  const updatedLateral = curLateral * Math.pow(lateralFriction, frameScale);
 
   car.vx = forwardDirX * updatedForward + normalDirX * updatedLateral;
   car.vy = forwardDirY * updatedForward + normalDirY * updatedLateral;

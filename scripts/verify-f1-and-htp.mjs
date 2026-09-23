@@ -157,7 +157,7 @@ async function main() {
 
   // --- 3. Test How to Play on other games ---
   console.log('\n--- 3. Testing How to Play on other games ---');
-  const sampleGames = ['mars-base', 'rootkit', 'redlight', 'scale-jump'];
+  const sampleGames = ['mars-base', 'rootkit', 'redlight'];
   for (const slug of sampleGames) {
     await page.goto(`${BASE_URL}/games/${slug}/`, { waitUntil: 'networkidle0' });
     await new Promise(r => setTimeout(r, 400));

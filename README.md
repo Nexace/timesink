@@ -30,31 +30,37 @@ absolute paths (`/shared/…`, `/games/…`) are used throughout.
 
 ```
 index.html / index.js / home.css   directory: boot hero, filters, game grid
-game-template.html                 copy-paste stage frame for new games
 404.html / 404.css                 signal-lost page
-shared/
+assets/           fonts, backgrounds, social images, covers/ (card art)
+shared/           everything the games have in common
   tokens.css      terminal design tokens (colors, fonts, CRT, phosphor)
   base.css        reset, HUD shell, filters, buttons, stage, console, modal
   registry.js     the games list — the single source of truth
-  shell.js        injects HUD/footer, clock, toggles, toasts, modals
+  shell.js        injects HUD/footer, clock, toggles, toasts, modals, fullscreen
   storage.js      namespaced localStorage, save export/import codes
-  sound.js        WebAudio synth blips, muted by default
+  scores.js       best-score records per game
+  save.js         save slots and score helpers for canvas games
+  sound.js        WebAudio synth blips (the cabinet SFX toggle and volume)
+  audio.js        extra synth voices: tones, lasers, explosions, engine hum
+  gfx.js          canvas helpers: textures, sprites, particles, lighting
+  engine.js       game loop, keyboard/touch input, math helpers, A*
+  rule-engine.js  escalating rule checker (Diet Game, Resume Game)
   rng.js          seeded PRNG (mulberry32) + daily seed helpers
   icons.js        inline SVG icon set
   format.js       number formatting (K/M/B, deltas, costs)
-games/<slug>/
+games/<slug>/     one folder per game, holding everything that game needs
   index.html      page shell + meta
   game.css        per-game styles
-  data.js         balance tables (resources, buildings, events)
-  engine.js       PURE simulation — no DOM, deterministic
-  ui.js           DOM rendering + input, no game logic
-  engine.test.mjs assertions runnable with plain `node`
+  *.js            game code (pure engine/data modules + a browser entry file)
+  *.test.mjs      assertions runnable with plain `node`
+scripts/
+  capture-covers.mjs   regenerates assets/covers (`npm run covers`)
 ```
 
 ## Adding a game
 
-1. Copy `game-template.html` to `games/<slug>/index.html` and replace the
-   `GAME_*` slots (title, tagline, slug, accent, instructions, keys).
+1. Copy an existing game's `index.html` (e.g. `games/diet-game/index.html`)
+   to `games/<slug>/index.html` and change the title, meta, accent and keys.
 2. Add `game.css`, plus `data.js` / `engine.js` / `ui.js` following the
    Mars Base shape: pure engine + thin UI + data tables.
 3. Add one entry to `games` in `shared/registry.js`
@@ -127,7 +133,7 @@ tests/         unit suites + a scripted bot that plays Act I and drives the rove
 - Saves live under `mars-base-campaign`, `mars-base-endless`, `mars-base-daily`
   (+ a dawn checkpoint for campaign deaths). The old turn-based save key is cleared
   on first load with a one-time notice.
-- Test hook: `window.__marsBase` (used by `scripts/verify-mars-base.mjs`).
+- Test hook: `window.__marsBase` for automated browser checks.
 
 ## 6 New Arcade Games
 

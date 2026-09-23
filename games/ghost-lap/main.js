@@ -1,8 +1,8 @@
 import { initShell, escapeHtml, toast } from "/shared/shell.js";
 import { sfx } from "/shared/sound.js";
 import { saveScore } from "/shared/scores.js";
-import { setEngineHum } from "/src/core/audio.js";
-import { vignette, glow } from "/src/core/gfx.js";
+import { setEngineHum } from "/shared/audio.js";
+import { vignette, glow } from "/shared/gfx.js";
 import { CIRCUITS } from "./circuits.js";
 import { buildTrack, createRace, stepRace, classify, aiInput, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS } from "./race.js";
 import { createWorld, drawCar, createMinimap } from "./render.js";

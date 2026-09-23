@@ -1,6 +1,6 @@
 // Ghost Lap world renderer: the circuit and its surroundings are generated once per track and
 // painted into 512px tiles on demand (LRU cached), so huge real-scale maps stay cheap per frame.
-import { makeCanvas, mulberry32, noiseTile, patternOf, glow, shade, rgba } from "/src/core/gfx.js";
+import { makeCanvas, mulberry32, noiseTile, patternOf, glow, shade, rgba } from "/shared/gfx.js";
 
 const TILE = 512;
 const MAX_TILES = 72;

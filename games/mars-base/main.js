@@ -2,7 +2,7 @@ import { initShell, toast, openModal, confirmDialog, escapeHtml, setStreak, getS
 import { saveScore } from "../../shared/scores.js";
 import { createStore, createPrefStore, exportCode, importCode } from "../../shared/storage.js";
 import { dailySeedKey } from "../../shared/rng.js";
-import { createInputManager } from "../../src/core/engine.js";
+import { createInputManager } from "../../shared/engine.js";
 import { DT, SPEEDS, MAX_TICKS_PER_FRAME, TICK_RATE, REACH, DAILY_SCORE_SOL } from "./data/balance.js";
 import { itemById } from "./data/items.js";
 import { structById } from "./data/structures.js";
@@ -1143,7 +1143,7 @@ if (params.get("mode") === "daily") newDaily();
 else renderTitle();
 requestAnimationFrame(frame);
 
-// Debug/test hook (used by scripts/verify-mars-base.mjs).
+// Debug/test hook for automated browser checks.
 window.__marsBase = {
   get game() {
     return g;

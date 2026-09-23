@@ -133,7 +133,7 @@ export const games = [
       steps: [
         "Pick a mode, a circuit, the lap count and the AI level (Noob to Impossible, or Mixed). A Grand Prix starts with a one-lap qualifying session for your grid slot, or skip it for a random grid.",
         "Don't touch the throttle until the five red lights go out: holding it early locks the throttle until you let go.",
-        "Corners have real grip limits: brake in a straight line, because kerbs and grass cost grip and speed. Running clearly wide gives you five warnings, then 3 second penalties. Cutting across the inside of a corner costs 2 seconds and deletes the lap.",
+        "Corners have real grip limits: brake in a straight line, because kerbs and grass cost grip and speed. Stewards are lenient but fair: kerbs are yours, and running wide only counts if the whole car goes past the kerb and you keep your speed (five warnings, then 3 second penalties). Cutting across the inside of a corner is a warning the first time, then +2 seconds. Being pushed off by another car never counts, and any offence deletes that lap's time.",
         "Within a second of the car ahead at the DRS detection line, you can open DRS once you enter the zone for extra top speed; tuck into a slipstream for a tow.",
         "ERS: braking charges the battery. Hold ERS for a power boost anywhere except while DRS is open. You can only deploy 60% of the battery per lap, and braking recovers at most 55%, so save it for corner exits, attacks and defending."
       ],

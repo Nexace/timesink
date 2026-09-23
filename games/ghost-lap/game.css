@@ -239,6 +239,26 @@ main.wrap.game-screen {
   background: var(--accent, #0088ff);
   border-color: var(--accent, #0088ff);
 }
+.gl-chip:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.gl-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+}
+.gl-stepper .gl-chip {
+  min-width: 26px;
+}
+.gl-laps-val {
+  min-width: 64px;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 8px;
+  color: #ffd400;
+}
 
 .gl-res {
   width: 100%;

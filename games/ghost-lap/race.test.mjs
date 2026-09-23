@@ -53,11 +53,12 @@ describe("Ghost Lap race simulation", () => {
     for (let k = 1; k < times.length; k++) assert.ok(times[k] < times[k - 1], `${DIFFICULTY_ORDER[k]} should beat ${DIFFICULTY_ORDER[k - 1]}`);
   });
 
-  it("is lenient on track limits: brief kerb hops are free, then five warnings before 3s penalties", () => {
+  it("is lenient but fair on track limits: kerb hops, no-advantage trips and being pushed are free", () => {
     const race = createRace({ track, mode: "gp", laps: 3, seed: 4 });
     run(race, 8);
     const p = race.player;
-    const excursion = (holdSteps) => {
+    // Hold the whole car past the kerb for a while, then rejoin at `backSpeed` (px/s)
+    const excursion = (holdSteps, { backSpeed = 500, hit = false } = {}) => {
       const i = p.idx;
       const out = [];
       for (let k = 0; k < holdSteps; k++) {
@@ -65,18 +66,27 @@ describe("Ghost Lap race simulation", () => {
         p.y = track.path[i][1] + track.nor[i][1] * (TRACK_WIDTH / 2 + LIMITS.margin + 20);
         p.vx = track.tan[i][0] * 500;
         p.vy = track.tan[i][1] * 500;
+        if (hit) p.lastHit = race.t;
         stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
         out.push(...race.events.filter((e) => e.type === "limits"));
       }
       p.x = track.path[i][0];
       p.y = track.path[i][1];
+      p.vx = track.tan[i][0] * backSpeed;
+      p.vy = track.tan[i][1] * backSpeed;
       stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
+      out.push(...race.events.filter((e) => e.type === "limits"));
+      if (hit) p.lastHit = -9;
       return out;
     };
     // A split-second over the line doesn't count
     assert.equal(excursion(10).length, 0);
+    // Out long enough, but it came back much slower: no advantage, no strike
+    assert.equal(excursion(60, { backSpeed: 250 }).length, 0);
+    // Shoved off by contact: not the driver's fault
+    assert.equal(excursion(60, { hit: true }).length, 0);
     assert.equal(p.strikes, 0);
-    // Staying out does: five warnings, then the stewards act
+    // Running wide and keeping the speed does count: five warnings, then the stewards act
     const events = [];
     for (let k = 0; k < LIMITS.warnings + 2; k++) events.push(...excursion(60));
     assert.equal(p.strikes, LIMITS.warnings + 2);
@@ -143,32 +153,66 @@ describe("Ghost Lap race simulation", () => {
     assert.ok(cornerSpeed(200, 1.1) > cornerSpeed(200, 0.9));
   });
 
-  it("cutting a corner on the inside costs 2 seconds and deletes the lap", () => {
+  it("cutting a corner: first one is a warning, then +2 s, and a push onto the inside is free", () => {
     const race = createRace({ track, mode: "gp", laps: 3, seed: 9 });
     run(race, 8);
     const p = race.player;
-    // Find a proper corner and drag the car across its inside, off the road, for a good stretch
-    let i0 = 0;
-    for (let i = 0; i < track.n; i++) if (Math.abs(track.curv[i]) > Math.abs(track.curv[i0])) i0 = i;
-    const inside = Math.sign(track.curv[i0]);
-    const cutEvents = [];
-    for (let k = -12; k <= 12; k++) {
-      const i = (i0 + k + track.n) % track.n;
-      p.x = track.path[i][0] + track.nor[i][0] * inside * (TRACK_WIDTH / 2 + 40);
-      p.y = track.path[i][1] + track.nor[i][1] * inside * (TRACK_WIDTH / 2 + 40);
-      stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
-      cutEvents.push(...race.events.filter((e) => e.type === "cut"));
+    // Find a long, steady corner and drive the car across its inside, off the road, at 300 px/s:
+    // it covers ~10 px of track per frame while only driving 2.5 px, a clear shortcut
+    let i0 = -1;
+    let best = 0;
+    for (let i = 20; i < track.n - 20; i++) {
+      const sg = Math.sign(track.curv[i]);
+      let sum = 0;
+      let steady = true;
+      for (let k = -14; k <= 14; k++) {
+        const c = track.curv[i + k];
+        if (Math.sign(c) !== sg || 1 / Math.abs(c) < 120) steady = false;
+        sum += Math.abs(c);
+      }
+      if (steady && sum > best) {
+        best = sum;
+        i0 = i;
+      }
     }
-    const back = (i0 + 13) % track.n;
-    p.x = track.path[back][0];
-    p.y = track.path[back][1];
-    stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
-    cutEvents.push(...race.events.filter((e) => e.type === "cut"));
-    assert.ok(cutEvents.length >= 1);
-    assert.equal(cutEvents[0].penalty, CUT_PENALTY);
-    assert.equal(p.penalty % CUT_PENALTY, 0);
-    assert.ok(p.penalty >= CUT_PENALTY);
+    assert.ok(i0 > 0, "needs a sweeping corner");
+    const inside = Math.sign(track.curv[i0]);
+    const cut = ({ hit = false } = {}) => {
+      // Line the car up on the kerb before the cut so the only progress counted is the shortcut
+      const s0 = i0 - 9;
+      p.x = track.path[s0][0];
+      p.y = track.path[s0][1];
+      stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
+      const out = [];
+      for (let k = -8; k <= 8; k++) {
+        const i = (i0 + k + track.n) % track.n;
+        p.x = track.path[i][0] + track.nor[i][0] * inside * (TRACK_WIDTH / 2 + 30);
+        p.y = track.path[i][1] + track.nor[i][1] * inside * (TRACK_WIDTH / 2 + 30);
+        p.vx = track.tan[i][0] * 300;
+        p.vy = track.tan[i][1] * 300;
+        if (hit) p.lastHit = race.t;
+        stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
+        out.push(...race.events.filter((e) => e.type === "cut"));
+      }
+      const back = (i0 + 9) % track.n;
+      p.x = track.path[back][0];
+      p.y = track.path[back][1];
+      stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
+      out.push(...race.events.filter((e) => e.type === "cut"));
+      p.lastHit = -9;
+      return out;
+    };
+    assert.equal(cut({ hit: true }).length, 0);
+    assert.equal(p.penalty, 0);
+    const first = cut();
+    assert.equal(first.length, 1);
+    assert.equal(first[0].warning, true);
+    assert.equal(p.penalty, 0);
     assert.equal(p.lapValid, false);
+    const second = cut();
+    assert.equal(second.length, 1);
+    assert.equal(second[0].penalty, CUT_PENALTY);
+    assert.equal(p.penalty, CUT_PENALTY);
   });
 
   it("fields 19 rivals, adds Noob below Very Easy, and MIXED spans every level", () => {

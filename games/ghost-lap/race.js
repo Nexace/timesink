@@ -95,12 +95,20 @@ export const ERS = {
   harvestLap: 0.55 // most battery that can be recovered in one lap
 };
 
-// Track limits are looser than F1: the car must be clearly past the kerb for a moment, and the
-// stewards give five warnings before handing out 3-second penalties.
-export const LIMITS = { margin: 24, dwell: 0.25, minSpeed: 170, warnings: 5, penalty: 3 };
-// Cutting a corner on the inside (more than ~15 m gained off the road) is penalised straight away
-export const CUT_GAIN = 50;
+// Stewarding is looser than F1 but still fair. F1: all four wheels past the white line, three
+// warnings, then a 5 s penalty; leaving the track and gaining an advantage, 5-10 s.
+// Here:
+// • Running wide only counts when the whole car is past the kerb for a moment AND it gained something
+//   by it (came back carrying its speed). Run onto the grass and lose time: no strike. Five
+//   warnings, then 3 s penalties.
+// • Cutting a corner counts when the car takes a real shortcut across the inside at racing speed.
+//   The first cut in a race is a warning; after that it's +2 s (+5 s for a huge shortcut).
+// • Nothing counts in the second after contact with another car or a wall: you were pushed.
+// • Any offence still deletes that lap's time (it can't set a best lap or a qualifying time).
+export const LIMITS = { margin: 28, dwell: 0.25, minSpeed: 170, keep: 0.85, warnings: 5, penalty: 3, grace: 1 };
+export const CUT_GAIN = 60; // px of the track (~18 m) gained across the inside before it counts
 export const CUT_PENALTY = 2;
+export const CUT_BIG = { gain: 200, penalty: 5 };
 
 export const PLAYER_LIVERY = { name: "YOU", code: "YOU", color: "#0088ff", accent: "#00f0ff" };
 
@@ -980,36 +988,63 @@ export function stepRace(race, playerInput, dt) {
       car.ersHarvestLap += h;
     }
 
-    // Track limits: clearly past the kerb, for a moment, at speed. Kerb-hopping is fine.
+    // Track limits: judged when the car rejoins. Kerb-hopping is fine; the whole car has to be past
+    // the kerb for a moment, and it only counts if the car came back with its speed (an advantage).
+    if (car.wallHit > 0) car.lastHit = race.t;
+    const pushed = race.t - (car.lastHit ?? -9) < LIMITS.grace;
     const off = Math.abs(car.d) > track.width / 2 + LIMITS.margin;
-    car.offTime = off ? car.offTime + dt : 0;
-    if (off && !car.offTrack && car.laps >= 0 && car.speed > LIMITS.minSpeed && car.offTime >= LIMITS.dwell) {
-      car.offTrack = true;
-      car.lapValid = false;
-      car.strikes += 1;
-      let pen = 0;
-      if (race.mode !== "trial" && car.strikes > LIMITS.warnings) {
-        pen = LIMITS.penalty;
-        car.penalty += pen;
+    if (off) {
+      if (!car.offTrack) {
+        car.offTrack = true;
+        car.offTime = 0;
+        car.offSpeed = car.speed;
+        car.offPushed = false;
       }
-      emit(race, { type: "limits", car: car.id, strikes: car.strikes, penalty: pen, warnings: LIMITS.warnings });
-    } else if (!off && Math.abs(car.d) < track.width / 2) {
+      car.offTime += dt;
+      if (pushed) car.offPushed = true;
+    } else if (car.offTrack && Math.abs(car.d) < track.width / 2 + 16) {
       car.offTrack = false;
+      const gained = car.speed >= car.offSpeed * LIMITS.keep;
+      // (across the inside of a corner is the corner-cut rule's business, below)
+      if (car.laps >= 0 && !car.cutGain && car.offTime >= LIMITS.dwell && car.offSpeed > LIMITS.minSpeed && !car.offPushed && !pushed) {
+        if (gained) {
+          car.lapValid = false;
+          car.strikes += 1;
+          let pen = 0;
+          if (race.mode !== "trial" && car.strikes > LIMITS.warnings) {
+            pen = LIMITS.penalty;
+            car.penalty += pen;
+          }
+          emit(race, { type: "limits", car: car.id, strikes: car.strikes, penalty: pen, warnings: LIMITS.warnings });
+        } else if (car.isPlayer) emit(race, { type: "noAdvantage", car: car.id });
+      }
     }
 
-    // Corner cutting (separate from the lenient running-wide limits): ground gained off the road on
-    // the INSIDE of a corner, e.g. straight across a chicane, costs 2 s in a race and deletes the lap.
+    // Corner cutting: ground covered off the road on the INSIDE of a corner (straight across a
+    // chicane). It only counts as a shortcut if the car made more progress along the track than it
+    // actually drove, at racing speed, and nobody pushed it there. A slow spin across the grass is fine.
     const offRoad = Math.abs(car.d) > track.width / 2 + 16;
     const moved = (car.idx - prevIdx + track.n) % track.n;
-    if (offRoad && moved < track.n / 2 && Math.sign(car.d) === Math.sign(track.curv[car.idx])) car.cutGain = (car.cutGain || 0) + moved * STEP;
+    if (offRoad && moved < track.n / 2 && Math.sign(car.d) === Math.sign(track.curv[car.idx])) {
+      car.cutGain = (car.cutGain || 0) + moved * STEP;
+      car.cutDriven = (car.cutDriven || 0) + car.speed * dt;
+      if (pushed) car.cutPushed = true;
+    }
     if (!offRoad && car.cutGain) {
-      if (car.cutGain > CUT_GAIN && car.laps >= 0) {
+      const shortcut = car.cutGain - car.cutDriven * 0.8;
+      if (car.cutGain > CUT_GAIN && shortcut > 0 && !car.cutPushed && car.laps >= 0) {
         car.lapValid = false;
-        const pen = race.mode !== "trial" ? CUT_PENALTY : 0;
-        car.penalty += pen;
-        emit(race, { type: "cut", car: car.id, penalty: pen });
+        car.cuts = (car.cuts || 0) + 1;
+        let pen = 0;
+        if (race.mode !== "trial" && car.cuts > 1) {
+          pen = car.cutGain > CUT_BIG.gain ? CUT_BIG.penalty : CUT_PENALTY;
+          car.penalty += pen;
+        }
+        emit(race, { type: "cut", car: car.id, penalty: pen, warning: race.mode !== "trial" && car.cuts === 1 });
       }
       car.cutGain = 0;
+      car.cutDriven = 0;
+      car.cutPushed = false;
     }
 
     const before = car.idx;
@@ -1057,6 +1092,7 @@ export function stepRace(race, playerInput, dt) {
           B.vx += nx * j;
           B.vy += ny * j;
         }
+        if (Math.abs(rv) > 40) A.lastHit = B.lastHit = race.t;
         if ((A.isPlayer || B.isPlayer) && Math.abs(rv) > 60) emit(race, { type: "contact", speed: Math.abs(rv) });
       }
     }

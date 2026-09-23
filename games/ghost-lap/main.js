@@ -91,6 +91,11 @@ const RECORDS_KEY = "timesink:ghost-lap:records";
 let prefs = load(PREFS_KEY, { track: "monza", gpLaps: 5, duelLaps: 3, difficulty: "medium", gpQuali: true });
 if (!CAL[prefs.track]) prefs.track = "monza";
 if (!DIFFICULTY[prefs.difficulty]) prefs.difficulty = "medium";
+// Real race distance: the fewest laps over 305 km (Monaco is the exception at 78 laps)
+const fullLaps = (key) => (key === "monaco" ? 78 : Math.ceil(305000 / CIRCUITS[key].lengthM));
+const clampLaps = (n) => clamp(Math.round(Number(n) || 3), 1, fullLaps(prefs.track));
+prefs.gpLaps = clampLaps(prefs.gpLaps);
+prefs.duelLaps = clampLaps(prefs.duelLaps);
 let records = load(RECORDS_KEY, { races: 0, gpWins: {}, podiums: 0, duels: {}, bestLaps: {} });
 
 const ghostKey = (track) => `timesink:ghost-lap:v4:${track}`;
@@ -677,7 +682,11 @@ function handleEvents(race) {
       else banner("TRACK LIMITS", `WARNING ${Math.min(LIMITS.warnings, e.strikes)}/${LIMITS.warnings}${e.strikes === LIMITS.warnings ? " • BLACK & WHITE FLAG" : ""}`, "#ff9a3c", 2.4);
     } else if (e.type === "cut") {
       sfx.warn();
-      banner("CORNER CUT", e.penalty ? `+${e.penalty} SECOND PENALTY • LAP DELETED` : "LAP TIME DELETED", "#ff4d5e", 2.6);
+      if (e.penalty) banner("CORNER CUT", `+${e.penalty} SECOND PENALTY • LAP DELETED`, "#ff4d5e", 2.6);
+      else if (e.warning) banner("CORNER CUT", "WARNING • NEXT ONE IS A PENALTY • LAP DELETED", "#ff9a3c", 2.6);
+      else banner("CORNER CUT", "LAP TIME DELETED", "#ff4d5e", 2.6);
+    } else if (e.type === "noAdvantage") {
+      banner("OFF TRACK", "NO ADVANTAGE • NO STRIKE", "#8a95a8", 1.4, 12);
     } else if (e.type === "ersBlocked") {
       const why = { drs: "NOT WITH DRS OPEN", empty: "BATTERY FLAT • BRAKE TO HARVEST", lap: "LAP ALLOWANCE USED • RESETS AT THE LINE", throttle: "NEEDS THROTTLE" }[e.reason];
       if (e.reason !== "throttle") {
@@ -979,10 +988,10 @@ function showSetup(mode) {
   const laps = mode === "gp" ? prefs.gpLaps : prefs.duelLaps;
   // A mixed field only makes sense in a Grand Prix; a duel falls back to Medium
   if (mode === "duel" && prefs.difficulty === "mixed") prefs.difficulty = "medium";
-  const lapOpts = mode === "gp" ? [3, 5, 8, 12] : [3, 5, 8];
+  const lapOpts = [1, 3, 5, 10, 20];
   const title = { gp: "GRAND PRIX", duel: "DUEL", trial: "TIME TRIAL" }[mode];
   const blurb = {
-    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Qualify with one flying lap to set your grid slot, or skip it for a random grid. Running wide: five warnings, then 3 s penalties. Cutting a corner: +2 s straight away.",
+    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Qualify with one flying lap to set your grid slot, or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
     duel: "Head-to-head against one bot. Pick how fast it drives — Impossible is quicker than the car you drive.",
     trial: "Flying laps on an empty circuit. Your best clean lap becomes a ghost; running wide deletes the lap."
   }[mode];
@@ -1013,14 +1022,42 @@ function showSetup(mode) {
         ${
           mode === "trial"
             ? ""
-            : `<div class="gl-opt"><span>LAPS</span>${lapOpts.map((l) => `<button type="button" class="gl-chip ${l === laps ? "is-on" : ""}" data-laps="${l}" aria-pressed="${l === laps}">${l}</button>`).join("")}</div>
+            : `<div class="gl-opt gl-opt--laps"><span>LAPS</span>${lapOpts.map((l) => `<button type="button" class="gl-chip" data-laps="${l}">${l}</button>`).join("")}<button type="button" class="gl-chip" data-laps="full">FULL</button>
+                 <span class="gl-stepper"><button type="button" class="gl-chip" data-lapstep="-1" aria-label="One lap fewer">−</button><output class="gl-laps-val" aria-live="polite">${laps}</output><button type="button" class="gl-chip" data-lapstep="1" aria-label="One lap more">+</button></span></div>
                <div class="gl-opt"><span>${mode === "duel" ? "BOT" : "AI LEVEL"}</span>${(mode === "gp" ? [...DIFFICULTY_ORDER, "mixed"] : DIFFICULTY_ORDER).map((d) => `<button type="button" class="gl-chip ${d === prefs.difficulty ? "is-on" : ""}" data-diff="${d}" aria-pressed="${d === prefs.difficulty}">${DIFFICULTY[d].label}</button>`).join("")}</div>
                ${mode === "gp" ? `<div class="gl-opt"><span>GRID</span><button type="button" class="gl-chip ${prefs.gpQuali ? "is-on" : ""}" data-quali="1" aria-pressed="${prefs.gpQuali}">QUALIFYING</button><button type="button" class="gl-chip ${!prefs.gpQuali ? "is-on" : ""}" data-quali="0" aria-pressed="${!prefs.gpQuali}">SKIP • RANDOM GRID</button></div>` : ""}`
         }
       </div>
     </div>`;
+  syncLaps();
   overlay.querySelector(".gl-track.is-on")?.scrollIntoView({ block: "nearest" });
   overlay.querySelector("[data-act=start]")?.focus();
+}
+
+// Lap picker: presets, the real race distance for the chosen circuit, and a -/+ stepper for any count
+function setLaps(n) {
+  const v = clampLaps(n);
+  if (setupMode === "gp") prefs.gpLaps = v;
+  else prefs.duelLaps = v;
+}
+function syncLaps() {
+  if (setupMode === "trial") return;
+  const full = fullLaps(prefs.track);
+  setLaps(setupMode === "gp" ? prefs.gpLaps : prefs.duelLaps);
+  const laps = setupMode === "gp" ? prefs.gpLaps : prefs.duelLaps;
+  overlay.querySelectorAll("[data-laps]").forEach((el) => {
+    const v = el.dataset.laps === "full" ? full : Number(el.dataset.laps);
+    if (el.dataset.laps === "full") el.textContent = `FULL • ${full}`;
+    el.hidden = el.dataset.laps !== "full" && v > full;
+    const on = v === laps;
+    el.classList.toggle("is-on", on);
+    el.setAttribute("aria-pressed", String(on));
+  });
+  const out = overlay.querySelector(".gl-laps-val");
+  if (out) out.textContent = `${laps} LAP${laps === 1 ? "" : "S"}`;
+  const [minus, plus] = overlay.querySelectorAll("[data-lapstep]");
+  if (minus) minus.disabled = laps <= 1;
+  if (plus) plus.disabled = laps >= full;
 }
 
 overlay.addEventListener("click", (e) => {
@@ -1039,16 +1076,21 @@ overlay.addEventListener("click", (e) => {
       el.classList.toggle("is-on", el === b);
       el.setAttribute("aria-pressed", String(el === b));
     });
+    syncLaps();
     return;
   }
   if (b.dataset.laps) {
     sfx.click();
-    if (setupMode === "gp") prefs.gpLaps = Number(b.dataset.laps);
-    else prefs.duelLaps = Number(b.dataset.laps);
-    overlay.querySelectorAll("[data-laps]").forEach((el) => {
-      el.classList.toggle("is-on", el === b);
-      el.setAttribute("aria-pressed", String(el === b));
-    });
+    setLaps(b.dataset.laps === "full" ? fullLaps(prefs.track) : b.dataset.laps);
+    syncLaps();
+    save(PREFS_KEY, prefs);
+    return;
+  }
+  if (b.dataset.lapstep) {
+    sfx.click();
+    setLaps((setupMode === "gp" ? prefs.gpLaps : prefs.duelLaps) + Number(b.dataset.lapstep));
+    syncLaps();
+    save(PREFS_KEY, prefs);
     return;
   }
   if (b.dataset.quali) {

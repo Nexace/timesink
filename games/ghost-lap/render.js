@@ -780,6 +780,16 @@ function strokeOffsetRuns(g, track, runs, d) {
 }
 
 // ─────────────────────────── Renderer ───────────────────────────
+/** Camera → canvas: centre on the camera, turn the world by -angle, then zoom. */
+export function worldTransform(ctx, cam, W, H) {
+  const z = cam.zoom;
+  const a = cam.angle || 0;
+  const c = Math.cos(a) * z;
+  const n = Math.sin(a) * z;
+  // translate(W/2,H/2) · rotate(-a) · scale(z) · translate(-x,-y)
+  ctx.setTransform(c, -n, n, c, W / 2 - (c * cam.x + n * cam.y), H / 2 - (-n * cam.x + c * cam.y));
+}
+
 export function createWorld(track) {
   const field = buildDistField(track);
   const scene = generateScenery(track, field);
@@ -1031,14 +1041,18 @@ export function createWorld(track) {
     /** Draw the cached world for a camera {x, y, zoom} (x/y = world point at screen centre). */
     draw(ctx, cam, W, H, budget = 3) {
       const z = cam.zoom;
-      const left = cam.x - W / 2 / z;
-      const top = cam.y - H / 2 / z;
-      const right = cam.x + W / 2 / z;
-      const bottom = cam.y + H / 2 / z;
+      const a = cam.angle || 0;
+      // A rotated view needs the bounding box of the whole screen, whichever way it's turned
+      const hw = a ? Math.hypot(W, H) / 2 / z : W / 2 / z;
+      const hh = a ? hw : H / 2 / z;
+      const left = cam.x - hw;
+      const top = cam.y - hh;
+      const right = cam.x + hw;
+      const bottom = cam.y + hh;
       ctx.fillStyle = street ? "#1c1f25" : track.theme === "desert" ? "#9c7c50" : "#1a4020";
       ctx.fillRect(0, 0, W, H);
       ctx.save();
-      ctx.setTransform(z, 0, 0, z, W / 2 - cam.x * z, H / 2 - cam.y * z);
+      worldTransform(ctx, cam, W, H);
       ctx.imageSmoothingEnabled = false;
       let painted = 0;
       for (let ty = Math.max(0, Math.floor(top / TILE)); ty <= Math.min(rows - 1, Math.floor(bottom / TILE)); ty++) {

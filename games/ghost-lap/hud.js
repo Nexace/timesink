@@ -32,7 +32,9 @@ function text(ctx, str, x, y, { font = DISPLAY, size = 10, color = "#fff", align
 
 function timingTower(ctx, race, x, y) {
   const rows = race.order;
-  const rowH = 26;
+  // A 20-car field gets a compact tower so it still clears the speed panel
+  const big = rows.length > 12;
+  const rowH = big ? 21 : 26;
   const w = 238;
   panel(ctx, x, y, w, 30 + rows.length * rowH);
   text(ctx, race.mode === "duel" ? "DUEL" : "RACE ORDER", x + 12, y + 20, { size: 9, color: "#8fb4ff" });
@@ -43,19 +45,20 @@ function timingTower(ctx, race, x, y) {
       ctx.fillStyle = "rgba(0, 136, 255, 0.28)";
       ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
     }
-    text(ctx, String(k + 1).padStart(2, " "), x + 10, ry + 18, { size: 10, color: k === 0 ? "#ffd400" : "#fff" });
+    const ty = ry + (big ? 15 : 18);
+    text(ctx, String(k + 1).padStart(2, " "), x + 10, ty, { size: big ? 9 : 10, color: k === 0 ? "#ffd400" : "#fff" });
     ctx.fillStyle = c.color;
-    ctx.fillRect(x + 44, ry + 5, 4, rowH - 12);
-    text(ctx, c.code, x + 56, ry + 18, { size: 10, color: c.isPlayer ? "#6fd3ff" : "#e8ecf4" });
+    ctx.fillRect(x + 44, ry + 4, 4, rowH - 9);
+    text(ctx, c.code, x + 56, ty, { size: big ? 9 : 10, color: c.isPlayer ? "#6fd3ff" : "#e8ecf4" });
     let gap = "";
     if (c.finished) gap = k === 0 ? "FLAG" : `+${c.gapLeader.toFixed(3)}`;
     else if (k === 0) gap = "LEADER";
     else gap = `+${c.gapAhead.toFixed(3)}`;
     if (c.penalty) gap = `${gap} ▲${c.penalty}s`;
-    text(ctx, gap, x + w - 12, ry + 19, { font: BODY, size: 20, color: k === 0 ? "#ffd400" : "#c9d2e3", align: "right" });
+    text(ctx, gap, x + w - 12, ry + (big ? 16 : 19), { font: BODY, size: big ? 17 : 20, color: k === 0 ? "#ffd400" : "#c9d2e3", align: "right" });
     if (race.bestLapBy === c.id) {
       ctx.fillStyle = SECTOR_COLORS.purple;
-      ctx.fillRect(x + 140, ry + 8, 8, 8);
+      ctx.fillRect(x + 140, ry + (big ? 6 : 8), 7, 7);
     }
   });
 }

@@ -120,7 +120,7 @@ export const games = [
   {
     slug: "ghost-lap",
     title: "Ghost Lap",
-    tagline: "Top-down Formula racing on all 24 real calendar circuits: 10-car Grands Prix, bot duels and ghost time trials.",
+    tagline: "Top-down Formula racing on all 24 real calendar circuits: 20-car Grands Prix with qualifying, bot duels and ghost time trials.",
     kind: "racing",
     tags: ["racing", "f1", "time-trial"],
     accent: "blue",
@@ -129,14 +129,15 @@ export const games = [
     status: "live",
     added: "2026-09-20",
     howToPlay: {
-      goal: "Win Grands Prix against nine rivals, beat a bot from Very Easy to Impossible, or chase your own ghost on real-length F1 circuits.",
+      goal: "Qualify, then win 20-car Grands Prix, beat a bot from Noob to Impossible, or chase your own ghost on real-length F1 circuits.",
       steps: [
-        "Pick a mode, a circuit, the lap count and the AI level, then wait for the five red lights to go out.",
-        "Brake in a straight line before each corner. Track limits are lenient: kerb hops are free, and only running clearly wide counts. You get five warnings, then 3 second penalties (time trials delete the lap).",
-        "Within a second of the car ahead at the DRS detection line, open DRS on the next straight for extra top speed; tuck into a slipstream for a tow.",
+        "Pick a mode, a circuit, the lap count and the AI level (Noob to Impossible, or Mixed). A Grand Prix starts with a one-lap qualifying session for your grid slot, or skip it for a random grid.",
+        "Don't touch the throttle until the five red lights go out: holding it early locks the throttle until you let go.",
+        "Corners have real grip limits: brake in a straight line, because kerbs and grass cost grip and speed. Running clearly wide gives you five warnings, then 3 second penalties. Cutting across the inside of a corner costs 2 seconds and deletes the lap.",
+        "Within a second of the car ahead at the DRS detection line, you can open DRS once you enter the zone for extra top speed; tuck into a slipstream for a tow.",
         "ERS: braking charges the battery. Hold ERS for a power boost anywhere except while DRS is open. You can only deploy 60% of the battery per lap, and braking recovers at most 55%, so save it for corner exits, attacks and defending."
       ],
-      controls: "[W / ↑] Throttle, [S / ↓] Brake/Reverse, [A/D / ←/→] Steer, [E] DRS, [Shift] ERS (hold), [Space] Handbrake, [Esc] Pause, [R] Restart. Settings let you rebind keys and tune steering, acceleration sensitivity and braking.",
+      controls: "[W / ↑] Throttle, [S / ↓] Brake/Reverse, [A/D / ←/→] Steer, [E] DRS, [Shift] ERS (hold), [Space] Handbrake, [Esc] Pause, [R] Restart. Mouse: drag to turn the view, wheel to zoom, double-click to reset. Settings let you rebind keys, tune steering, acceleration and braking, and choose a fixed or rotating camera.",
       tip: "Follow the racing line guide: red dashes mean brake now, amber means lift, green means flat out."
     },
   },

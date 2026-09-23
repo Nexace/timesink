@@ -4,9 +4,11 @@ import { saveScore } from "/shared/scores.js";
 import { setEngineHum } from "/shared/audio.js";
 import { vignette, glow } from "/shared/gfx.js";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, aiInput, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS } from "./race.js";
-import { createWorld, drawCar, createMinimap } from "./render.js";
+import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingLap, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS } from "./race.js";
+import { createWorld, drawCar, createMinimap, worldTransform } from "./render.js";
 import { drawHud, fmtLap, fmtSec } from "./hud.js";
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 initShell({ crumb: "Ghost Lap" });
 
@@ -86,7 +88,7 @@ function save(key, value) {
 }
 const PREFS_KEY = "timesink:ghost-lap:prefs";
 const RECORDS_KEY = "timesink:ghost-lap:records";
-let prefs = load(PREFS_KEY, { track: "monza", gpLaps: 5, duelLaps: 3, difficulty: "medium" });
+let prefs = load(PREFS_KEY, { track: "monza", gpLaps: 5, duelLaps: 3, difficulty: "medium", gpQuali: true });
 if (!CAL[prefs.track]) prefs.track = "monza";
 if (!DIFFICULTY[prefs.difficulty]) prefs.difficulty = "medium";
 let records = load(RECORDS_KEY, { races: 0, gpWins: {}, podiums: 0, duels: {}, bestLaps: {} });
@@ -119,7 +121,7 @@ const DEFAULT_CONTROLS = {
   ers: ["ShiftLeft", "ShiftRight"],
   restart: ["KeyR"]
 };
-const DEFAULT_SETTINGS = { steerSens: 100, brakeForce: 100, accelSens: 60, racingLine: true, playerRing: false, edgeShade: true };
+const DEFAULT_SETTINGS = { steerSens: 100, brakeForce: 100, accelSens: 60, racingLine: true, playerRing: false, edgeShade: true, camRotate: false };
 const ACTION_LABELS = {
   accel: "THROTTLE",
   brake: "BRAKE / REVERSE",
@@ -220,6 +222,8 @@ function syncSettingsUI() {
   if ($("val-player-ring")) $("val-player-ring").textContent = onOff(settings.playerRing);
   if ($("btn-toggle-shade")) $("btn-toggle-shade").textContent = `EDGE SHADING: [${onOff(settings.edgeShade)}]`;
   if ($("val-edge-shade")) $("val-edge-shade").textContent = onOff(settings.edgeShade);
+  if ($("btn-toggle-cam")) $("btn-toggle-cam").textContent = `CAMERA: [${settings.camRotate ? "ROTATING" : "FIXED"}]`;
+  if ($("val-cam-mode")) $("val-cam-mode").textContent = settings.camRotate ? "ROTATING" : "FIXED";
 }
 function openControlsModal() {
   sfx.click();
@@ -281,7 +285,7 @@ $("btn-toggle-line")?.addEventListener("click", () => {
   syncSettingsUI();
   saveSettings();
 });
-for (const [id, key] of [["btn-toggle-ring", "playerRing"], ["btn-toggle-shade", "edgeShade"]]) {
+for (const [id, key] of [["btn-toggle-ring", "playerRing"], ["btn-toggle-shade", "edgeShade"], ["btn-toggle-cam", "camRotate"]]) {
   $(id)?.addEventListener("click", () => {
     sfx.click();
     settings[key] = !settings[key];
@@ -360,11 +364,37 @@ document.querySelectorAll("#touch-pad [data-key]").forEach((btn) => {
 // Throttle builds up at a rate set by the acceleration sensitivity, and a traction limiter caps it at
 // low speed (lifting as the car gathers pace), so launches and slow-corner exits don't light up the rears.
 let throttleLevel = 0;
+// No rolling starts: throttle held on the grid is ignored, and if it's still held when the lights go
+// out it stays dead until released and pressed again.
+let gridLock = false;
+let gridWarned = false;
+let lockShown = false;
 function playerInput(dt = 1 / 120) {
   const sens = settings.steerSens / 100;
   const accel = Math.max(0.25, Math.min(1, (settings.accelSens ?? 60) / 100));
   const steer = ((keys.right ? 1 : 0) - (keys.left ? 1 : 0)) * Math.min(1, sens);
-  if (keys.up) throttleLevel = Math.min(1, throttleLevel + (0.6 + accel * 6) * dt);
+  if (session?.race.phase === "lights") {
+    throttleLevel = 0;
+    if (keys.up) {
+      gridLock = true;
+      if (!gridWarned) {
+        gridWarned = true;
+        sfx.deny();
+        banner("HOLD IT!", "WAIT FOR LIGHTS OUT", "#ff9a3c", 1.6, 16);
+      }
+    }
+    // The car can't move yet; the throttle only revs the engine on the grid
+    return { throttle: keys.up ? 1 : 0, ers: false, brake: 0, steer: 0, handbrake: false, drs: false, brakeMult: 1, steerRate: 7 };
+  }
+  if (gridLock) {
+    if (keys.up) {
+      if (!lockShown) {
+        lockShown = true;
+        banner("THROTTLE LOCKED", `JUMPED THE LIGHTS • RELEASE ${keyLabel("accel")} AND GO AGAIN`, "#ff4d5e", 2, 14);
+      }
+    } else gridLock = false;
+  }
+  if (keys.up && !gridLock) throttleLevel = Math.min(1, throttleLevel + (0.6 + accel * 6) * dt);
   else throttleLevel = Math.max(0, throttleLevel - 9 * dt);
   const car = session?.race.player;
   const v = car ? Math.max(0, car.fwd) / CAR.top : 1;
@@ -391,9 +421,46 @@ let demo = null;
 let acc = 0;
 let autopilot = false; // test hook only: lets the AI drive the player's car
 
+// Mouse camera: drag to turn the view, wheel to zoom, double-click to reset. Kept across races.
+const camView = { angle: 0, zoom: 1 };
 function newCam(car) {
-  return { x: car.x, y: car.y, zoom: 1, shake: 0 };
+  return { x: car.x, y: car.y, zoom: 1, shake: 0, angle: camView.angle + (settings.camRotate ? car.heading + Math.PI / 2 : 0) };
 }
+let camDrag = null;
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  const r = canvas.getBoundingClientRect();
+  camDrag = { id: e.pointerId, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+  camDrag.last = Math.atan2(e.clientY - camDrag.cy, e.clientX - camDrag.cx);
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!camDrag || e.pointerId !== camDrag.id) return;
+  const a = Math.atan2(e.clientY - camDrag.cy, e.clientX - camDrag.cx);
+  let d = a - camDrag.last;
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  // Grab-and-turn: the track follows the pointer round the centre of the screen
+  camView.angle -= d;
+  camDrag.last = a;
+});
+const endDrag = (e) => {
+  if (camDrag && e.pointerId === camDrag.id) camDrag = null;
+};
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    camView.zoom = clamp(camView.zoom * Math.exp(-e.deltaY * 0.0012), 0.5, 2);
+  },
+  { passive: false }
+);
+canvas.addEventListener("dblclick", () => {
+  camView.angle = 0;
+  camView.zoom = 1;
+});
 
 function makeDemo() {
   const pool = CALENDAR.filter((c) => c.key !== (session?.config.track ?? ""));
@@ -490,6 +557,9 @@ function drawFx(fx, view) {
 // ==========================================
 function startRace(config) {
   throttleLevel = 0;
+  gridLock = false;
+  gridWarned = false;
+  lockShown = false;
   prefs.track = config.track;
   if (config.mode === "gp") prefs.gpLaps = config.laps;
   if (config.mode === "duel") prefs.duelLaps = config.laps;
@@ -497,11 +567,19 @@ function startRace(config) {
   save(PREFS_KEY, prefs);
 
   const entry = getTrack(config.track);
-  const race = createRace({ track: entry.track, mode: config.mode, laps: config.laps, difficulty: config.difficulty, seed: (Date.now() & 0xffffff) + 1 });
+  const quali = config.stage === "quali";
+  const race = createRace({
+    track: entry.track,
+    mode: quali ? "trial" : config.mode,
+    laps: quali ? Infinity : config.laps,
+    difficulty: config.difficulty,
+    seed: (Date.now() & 0xffffff) + 1,
+    grid: quali ? null : config.grid || null
+  });
   const cam = newCam(race.player);
   cam.zoom = 1.05;
   entry.world.warm(cam, W, H);
-  const ghost = config.mode === "trial" ? loadGhost(config.track) : null;
+  const ghost = config.mode === "trial" || quali ? loadGhost(config.track) : null;
   session = {
     config,
     entry,
@@ -516,7 +594,8 @@ function startRace(config) {
     rec: [],
     recT: 0,
     lastLaps: race.player.laps,
-    delta: null
+    delta: null,
+    qualiLap: null
   };
   acc = 0;
   Object.keys(keys).forEach((k) => (keys[k] = false));
@@ -524,9 +603,23 @@ function startRace(config) {
   overlay.hidden = true;
   overlay.innerHTML = "";
   canvas.focus({ preventScroll: true });
-  if (config.mode === "trial") banner("TIME TRIAL", ghost ? `Beat your ghost: ${fmtSec(ghost.time)}` : "Cross the line to start a flying lap", "#00f0ff", 3.5);
-  else banner(config.mode === "gp" ? "GRAND PRIX" : "DUEL", `${CAL[config.track].name.toUpperCase()} • ${config.laps} LAPS • ${DIFFICULTY[config.difficulty].label}`, "#ffd400", 3.5);
-  announce(`${CAL[config.track].name}. ${config.mode === "trial" ? "Time trial" : `${config.laps} laps`}.`);
+  if (quali) banner("QUALIFYING", "One flying lap sets your grid slot • running wide deletes it", "#00f0ff", 4);
+  else if (config.mode === "trial") banner("TIME TRIAL", ghost ? `Beat your ghost: ${fmtSec(ghost.time)}` : "Cross the line to start a flying lap", "#00f0ff", 3.5);
+  else {
+    const slot = race.cars.findIndex((c) => c.isPlayer) + 1;
+    const where = config.mode === "gp" ? ` • STARTING P${slot}` : "";
+    banner(config.mode === "gp" ? "GRAND PRIX" : "DUEL", `${CAL[config.track].name.toUpperCase()} • ${config.laps} LAPS • ${DIFFICULTY[config.difficulty].label}${where}`, "#ffd400", 3.5);
+  }
+  announce(`${CAL[config.track].name}. ${quali ? "Qualifying" : config.mode === "trial" ? "Time trial" : `${config.laps} laps`}.`);
+}
+
+// A Grand Prix weekend: one-lap qualifying sets the grid, or (if skipped) you get a random slot
+function startGrandPrix(base) {
+  const seed = (Date.now() & 0xffffff) + 7;
+  const field = makeField({ mode: "gp", difficulty: base.difficulty, seed });
+  if (prefs.gpQuali) return startRace({ ...base, stage: "quali", field });
+  const slot = Math.floor(Math.random() * (field.length + 1));
+  startRace({ ...base, stage: "race", grid: [...field.slice(0, slot), "player", ...field.slice(slot)] });
 }
 
 function monotone(arr) {
@@ -572,12 +665,19 @@ function handleEvents(race) {
       }
       announce(`Lap ${e.lap}: ${fmtSec(e.time)}${e.valid ? "" : ", deleted"}.`);
       if (race.mode === "trial") onTrialLap(e, c);
+      if (s.config.stage === "quali" && !s.qualiLap) {
+        s.qualiLap = { time: e.time, valid: e.valid };
+        s.endAt = performance.now() + 1600;
+      }
       if (race.mode !== "trial" && !c.finished && c.laps === race.laps - 1) banner("FINAL LAP", "", "#ffd400", 2);
     } else if (e.type === "limits") {
       sfx.warn();
       if (e.penalty) banner(`${e.penalty} SECOND PENALTY`, `TRACK LIMITS • STRIKE ${e.strikes}`, "#ff4d5e", 3);
       else if (race.mode === "trial") banner("TRACK LIMITS", "LAP TIME DELETED", "#ff9a3c", 2.2);
       else banner("TRACK LIMITS", `WARNING ${Math.min(LIMITS.warnings, e.strikes)}/${LIMITS.warnings}${e.strikes === LIMITS.warnings ? " • BLACK & WHITE FLAG" : ""}`, "#ff9a3c", 2.4);
+    } else if (e.type === "cut") {
+      sfx.warn();
+      banner("CORNER CUT", e.penalty ? `+${e.penalty} SECOND PENALTY • LAP DELETED` : "LAP TIME DELETED", "#ff4d5e", 2.6);
     } else if (e.type === "ersBlocked") {
       const why = { drs: "NOT WITH DRS OPEN", empty: "BATTERY FLAT • BRAKE TO HARVEST", lap: "LAP ALLOWANCE USED • RESETS AT THE LINE", throttle: "NEEDS THROTTLE" }[e.reason];
       if (e.reason !== "throttle") {
@@ -585,7 +685,7 @@ function handleEvents(race) {
         banner("ERS LOCKED", why, "#8a95a8", 1.6, 12);
       }
     } else if (e.type === "drsReady") {
-      banner("DRS ENABLED", `PRESS ${keyLabel("drs")} IN THE ZONE`, "#22e36b", 1.6, 12);
+      banner("DRS ENABLED", `PRESS ${keyLabel("drs")} TO OPEN THE FLAP`, "#22e36b", 1.6, 12);
     } else if (e.type === "drs") {
       sfx.coin();
     } else if (e.type === "wall") {
@@ -693,6 +793,7 @@ function finishSession(retired = false) {
   const s = session;
   const race = s.race;
   setEngineHum(false);
+  if (s.config.stage === "quali") return showQualifying();
   if (race.mode === "trial") return goHome();
   const rows = classify(race);
   const me = rows.find((r) => r.car.isPlayer);
@@ -710,6 +811,55 @@ function finishSession(retired = false) {
   }
   save(RECORDS_KEY, records);
   showResults(rows, retired);
+}
+
+// Rivals set their laps on an empty track with their own race pace; a deleted lap starts from the back
+function showQualifying() {
+  const s = session;
+  screen = "results";
+  const track = s.race.track;
+  const mine = s.qualiLap && s.qualiLap.valid ? s.qualiLap.time : Infinity;
+  const rows = [
+    { entry: "player", name: PLAYER_LIVERY.name, code: PLAYER_LIVERY.code, color: PLAYER_LIVERY.color, time: mine },
+    ...s.config.field.map((f) => ({ entry: f, name: f.livery.name, code: f.livery.code, color: f.livery.color, time: qualifyingLap(track, f.skill) }))
+  ].sort((a, b) => a.time - b.time);
+  s.qualiGrid = rows.map((r) => r.entry);
+  const pole = rows[0].time;
+  const myPos = rows.findIndex((r) => r.entry === "player") + 1;
+  if (myPos === 1 && Number.isFinite(mine)) sfx.win();
+  else sfx.good();
+  const body = rows
+    .map((r, k) => {
+      const t = Number.isFinite(r.time) ? (k === 0 ? fmtSec(r.time) : `+${(r.time - pole).toFixed(3)}`) : "NO TIME";
+      return `<tr class="${r.entry === "player" ? "is-you" : ""}">
+        <td>${k + 1}</td>
+        <td><i style="background:${r.color}"></i>${escapeHtml(r.name)} <small>${escapeHtml(r.code)}</small></td>
+        <td>${t}</td>
+      </tr>`;
+    })
+    .join("");
+  const title = !Number.isFinite(mine) ? "LAP DELETED" : myPos === 1 ? "POLE POSITION" : `QUALIFIED P${myPos}`;
+  const note = !Number.isFinite(mine)
+    ? "Your lap was deleted for track limits, so you start from the back of the grid."
+    : `Your lap: ${fmtSec(mine)}. Run it again for a better slot, or take the grid as it stands.`;
+  overlay.hidden = false;
+  overlay.innerHTML = `
+    <div class="gl-menu gl-menu--wide">
+      <p class="gl-kicker">QUALIFYING • ${escapeHtml(CAL[s.config.track].name.toUpperCase())} • ${escapeHtml(DIFFICULTY[s.config.difficulty].label)}</p>
+      <h2 class="gl-heading ${myPos === 1 && Number.isFinite(mine) ? "is-win" : ""}">${title}</h2>
+      <table class="gl-res">
+        <thead><tr><th>GRID</th><th>DRIVER</th><th>LAP / GAP</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+      <p class="gl-note">${note}</p>
+      <div class="gl-menu__row">
+        <button type="button" class="btn btn--primary" data-act="race">START RACE ▶ <small>from P${myPos}</small></button>
+        <button type="button" class="btn" data-act="restart">REDO QUALIFYING</button>
+        <button type="button" class="btn" data-act="home">MAIN MENU</button>
+      </div>
+    </div>`;
+  overlay.querySelector("button")?.focus();
+  announce(`Qualifying: ${title}.`);
 }
 
 function showResults(rows, retired) {
@@ -774,7 +924,7 @@ function goHome() {
       <h2 class="gl-title__logo">GHOST<br />LAP</h2>
       <p class="gl-title__tag">Lights out and away we go.</p>
       <div class="gl-menu__list">
-        <button type="button" class="btn btn--primary" data-go="gp">GRAND PRIX <small>10-car race</small></button>
+        <button type="button" class="btn btn--primary" data-go="gp">GRAND PRIX <small>20-car race</small></button>
         <button type="button" class="btn" data-go="duel">DUEL <small>1v1 vs a bot</small></button>
         <button type="button" class="btn" data-go="trial">TIME TRIAL <small>race your ghost</small></button>
         <button type="button" class="btn" data-go="controls">CONTROLS <small>keys &amp; tuning</small></button>
@@ -827,10 +977,12 @@ function showSetup(mode) {
   setupMode = mode;
   screen = "setup";
   const laps = mode === "gp" ? prefs.gpLaps : prefs.duelLaps;
+  // A mixed field only makes sense in a Grand Prix; a duel falls back to Medium
+  if (mode === "duel" && prefs.difficulty === "mixed") prefs.difficulty = "medium";
   const lapOpts = mode === "gp" ? [3, 5, 8, 12] : [3, 5, 8];
   const title = { gp: "GRAND PRIX", duel: "DUEL", trial: "TIME TRIAL" }[mode];
   const blurb = {
-    gp: "Start mid-grid against nine rivals. Three track-limit warnings, then 5 second penalties. DRS opens within a second of the car ahead.",
+    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Qualify with one flying lap to set your grid slot, or skip it for a random grid. Running wide: five warnings, then 3 s penalties. Cutting a corner: +2 s straight away.",
     duel: "Head-to-head against one bot. Pick how fast it drives — Impossible is quicker than the car you drive.",
     trial: "Flying laps on an empty circuit. Your best clean lap becomes a ghost; running wide deletes the lap."
   }[mode];
@@ -862,7 +1014,8 @@ function showSetup(mode) {
           mode === "trial"
             ? ""
             : `<div class="gl-opt"><span>LAPS</span>${lapOpts.map((l) => `<button type="button" class="gl-chip ${l === laps ? "is-on" : ""}" data-laps="${l}" aria-pressed="${l === laps}">${l}</button>`).join("")}</div>
-               <div class="gl-opt"><span>${mode === "duel" ? "BOT" : "AI LEVEL"}</span>${DIFFICULTY_ORDER.map((d) => `<button type="button" class="gl-chip ${d === prefs.difficulty ? "is-on" : ""}" data-diff="${d}" aria-pressed="${d === prefs.difficulty}">${DIFFICULTY[d].label}</button>`).join("")}</div>`
+               <div class="gl-opt"><span>${mode === "duel" ? "BOT" : "AI LEVEL"}</span>${(mode === "gp" ? [...DIFFICULTY_ORDER, "mixed"] : DIFFICULTY_ORDER).map((d) => `<button type="button" class="gl-chip ${d === prefs.difficulty ? "is-on" : ""}" data-diff="${d}" aria-pressed="${d === prefs.difficulty}">${DIFFICULTY[d].label}</button>`).join("")}</div>
+               ${mode === "gp" ? `<div class="gl-opt"><span>GRID</span><button type="button" class="gl-chip ${prefs.gpQuali ? "is-on" : ""}" data-quali="1" aria-pressed="${prefs.gpQuali}">QUALIFYING</button><button type="button" class="gl-chip ${!prefs.gpQuali ? "is-on" : ""}" data-quali="0" aria-pressed="${!prefs.gpQuali}">SKIP • RANDOM GRID</button></div>` : ""}`
         }
       </div>
     </div>`;
@@ -898,6 +1051,16 @@ overlay.addEventListener("click", (e) => {
     });
     return;
   }
+  if (b.dataset.quali) {
+    sfx.click();
+    prefs.gpQuali = b.dataset.quali === "1";
+    save(PREFS_KEY, prefs);
+    overlay.querySelectorAll("[data-quali]").forEach((el) => {
+      el.classList.toggle("is-on", el === b);
+      el.setAttribute("aria-pressed", String(el === b));
+    });
+    return;
+  }
   if (b.dataset.diff) {
     sfx.click();
     prefs.difficulty = b.dataset.diff;
@@ -913,13 +1076,21 @@ overlay.addEventListener("click", (e) => {
   if (act === "home") goHome();
   else if (act === "start") {
     const laps = setupMode === "gp" ? prefs.gpLaps : prefs.duelLaps;
-    startRace({ mode: setupMode, track: prefs.track, laps: setupMode === "trial" ? Infinity : laps, difficulty: prefs.difficulty });
+    const base = { mode: setupMode, track: prefs.track, laps: setupMode === "trial" ? Infinity : laps, difficulty: prefs.difficulty };
+    if (setupMode === "gp") startGrandPrix(base);
+    else startRace(base);
   } else if (act === "resume") resumeRace();
   else if (act === "restart") startRace(session.config);
   else if (act === "controls") openControlsModal();
   else if (act === "retire") finishSession(true);
   else if (act === "quit") goHome();
-  else if (act === "again") startRace(session.config);
+  else if (act === "race") startRace({ ...session.config, stage: "race", grid: session.qualiGrid });
+  else if (act === "again") {
+    // A new Grand Prix weekend means a new qualifying session (or a new random grid)
+    const { mode, track, laps, difficulty } = session.config;
+    if (mode === "gp") startGrandPrix({ mode, track, laps, difficulty });
+    else startRace(session.config);
+  }
   else if (act === "setup") showSetup(session.config.mode);
 });
 
@@ -932,8 +1103,13 @@ function followCam(cam, car, dt) {
   const ty = car.y + car.vy * 0.3;
   cam.x += (tx - cam.x) * k;
   cam.y += (ty - cam.y) * k;
-  const zt = 1.08 - Math.min(1, car.speed / CAR.top) * 0.3;
+  const zt = (1.08 - Math.min(1, car.speed / CAR.top) * 0.3) * camView.zoom;
   cam.zoom += (zt - cam.zoom) * (1 - Math.exp(-dt * 1.6));
+  // Fixed: north-up plus whatever turn the mouse gave it. Rotating: the car always points up the screen.
+  let at = camView.angle + (settings.camRotate ? car.heading + Math.PI / 2 : 0);
+  let da = at - cam.angle;
+  da -= Math.round(da / (Math.PI * 2)) * Math.PI * 2;
+  cam.angle += camDrag ? da : da * (1 - Math.exp(-dt * 4));
   cam.shake = Math.max(0, cam.shake - dt * 30);
 }
 
@@ -1013,10 +1189,10 @@ function drawGantry(race, t) {
 function renderScene(s, now) {
   const { entry, race, cam } = s;
   const shake = cam.shake ? { x: (Math.random() - 0.5) * cam.shake, y: (Math.random() - 0.5) * cam.shake } : { x: 0, y: 0 };
-  const view = entry.world.draw(ctx, { x: cam.x + shake.x, y: cam.y + shake.y, zoom: cam.zoom }, W, H, 3);
-  const z = cam.zoom;
+  const eye = { x: cam.x + shake.x, y: cam.y + shake.y, zoom: cam.zoom, angle: cam.angle };
+  const view = entry.world.draw(ctx, eye, W, H, 3);
   ctx.save();
-  ctx.setTransform(z, 0, 0, z, W / 2 - (cam.x + shake.x) * z, H / 2 - (cam.y + shake.y) * z);
+  worldTransform(ctx, eye, W, H);
   if (s === session && settings.racingLine) drawRacingLine(race, view);
   drawFx(s.fx, view);
   const t = now / 1000;
@@ -1042,15 +1218,19 @@ function renderScene(s, now) {
       ctx.stroke();
     }
   }
-  // Driver codes over rivals
+  // Driver codes over rivals, kept upright however the camera is turned
   ctx.font = "9px 'Press Start 2P', monospace";
   ctx.textAlign = "center";
   for (const c of race.cars) {
     if (c.isPlayer || c.x < view.left || c.x > view.right || c.y < view.top || c.y > view.bottom) continue;
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.rotate(eye.angle);
     ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.fillRect(c.x - 20, c.y - 38, 40, 14);
+    ctx.fillRect(-20, -38, 40, 14);
     ctx.fillStyle = c.color;
-    ctx.fillText(c.code, c.x, c.y - 27);
+    ctx.fillText(c.code, 0, -27);
+    ctx.restore();
   }
   entry.world.drawLive(ctx, view, t);
   drawGantry(race, t);

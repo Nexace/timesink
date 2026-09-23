@@ -14,10 +14,26 @@ export const CAR = {
   power: 270, // px/s² traction-limited launch acceleration
   powerSpeed: 250, // above this speed the engine is power-limited (thrust falls off as 1/v)
   brake: 1450,
-  grip: 1600, // lateral px/s² before the tyres give up
+  // Lateral grip grows with speed like an F1 car's downforce: about 3 g in slow corners, about 5 g
+  // flat out (in the game's scale). Hairpins need ~70 km/h; only genuinely fast corners are flat.
+  gripLow: 450,
+  gripHigh: 750,
   wheelbase: 30,
   radius: 15
 };
+
+/** Lateral grip (px/s²) available at speed v. */
+export const gripAt = (v) => CAR.gripLow + (CAR.gripHigh - CAR.gripLow) * Math.min(1, (v / CAR.top) ** 2);
+
+/**
+ * Fastest speed through a corner of radius r: solves v² = r·m·gripAt(v) for the speed-dependent grip.
+ * m scales the grip (skill, surface).
+ */
+export function cornerSpeed(r, m = 1) {
+  const a = CAR.gripLow * m * r;
+  const b = ((CAR.gripHigh - CAR.gripLow) * m * r) / (CAR.top * CAR.top);
+  return b >= 0.98 ? CAR.top * 2 : Math.sqrt(a / (1 - b));
+}
 
 // Steering lock shrinks with speed; this sets the tightest turn the car can make at a given speed
 export const maxSteerAt = (v) => 0.95 / (1 + Math.abs(v) / 170);
@@ -34,6 +50,7 @@ function steerSpeedFor(r) {
 }
 
 export const DIFFICULTY = {
+  noob: { label: "NOOB", pace: 0.56, grip: 0.7, noise: 0.3 },
   veryEasy: { label: "VERY EASY", pace: 0.66, grip: 0.78, noise: 0.22 },
   easy: { label: "EASY", pace: 0.76, grip: 0.85, noise: 0.14 },
   medium: { label: "MEDIUM", pace: 0.86, grip: 0.92, noise: 0.08 },
@@ -41,7 +58,8 @@ export const DIFFICULTY = {
   veryHard: { label: "VERY HARD", pace: 0.98, grip: 1.0, noise: 0.02 },
   impossible: { label: "IMPOSSIBLE", pace: 1.04, grip: 1.07, noise: 0 }
 };
-export const DIFFICULTY_ORDER = ["veryEasy", "easy", "medium", "hard", "veryHard", "impossible"];
+DIFFICULTY.mixed = { label: "MIXED", pace: 0.86, grip: 0.92, noise: 0.08 };
+export const DIFFICULTY_ORDER = ["noob", "veryEasy", "easy", "medium", "hard", "veryHard", "impossible"];
 
 // Fictional grid (names, 3-letter timing codes, livery)
 export const DRIVERS = [
@@ -53,7 +71,17 @@ export const DRIVERS = [
   { name: "T. OKAFOR", code: "OKA", color: "#f5f5f5", accent: "#111111" },
   { name: "J. DUCHAMP", code: "DUC", color: "#2b4562", accent: "#ff5ea8" },
   { name: "M. RAINES", code: "RAI", color: "#900000", accent: "#f0f0f0" },
-  { name: "I. SOKOLOV", code: "SOK", color: "#52e252", accent: "#161616" }
+  { name: "I. SOKOLOV", code: "SOK", color: "#52e252", accent: "#161616" },
+  { name: "D. BRENNAN", code: "BRE", color: "#ffd400", accent: "#1a1a1a" },
+  { name: "H. TANAKA", code: "TAN", color: "#ff2e88", accent: "#ffffff" },
+  { name: "P. OLIVEIRA", code: "OLI", color: "#7a3cff", accent: "#ffd400" },
+  { name: "S. KOWALSKI", code: "KOW", color: "#ff5a1f", accent: "#0b2230" },
+  { name: "N. ADEYEMI", code: "ADE", color: "#00a86b", accent: "#ffffff" },
+  { name: "C. ROUSSEAU", code: "ROU", color: "#3a86ff", accent: "#ffbe0b" },
+  { name: "V. PETROV", code: "PET", color: "#8d99ae", accent: "#e63946" },
+  { name: "Y. NAKAMURA", code: "NAK", color: "#e5383b", accent: "#f5f3f4" },
+  { name: "G. FERRARO", code: "FER", color: "#b5179e", accent: "#4cc9f0" },
+  { name: "O. HALVORSEN", code: "HAL", color: "#06d6a0", accent: "#073b4c" }
 ];
 // ERS: the battery (0–1) charges under braking and deploys for extra shove. Strategy lives in
 // the limits — a per-lap deploy budget, a per-lap harvest cap, and no deploying with DRS open.
@@ -70,6 +98,9 @@ export const ERS = {
 // Track limits are looser than F1: the car must be clearly past the kerb for a moment, and the
 // stewards give five warnings before handing out 3-second penalties.
 export const LIMITS = { margin: 24, dwell: 0.25, minSpeed: 170, warnings: 5, penalty: 3 };
+// Cutting a corner on the inside (more than ~15 m gained off the road) is penalised straight away
+export const CUT_GAIN = 50;
+export const CUT_PENALTY = 2;
 
 export const PLAYER_LIVERY = { name: "YOU", code: "YOU", color: "#0088ff", accent: "#00f0ff" };
 
@@ -140,16 +171,32 @@ export function buildTrack(def) {
     }
     line[i] = clamp((s / wsum) * 1.35, -w * 0.34, w * 0.34);
   }
-
-  // Reference speed profile (full grip): corner limits, then braking zones propagated backwards
-  const vmax = new Float64Array(n);
-  for (let i = 0; i < n; i++) vmax[i] = Math.min(CAR.top, Math.sqrt(CAR.grip * Math.max(radii[i], 8)));
-  for (let pass = 0; pass < 2; pass++) {
-    for (let i = n - 1; i >= 0; i--) {
-      const nxt = vmax[(i + 1) % n];
-      vmax[i] = Math.min(vmax[i], Math.sqrt(nxt * nxt + 2 * CAR.brake * 0.8 * STEP));
+  // ...then relax it like an elastic band pulled tight between the edges: each point moves toward the
+  // midpoint of its neighbours (coarse to fine), which converges on the least-curvature line that uses
+  // the full width — outside on entry, clipping the apex, outside again on exit.
+  const lim = w / 2 - 16;
+  for (const [k, iters] of [[10, 80], [4, 120], [1, 160]]) {
+    for (let it = 0; it < iters; it++) {
+      for (let i = 0; i < n; i++) {
+        const a = (i - k + n) % n;
+        const b = (i + k) % n;
+        const tx = (path[a][0] + nor[a][0] * line[a] + path[b][0] + nor[b][0] * line[b]) / 2;
+        const ty = (path[a][1] + nor[a][1] * line[a] + path[b][1] + nor[b][1] * line[b]) / 2;
+        const px = path[i][0] + nor[i][0] * line[i];
+        const py = path[i][1] + nor[i][1] * line[i];
+        line[i] = clamp(line[i] + ((tx - px) * nor[i][0] + (ty - py) * nor[i][1]) * 0.6, -lim, lim);
+      }
     }
   }
+  const linePath = path.map((p, i) => [p[0] + nor[i][0] * line[i], p[1] + nor[i][1] * line[i]]);
+  const lineRadii = cornerRadii(linePath, 8);
+  const lineDs = linePath.map((p, i) => {
+    const q = linePath[(i + 1) % n];
+    return Math.hypot(q[0] - p[0], q[1] - p[1]);
+  });
+
+  // Reference speed profile along the racing line at full grip (drives the line guide and DRS zones)
+  const vmax = profileFor({ n, lineRadii, lineDs }, 1);
 
   // DRS: the longest flat-out runs (up to two) with detection points before them
   const flat = Array.from(vmax, (v) => v >= CAR.top * 0.985);
@@ -180,8 +227,8 @@ export function buildTrack(def) {
 
   // Grid: staggered two-by-two behind the line
   const grid = [];
-  for (let s = 0; s < 10; s++) {
-    const i = (n - 5 - s * 7) % n;
+  for (let s = 0; s < 20; s++) {
+    const i = (n - 5 - s * 7 + n * 2) % n;
     const side = s % 2 === 0 ? -1 : 1;
     const off = side * w * 0.22;
     grid.push({ x: path[i][0] + nor[i][0] * off, y: path[i][1] + nor[i][1] * off, heading: Math.atan2(tan[i][1], tan[i][0]), i });
@@ -205,6 +252,10 @@ export function buildTrack(def) {
     radii,
     curv,
     line,
+    linePath,
+    lineRadii,
+    lineDs,
+    profiles: new Map(),
     vmax,
     drs,
     grid,
@@ -214,6 +265,35 @@ export function buildTrack(def) {
     sectors: [Math.floor(n / 3), Math.floor((2 * n) / 3)],
     loopEvery: 20
   };
+}
+
+/**
+ * Target speed at every point of the racing line for a driver using grip multiple m: the corner limit
+ * on the line's own curvature, then braking zones propagated backwards (the brakes' full force, less a
+ * small margin). This is the "speed plan" a driver follows.
+ */
+function profileFor(track, m) {
+  const { n, lineRadii, lineDs } = track;
+  const v = new Float64Array(n);
+  for (let i = 0; i < n; i++) v[i] = Math.min(CAR.top * 1.2, cornerSpeed(Math.max(lineRadii[i], 8), m));
+  const B = CAR.brake * 0.86;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = n - 1; i >= 0; i--) {
+      const nxt = v[(i + 1) % n];
+      v[i] = Math.min(v[i], Math.sqrt(nxt * nxt + 2 * B * lineDs[i]));
+    }
+  }
+  return v;
+}
+
+export function speedProfile(track, m) {
+  const key = Math.round(m * 200);
+  let prof = track.profiles.get(key);
+  if (!prof) {
+    prof = profileFor(track, key / 200);
+    track.profiles.set(key, prof);
+  }
+  return prof;
 }
 
 /** Nearest point on the centreline. `hint` (last index) keeps it local and cheap. */
@@ -342,11 +422,20 @@ export function stepCar(car, input, track, dt, mods = {}) {
   car.steer += clamp(input.steer - car.steer, -steerRate * dt, steerRate * dt);
   const maxSteer = maxSteerAt(fwd);
   let yaw = (fwd * Math.tan(car.steer * maxSteer)) / CAR.wheelbase;
-  const surfaceGrip = onTrack ? 1 : onKerb ? 0.85 : 0.55;
-  const G = CAR.grip * gripMult * surfaceGrip * (input.handbrake ? 0.75 : 1);
+  const surfaceGrip = onTrack ? 1 : onKerb ? 0.75 : 0.5;
+  // Friction circle: hard braking or wheelspin eats into the grip left for turning
+  const longUse = Math.max((input.brake ?? 0) * (fwd > 60 ? 0.35 : 0), (input.throttle ?? 0) * 0.25 * Math.max(0, 1 - Math.abs(fwd) / CAR.top));
+  const G = gripAt(Math.abs(fwd)) * gripMult * surfaceGrip * (input.handbrake ? 0.75 : 1) * (1 - longUse);
   const need = Math.abs(yaw * fwd);
   car.sliding = need > G ? Math.min(1, (need - G) / G) : Math.max(0, car.sliding - dt * 3);
-  if (need > G && Math.abs(fwd) > 1) yaw = (Math.sign(yaw) * G) / Math.abs(fwd);
+  if (need > G && Math.abs(fwd) > 1) {
+    yaw = (Math.sign(yaw) * G) / Math.abs(fwd);
+    // Past the limit the tyres scrub: the car runs wide AND bleeds speed
+    const excess = Math.min(1, (need - G) / need);
+    fwd -= Math.sign(fwd) * Math.min(Math.abs(fwd), excess * 650 * dt);
+  }
+  // Kerbs rattle the car and cost speed
+  if (onKerb && Math.abs(fwd) > 150) fwd *= Math.exp(-0.35 * dt);
   if (input.handbrake && Math.abs(fwd) > 120) {
     yaw += car.steer * 1.4;
     fwd *= Math.exp(-0.5 * dt);
@@ -399,30 +488,30 @@ export function stepCar(car, input, track, dt, mods = {}) {
 // ─────────────────────────── AI ───────────────────────────
 export function aiInput(car, race, dt) {
   const track = race.track;
-  const { n, path, nor, line, radii } = track;
+  const { n, path, nor, line } = track;
   const sk = car.skill;
   const fwd = Math.max(0, car.fwd);
 
-  // Corner speed limit within braking distance (skill scales grip and brakes)
-  const G = CAR.grip * sk.grip * 0.93;
-  const B = CAR.brake * 0.78;
-  let target = CAR.top * sk.pace * (car.drsOpen ? 1.1 : 1) * (car.slip ? 1.04 : 1);
-  const reach = Math.ceil((fwd * fwd) / (2 * B) / STEP) + 6;
-  for (let k = 0; k < reach; k++) {
-    const i = (car.idx + k) % n;
-    // The racing line swings wide, so the car can use a radius a little larger than the centreline's
-    const r = Math.max(radii[i], 8) + track.width * 0.1;
-    const vc = Math.min(Math.sqrt(G * r), steerSpeedFor(r));
-    const allowed = Math.sqrt(vc * vc + 2 * B * k * STEP);
-    if (allowed < target) target = allowed;
+  // Follow a speed plan for this driver's grip: weaker drivers leave more margin in every corner
+  const m = sk.grip * (0.975 - sk.noise * 0.45);
+  const prof = speedProfile(track, m);
+  const look = 1 + Math.round((fwd * 0.04) / STEP);
+  let target = Math.min(prof[(car.idx + look) % n], CAR.top * sk.pace * (car.drsOpen ? 1.12 : 1) * (car.slip ? 1.05 : 1) * 1.02);
+
+  // Racecraft: don't drive into the car ahead on the same piece of road
+  for (const o of race.cars) {
+    if (o === car) continue;
+    const gap = o.total - car.total;
+    if (gap > 0 && gap < 90 && Math.abs(o.d - car.d) < 26) target = Math.min(target, Math.max(0, o.fwd) + (gap - 34) * 2.5);
   }
+  car.aiTarget = target;
 
   // Stanley path tracking: align with the (slightly previewed) path heading and close the
   // cross-track error to the racing line, scaled by speed so it stays stable at any pace.
   const preview = (car.idx + 2 + Math.round(fwd * 0.06 / STEP)) % n;
   const tn = track.tan[preview];
   const headingErr = wrapAngle(Math.atan2(tn[1], tn[0]) - car.heading);
-  const wantD = clamp(line[preview] + car.lineBias, -track.width * 0.3, track.width * 0.3);
+  const wantD = clamp(line[preview] + car.lineBias, -(track.width / 2 - 16), track.width / 2 - 16);
   const cross = car.d - wantD;
   car.noiseT += dt;
   const wobble = sk.noise ? Math.sin(car.noiseT * 1.7) * sk.noise * 0.12 : 0;
@@ -431,14 +520,14 @@ export function aiInput(car, race, dt) {
   const recover = edge > 0 ? -Math.sign(car.d) * Math.min(1, edge / 10) : 0;
   const steer = clamp(delta / maxSteerAt(fwd) + recover, -1, 1);
 
-  car.aiTarget = target;
   let throttle = 0;
   let brake = 0;
-  if (fwd > target + 8) brake = clamp((fwd - target) / 30, 0.45, 1);
-  else throttle = clamp((target - fwd) / 50 + 0.25, 0, 1);
+  if (fwd > target + 6) brake = clamp((fwd - target) / 22, 0.35, 1);
+  else throttle = clamp((target - fwd) / 30 + 0.5, 0, 1);
   // Exit traction: feed the throttle in while still turning, and lift when running out of road
   if (throttle > 0) {
-    throttle *= clamp(1 - Math.abs(headingErr) * 1.6, 0.25, 1);
+    // Lift only when the tyres are actually saturated (sliding), not just because the car is turning
+    throttle *= clamp(1 - car.sliding * 2.5, 0.3, 1);
     if (edge > -24 && Math.sign(car.d) === Math.sign(car.d - wantD)) throttle *= clamp(1 - (edge + 24) / 30, 0.15, 1);
   }
   // Launch: full beans off the line
@@ -455,47 +544,82 @@ export function aiInput(car, race, dt) {
 
 // ─────────────────────────── Race ───────────────────────────
 /**
- * mode: "gp" (10 cars) | "duel" (you + 1 bot) | "trial" (you alone, flying laps) | "demo" (AI only)
+ * mode: "gp" (20 cars) | "duel" (you + 1 bot) | "trial" (you alone, flying laps) | "demo" (AI only)
  */
-export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1 }) {
+function seededRand(seed) {
   let r = seed >>> 0 || 1;
-  const rand = () => {
+  return () => {
     r = (r + 0x6d2b79f5) >>> 0;
     let t = r;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/**
+ * The AI drivers for a race, quickest first: [{ id, livery, skill }]. A Grand Prix field is spread
+ * around the chosen difficulty (front-runners a touch quicker); a duel bot drives at exactly that level.
+ */
+export function makeField({ mode, difficulty = "medium", seed = 1 }) {
+  const rand = seededRand(seed ^ 0x9e3779b9);
   const base = DIFFICULTY[difficulty] || DIFFICULTY.medium;
-  const cars = [];
-  const field = mode === "gp" ? 9 : mode === "duel" ? 1 : mode === "demo" ? 10 : 0;
-  // Player starts in the middle of a GP grid, second in a duel, on pole in a time trial
-  const playerSlot = mode === "gp" ? 6 : mode === "duel" ? 1 : 0;
+  const count = mode === "gp" ? 19 : mode === "duel" ? 1 : mode === "demo" ? 10 : 0;
   const drivers = DRIVERS.slice();
   for (let k = drivers.length - 1; k > 0; k--) {
     const j = Math.floor(rand() * (k + 1));
     [drivers[k], drivers[j]] = [drivers[j], drivers[k]];
   }
-  let slot = 0;
-  let di = 0;
-  const skillFor = (rank) => {
-    if (mode === "duel") return base;
-    // Spread the field around the chosen difficulty: front-runners a touch quicker
-    const spread = (4 - rank) * 0.012;
-    return { ...base, pace: base.pace + spread, grip: base.grip + spread * 0.6 };
-  };
-  const total = mode === "demo" ? 10 : field + 1;
-  for (let k = 0; k < total; k++) {
-    if (mode !== "demo" && k === playerSlot) {
-      cars.push(makeCar("player", PLAYER_LIVERY, track.grid[k], { isPlayer: true }));
-    } else {
-      const liv = drivers[di % drivers.length] || PLAYER_LIVERY;
-      const c = makeCar(`ai${di}`, di >= DRIVERS.length ? { ...liv, code: liv.code + di } : liv, track.grid[k], { skill: skillFor(slot) });
-      di++;
-      slot++;
-      cars.push(c);
+  // "Mixed": the grid spans every level from Noob to Impossible, quickest first
+  const levels = difficulty === "mixed" ? DIFFICULTY_ORDER.slice().reverse() : null;
+  const mid = (count - 1) / 2;
+  return Array.from({ length: count }, (_, rank) => {
+    const liv = drivers[rank % drivers.length];
+    let skill;
+    if (levels) skill = { ...DIFFICULTY[levels[Math.min(levels.length - 1, Math.floor((rank * levels.length) / count))]] };
+    else {
+      // Spread the field around the chosen level: front-runners a touch quicker
+      const spread = mode === "duel" ? 0 : ((mid - rank) / Math.max(1, mid)) * 0.05;
+      skill = { ...base, pace: base.pace + spread, grip: base.grip + spread * 0.6 };
     }
+    return { id: `ai${rank}`, livery: rank >= DRIVERS.length ? { ...liv, code: liv.code + rank } : liv, skill };
+  });
+}
+
+/**
+ * One flying lap for an AI driver on an empty track (qualifying). Returns the lap time in seconds,
+ * with a little random "form" so the order isn't identical every weekend.
+ */
+export function qualifyingLap(track, skill, rand = Math.random) {
+  const race = createRace({ track, mode: "trial", seed: 1 });
+  const car = race.cars[0];
+  car.isPlayer = false;
+  car.skill = skill;
+  race.player = null;
+  const dt = 1 / 120;
+  for (let k = 0; k < 400 * 120; k++) {
+    stepRace(race, null, dt);
+    const lap = car.lapTimes.find((l) => l.valid);
+    if (lap) return lap.time * (1 + (rand() - 0.5) * 0.008);
+    if (car.lapTimes.length > 3) break;
   }
+  return Infinity;
+}
+
+export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1, grid = null }) {
+  const rand = seededRand(seed);
+  const cars = [];
+  // Grid order, front to back: "player" or a field entry. By default the player starts in the middle
+  // of a GP grid, second in a duel, and alone in a time trial.
+  if (!grid) {
+    const field = makeField({ mode, difficulty, seed });
+    const playerSlot = mode === "gp" ? 6 : mode === "duel" ? 1 : 0;
+    grid = mode === "demo" ? field : [...field.slice(0, playerSlot), "player", ...field.slice(playerSlot)];
+  }
+  grid.forEach((entry, k) => {
+    if (entry === "player") cars.push(makeCar("player", PLAYER_LIVERY, track.grid[k], { isPlayer: true }));
+    else cars.push(makeCar(entry.id, entry.livery, track.grid[k], { skill: entry.skill }));
+  });
   for (const c of cars) {
     const pr = project(track, c.x, c.y, -1);
     c.idx = pr.i;
@@ -683,6 +807,9 @@ export function stepRace(race, playerInput, dt) {
 
     // DRS: eligible within 1s of the car ahead at the detection point (always in a time trial)
     const zone = track.drs.find((z) => (z.from <= z.to ? car.idx >= z.from && car.idx <= z.to : car.idx >= z.from || car.idx <= z.to));
+    // "DRS enabled" is announced on entering the activation zone, not back at the detection point
+    if (zone && !car.inDrsZone && car.drsEligible && car.isPlayer) emit(race, { type: "drsReady", car: car.id });
+    car.inDrsZone = !!zone;
     if (!zone) {
       if (car.drsOpen) car.drsOpen = false;
     } else if (car.drsEligible && input.drs && !car.drsOpen && input.brake < 0.1) {
@@ -756,6 +883,21 @@ export function stepRace(race, playerInput, dt) {
       car.offTrack = false;
     }
 
+    // Corner cutting (separate from the lenient running-wide limits): ground gained off the road on
+    // the INSIDE of a corner, e.g. straight across a chicane, costs 2 s in a race and deletes the lap.
+    const offRoad = Math.abs(car.d) > track.width / 2 + 16;
+    const moved = (car.idx - prevIdx + track.n) % track.n;
+    if (offRoad && moved < track.n / 2 && Math.sign(car.d) === Math.sign(track.curv[car.idx])) car.cutGain = (car.cutGain || 0) + moved * STEP;
+    if (!offRoad && car.cutGain) {
+      if (car.cutGain > CUT_GAIN && car.laps >= 0) {
+        car.lapValid = false;
+        const pen = race.mode !== "trial" ? CUT_PENALTY : 0;
+        car.penalty += pen;
+        emit(race, { type: "cut", car: car.id, penalty: pen });
+      }
+      car.cutGain = 0;
+    }
+
     const before = car.idx;
     trackProgress(race, car, prevIdx);
     // DRS detection
@@ -770,7 +912,6 @@ export function stepRace(race, playerInput, dt) {
           const gap = ahead ? gapBetween(race, ahead, car) : Infinity;
           car.drsEligible = car.laps >= 1 && gap < 1.0;
         }
-        if (car.isPlayer && car.drsEligible) emit(race, { type: "drsReady", car: car.id });
       }
     }
   }
@@ -807,19 +948,43 @@ export function stepRace(race, playerInput, dt) {
     }
   }
 
-  // AI overtaking: pull out of the car ahead's wake when closing
+  // AI racecraft. Attack: when closing on the car ahead, go for the inside of the next corner (or the
+  // side it leaves open). Defend: with a quicker car right behind before a corner, cover the inside.
+  const { n: tn, curv, line: tline, width: tw } = track;
+  const insideOfNextCorner = (idx) => {
+    let c = 0;
+    for (let k = 8; k < 70; k += 3) c += curv[(idx + k) % tn];
+    return Math.abs(c) > 0.004 ? Math.sign(c) : 0;
+  };
   for (const car of cars) {
-    if (car.isPlayer) continue;
-    let bias = 0;
+    if (car.isPlayer || car.finished) continue;
+    let want = 0;
+    let ahead = null;
+    let aheadGap = Infinity;
+    let behind = null;
+    let behindGap = Infinity;
     for (const o of cars) {
       if (o === car) continue;
       const gap = o.total - car.total;
-      if (gap > 0 && gap < 110) {
-        const side = o.d - car.d;
-        if (Math.abs(side) < 30) bias = side > 0 ? -34 : 34;
+      if (gap > 0 && gap < aheadGap) {
+        aheadGap = gap;
+        ahead = o;
+      } else if (gap < 0 && -gap < behindGap) {
+        behindGap = -gap;
+        behind = o;
       }
     }
-    car.lineBias += clamp(bias - car.lineBias, -60 * dt, 60 * dt);
+    const here = tline[car.idx];
+    if (ahead && aheadGap < 170 && (car.fwd > ahead.fwd - 15 || aheadGap < 70)) {
+      let side = insideOfNextCorner(car.idx) || Math.sign(car.d - ahead.d) || 1;
+      // The door's shut on that side: take the other one
+      if (Math.sign(ahead.d) === side && Math.abs(ahead.d) > tw * 0.18) side = -side;
+      want = side * tw * 0.28 - here;
+    } else if (behind && behindGap < 70 && behind.fwd > car.fwd - 10) {
+      const inside = insideOfNextCorner(car.idx);
+      if (inside) want = inside * tw * 0.2 - here;
+    }
+    car.lineBias += clamp(want - car.lineBias, -80 * dt, 80 * dt);
   }
 
   race.order = cars.slice().sort((a, b) => {

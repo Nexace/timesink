@@ -315,3 +315,23 @@
     transform-origin: top left;
   }
 }
+
+/* Touch screens: every button is at least a comfortable finger-sized target */
+@media (pointer: coarse) {
+  .btn-hangar-toggle {
+    min-height: 36px;
+  }
+}
+
+/* Menus never get cut off on a small screen: they scroll inside the game area instead */
+.av-modal {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@supports (align-items: safe center) {
+  .av-modal {
+    align-items: safe center;
+    justify-content: safe center;
+  }
+}
+

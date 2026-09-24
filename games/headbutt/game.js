@@ -25,6 +25,7 @@ import {
   mirrorCar
 } from "./data.js";
 import { domeSegments } from "./maps.js";
+import { enableTouchLayout } from "/shared/touchlayout.js";
 import * as art from "./art.js";
 
 initShell({ crumb: "Headbutt" });
@@ -65,18 +66,47 @@ window.addEventListener("keyup", (e) => keys.delete(e.code));
 window.addEventListener("blur", () => keys.clear());
 const down = (...codes) => codes.some((c) => keys.has(c));
 
-// Touch: left half = back, right half = forward, two-finger tap = boost
+// Touch: the on-screen ◀ ▶ BOOST buttons, or hold the left / right half of the arena (both = boost).
+// Every finger is tracked on its own, so lifting one doesn't let go of the others.
 const touch = { l: false, r: false, boost: false };
+const held = { l: false, r: false, boost: false };
+const fingers = new Map();
+const syncTouch = () => {
+  const halves = [...fingers.values()];
+  touch.l = held.l || halves.includes("l");
+  touch.r = held.r || halves.includes("r");
+  touch.boost = held.boost || (halves.includes("l") && halves.includes("r"));
+};
 canvas.addEventListener("pointerdown", (e) => {
   if (game.screen !== "play" && game.screen !== "countdown") return;
   const rect = canvas.getBoundingClientRect();
-  if (e.clientX - rect.left < rect.width / 2) touch.l = true;
-  else touch.r = true;
-  if (touch.l && touch.r) touch.boost = true;
+  fingers.set(e.pointerId, e.clientX - rect.left < rect.width / 2 ? "l" : "r");
+  syncTouch();
 });
-const clearTouch = () => Object.assign(touch, { l: false, r: false, boost: false });
-canvas.addEventListener("pointerup", clearTouch);
-canvas.addEventListener("pointercancel", clearTouch);
+const liftFinger = (e) => {
+  fingers.delete(e.pointerId);
+  syncTouch();
+};
+canvas.addEventListener("pointerup", liftFinger);
+canvas.addEventListener("pointercancel", liftFinger);
+const touchButtons = [...document.querySelectorAll("#hb-touch [data-hb]")];
+for (const b of touchButtons) {
+  const k = b.dataset.hb;
+  const set = (v) => (e) => {
+    e.preventDefault();
+    held[k] = v;
+    b.classList.toggle("is-pressed", v);
+    syncTouch();
+  };
+  b.addEventListener("pointerdown", set(true));
+  for (const t of ["pointerup", "pointercancel", "pointerleave"]) b.addEventListener(t, set(false));
+}
+window.addEventListener("blur", () => {
+  fingers.clear();
+  Object.assign(held, { l: false, r: false, boost: false });
+  syncTouch();
+});
+enableTouchLayout({ id: "headbutt", frame: document.getElementById("hb-touch"), items: touchButtons });
 
 function humanInput(idx) {
   if (game.cfg.mode === "friend") {

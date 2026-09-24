@@ -131,3 +131,16 @@ main.wrap.stage-page {
     transform-origin: top left;
   }
 }
+
+/* Menus never get cut off on a small screen: they scroll inside the game area instead */
+.or-modal {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@supports (align-items: safe center) {
+  .or-modal {
+    align-items: safe center;
+    justify-content: safe center;
+  }
+}
+

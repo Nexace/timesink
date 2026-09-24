@@ -369,3 +369,50 @@ main.wrap.stage-page {
     margin: 0 12px;
   }
 }
+
+/* ── Touch buttons: two big round buttons at the bottom corners (movable via MOVE CONTROLS) ── */
+.tr-touch {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 12px;
+  pointer-events: none;
+}
+@media (hover: none) and (pointer: coarse) {
+  .tr-touch {
+    display: flex;
+  }
+}
+html.touch-layout-editing .tr-touch {
+  z-index: 30;
+}
+.tr-touch .touch-zone {
+  position: relative;
+  top: auto;
+  bottom: auto;
+  left: auto;
+  right: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 84px;
+  height: 84px;
+  padding: 0;
+  border: 2px solid rgba(255, 170, 60, 0.6);
+  border-radius: 50%;
+  background: rgba(20, 10, 4, 0.35);
+  pointer-events: auto;
+  touch-action: none;
+}
+.tr-touch .touch-zone.is-pressed {
+  background: rgba(255, 170, 60, 0.4);
+}
+.tr-touch .zone-label {
+  font-size: 9px;
+  line-height: 1.5;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.85);
+}

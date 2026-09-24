@@ -10,6 +10,7 @@ import { playTone, playLaser, playExplosion } from "/shared/audio.js";
 import { saveGameScore, loadGameScore } from "/shared/save.js";
 import { createParticles, starfield, vignette, scanlines, glow, shade, rgba, tinted } from "/shared/gfx.js";
 import { buildRunnerArt, BIOME_ART } from "./art.js";
+import { enableTouchLayout } from "/shared/touchlayout.js";
 
 initShell({ crumb: "Teraform Run" });
 
@@ -332,20 +333,24 @@ const touchLeft = document.getElementById("touch-left");
 const touchRight = document.getElementById("touch-right");
 
 function setupTouch(el, pressHandler, releaseHandler) {
-  el.addEventListener("touchstart", (e) => { e.preventDefault(); pressHandler(); }, { passive: false });
-  el.addEventListener("touchend", (e) => { e.preventDefault(); releaseHandler(); }, { passive: false });
-  el.addEventListener("touchcancel", (e) => { e.preventDefault(); releaseHandler(); }, { passive: false });
+  el.addEventListener("touchstart", (e) => { e.preventDefault(); el.classList?.add("is-pressed"); pressHandler(); }, { passive: false });
+  el.addEventListener("touchend", (e) => { e.preventDefault(); el.classList?.remove("is-pressed"); releaseHandler(); }, { passive: false });
+  el.addEventListener("touchcancel", (e) => { e.preventDefault(); el.classList?.remove("is-pressed"); releaseHandler(); }, { passive: false });
 }
 
-setupTouch(touchRight, () => {
+const jumpPress = () => {
   if (state === STATES.IDLE) { startRun(); return; }
   if (state === STATES.RUNNING) handleJumpPress();
-}, handleJumpRelease);
+};
+setupTouch(touchRight, jumpPress, handleJumpRelease);
+// Tapping the track anywhere (not on a button) jumps too
+setupTouch(canvas, jumpPress, handleJumpRelease);
 
 setupTouch(touchLeft, () => {
   if (state === STATES.IDLE) { startRun(); return; }
   if (state === STATES.RUNNING) handleDuckPress();
 }, handleDuckRelease);
+enableTouchLayout({ id: "teraform-run", frame: document.getElementById("tr-touch"), items: [touchLeft, touchRight] });
 
 // Start overlay click
 startOverlay.addEventListener("click", () => {

@@ -28,6 +28,7 @@ import {
   hasWon
 } from "./world.js";
 import * as art from "./art.js";
+import { enableTouchLayout } from "/shared/touchlayout.js";
 
 initShell({ crumb: "IronSail" });
 
@@ -229,17 +230,40 @@ window.addEventListener("keydown", (e) => {
 });
 window.addEventListener("keyup", (e) => keys.delete(e.code));
 window.addEventListener("blur", () => keys.clear());
-canvas.addEventListener("pointermove", (e) => {
+const aimAt = (e) => {
   const r = canvas.getBoundingClientRect();
   mouse.x = ((e.clientX - r.left) / r.width) * W;
   mouse.y = ((e.clientY - r.top) / r.height) * H;
-});
+};
+canvas.addEventListener("pointermove", aimAt);
 canvas.addEventListener("pointerdown", (e) => {
   if (screen !== "sail") return;
+  // A tap has no hover before it: aim at the finger straight away, not at the last position
+  aimAt(e);
   mouse.down = true;
   canvas.setPointerCapture?.(e.pointerId);
 });
 canvas.addEventListener("pointerup", () => (mouse.down = false));
+canvas.addEventListener("pointercancel", () => (mouse.down = false));
+
+// Touch buttons: they press the same keys as the keyboard
+const touchButtons = [...document.querySelectorAll("#is-touch [data-key]")];
+for (const b of touchButtons) {
+  const code = b.dataset.key;
+  b.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    b.classList.add("is-pressed");
+    window.dispatchEvent(new KeyboardEvent("keydown", { code, key: code === "Space" ? " " : code }));
+  });
+  for (const t of ["pointerup", "pointercancel", "pointerleave"]) {
+    b.addEventListener(t, () => {
+      if (!b.classList.contains("is-pressed")) return;
+      b.classList.remove("is-pressed");
+      window.dispatchEvent(new KeyboardEvent("keyup", { code, key: code }));
+    });
+  }
+}
+enableTouchLayout({ id: "ironsail", frame: document.getElementById("is-touch"), items: touchButtons });
 const down = (...c) => c.some((k) => keys.has(k));
 
 // ─────────────────────────── helpers ───────────────────────────

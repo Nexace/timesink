@@ -539,3 +539,16 @@
     font-size: 10px;
   }
 }
+
+/* Menus never get cut off on a small screen: they scroll inside the game area instead */
+.sl-modal {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@supports (align-items: safe center) {
+  .sl-modal {
+    align-items: safe center;
+    justify-content: safe center;
+  }
+}
+

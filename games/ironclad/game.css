@@ -1005,3 +1005,12 @@ main.wrap.stage-page {
 #ic-canvas {
   cursor: grab;
 }
+
+/* Touch screens: every button is at least a comfortable finger-sized target */
+@media (pointer: coarse) {
+  .ic-btn-speed,
+  .ic-btn-jump {
+    min-height: 36px;
+    min-width: 40px;
+  }
+}

@@ -383,3 +383,10 @@
     0 0 0 2px #1a1d22,
     0 6px 0 #22262d;
 }
+
+/* Touch screens: every button is at least a comfortable finger-sized target */
+@media (pointer: coarse) {
+  .btn-micro {
+    min-height: 36px;
+  }
+}

@@ -36,6 +36,45 @@ body[data-page="game"] main.wrap.stage-page {
   outline: none;
 }
 
+/* Touch buttons over the arena (movable: MOVE CONTROLS in the stage bar) */
+.hb-touch {
+  display: none;
+}
+@media (pointer: coarse) {
+  .hb-touch {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 8px;
+    pointer-events: none;
+  }
+  .hb-touch__side {
+    display: flex;
+    gap: 8px;
+  }
+  .hb-touch button {
+    width: 56px;
+    height: 56px;
+    font-family: var(--font-display, monospace);
+    font-size: 9px;
+    color: #fff;
+    background: rgba(12, 6, 24, 0.5);
+    border: 1px solid rgba(153, 51, 255, 0.7);
+    border-radius: 50%;
+    pointer-events: auto;
+    touch-action: none;
+  }
+  .hb-touch button.is-pressed {
+    background: rgba(153, 51, 255, 0.55);
+  }
+}
+html.touch-layout-editing .hb-touch {
+  z-index: 30;
+}
+
 .console {
   width: 100%;
   max-width: 100%;
@@ -297,3 +336,16 @@ body[data-page="game"] main.wrap.stage-page {
   color: #9a8cc8;
   font-size: 0.85em;
 }
+
+/* Menus never get cut off on a small screen: they scroll inside the game area instead */
+.hb-overlay {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@supports (align-items: safe center) {
+  .hb-overlay {
+    align-items: safe center;
+    justify-content: safe center;
+  }
+}
+

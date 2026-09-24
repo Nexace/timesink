@@ -18,6 +18,7 @@ import { playTone, playLaser, playExplosion, sfx } from "/shared/audio.js";
 import { saveGameScore, loadGameScore } from "/shared/save.js";
 import { glow, tinted, vignette, scanlines } from "/shared/gfx.js";
 import { buildSkyArt, platformSprite, drawSky } from "./art.js";
+import { enableTouchLayout } from "/shared/touchlayout.js";
 
 initShell({ crumb: "SkyDoodle" });
 
@@ -224,6 +225,7 @@ document.getElementById("btn-skip-gyro")?.addEventListener("click", () => {
 // Touch Fallback & Tap to Shoot
 const leftZone = document.getElementById("touch-left");
 const rightZone = document.getElementById("touch-right");
+enableTouchLayout({ id: "skydoodle", frame: document.getElementById("touch-zones"), items: [leftZone, rightZone].filter(Boolean) });
 
 leftZone?.addEventListener("pointerdown", (e) => {
   e.preventDefault();

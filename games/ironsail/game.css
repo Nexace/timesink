@@ -29,6 +29,46 @@ main.wrap.stage-page {
   outline: none;
 }
 
+/* Touch buttons (steer by holding a finger on the sea; the buttons are movable via MOVE CONTROLS) */
+.is-touch {
+  display: none;
+}
+@media (pointer: coarse) {
+  .is-touch {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 8px;
+    pointer-events: none;
+  }
+  .is-touch__side {
+    display: flex;
+    gap: 8px;
+  }
+  .is-touch button {
+    width: 54px;
+    height: 54px;
+    font-family: var(--font-display, monospace);
+    font-size: 8px;
+    line-height: 1.2;
+    color: #fff;
+    background: rgba(4, 24, 34, 0.55);
+    border: 1px solid rgba(0, 191, 165, 0.7);
+    border-radius: 50%;
+    pointer-events: auto;
+    touch-action: none;
+  }
+  .is-touch button.is-pressed {
+    background: rgba(0, 191, 165, 0.5);
+  }
+}
+html.touch-layout-editing .is-touch {
+  z-index: 30;
+}
+
 .is-modal {
   position: absolute;
   inset: 0;
@@ -192,3 +232,16 @@ main.wrap.stage-page {
   justify-self: center;
   border: 1px solid #0e5f56;
 }
+
+/* Menus never get cut off on a small screen: they scroll inside the game area instead */
+.is-modal {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@supports (align-items: safe center) {
+  .is-modal {
+    align-items: safe center;
+    justify-content: safe center;
+  }
+}
+

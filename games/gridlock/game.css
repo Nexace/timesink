@@ -584,3 +584,12 @@
   color: #39ff14;
   text-shadow: 0 0 6px #00ff41, 0 0 14px rgba(0, 255, 65, 0.5);
 }
+
+/* Touch screens: every button is at least a comfortable finger-sized target */
+@media (pointer: coarse) {
+  .mode-btn,
+  .action-btn,
+  .tier-select {
+    min-height: 36px;
+  }
+}

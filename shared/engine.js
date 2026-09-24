@@ -4,6 +4,8 @@
  * AABB/Circle collisions, and grid A* pathfinding.
  */
 
+import { enableTouchLayout } from "./touchlayout.js";
+
 export function createGameLoop({ update, render, canvas, targetFps = 60, onPause = null }) {
   let lastTime = performance.now();
   let running = false;
@@ -376,6 +378,52 @@ function setupMobileTouchUI(canvas, stick, buttonStates, buttonDefs) {
   window.addEventListener("touchcancel", handleEnd, { passive: false });
 
   document.body.appendChild(container);
+  document.body.classList.add("has-touch-controls");
+
+  // Only show the controls while the game itself is on screen (scrolled to the footer they'd sit on
+  // top of its links), and let the player move / resize them
+  if (canvas && "IntersectionObserver" in window) {
+    new IntersectionObserver(
+      ([e]) => {
+        const off = e.intersectionRatio < 0.2;
+        container.classList.toggle("is-offscreen", off);
+        if (off) releaseAll();
+      },
+      { threshold: [0, 0.2, 0.5] }
+    ).observe(canvas);
+  }
+  // ...and step aside while a game menu / dialog is up over the play area, so they never sit on
+  // top of its buttons
+  const MENUS = '[role="dialog"], dialog[open], .modal-backdrop, [class*="-modal"], [class*="-overlay"], .mb-title';
+  const releaseAll = () => {
+    for (const id of Object.keys(buttonStates)) buttonStates[id] = false;
+    handleEnd({});
+  };
+  if (canvas && typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches) {
+    setInterval(() => {
+      const c = canvas.getBoundingClientRect();
+      let menu = false;
+      for (const el of document.querySelectorAll(MENUS)) {
+        if (container.contains(el) || el.closest("[hidden]") || !el.getClientRects().length) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === "none" || cs.visibility === "hidden" || +cs.opacity < 0.1) continue;
+        const r = el.getBoundingClientRect();
+        const w = Math.min(r.right, c.right) - Math.max(r.left, c.left);
+        const h = Math.min(r.bottom, c.bottom) - Math.max(r.top, c.top);
+        if (w > 0 && h > 0 && w * h > c.width * c.height * 0.25 && el.querySelector("button, a[href], input")) {
+          menu = true;
+          break;
+        }
+      }
+      if (menu !== container.classList.contains("is-menu")) {
+        container.classList.toggle("is-menu", menu);
+        if (menu) releaseAll();
+      }
+    }, 400);
+  }
+  stickZone.dataset.touchId = "stick";
+  const slug = location.pathname.split("/").filter(Boolean)[1] || "game";
+  enableTouchLayout({ id: slug, frame: container, items: [stickZone, ...actionsZone.querySelectorAll(".touch-btn")] });
 }
 
 // ==========================================

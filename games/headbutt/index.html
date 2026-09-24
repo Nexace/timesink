@@ -24,6 +24,15 @@
       <div class="hb-screen">
         <div class="hb-canvas-container">
           <canvas id="hb-canvas" width="1280" height="720" tabindex="0" aria-label="Arena"></canvas>
+          <div class="hb-touch" id="hb-touch" aria-hidden="true">
+            <div class="hb-touch__side">
+              <button type="button" data-hb="l" data-touch-id="back">&#9664;</button>
+              <button type="button" data-hb="r" data-touch-id="fwd">&#9654;</button>
+            </div>
+            <div class="hb-touch__side">
+              <button type="button" data-hb="boost" data-touch-id="boost">BOOST</button>
+            </div>
+          </div>
           <div class="hb-overlay" id="hb-overlay" role="dialog" aria-label="Headbutt menu"></div>
         </div>
         <div class="console">

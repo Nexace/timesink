@@ -43,12 +43,14 @@
           <!-- Game Canvas -->
           <canvas id="game-canvas" width="1440" height="700"></canvas>
 
-          <!-- Touch Zones -->
-          <div class="touch-zone touch-zone-left" id="touch-left">
-            <span class="zone-label">DUCK / SLAM</span>
-          </div>
-          <div class="touch-zone touch-zone-right" id="touch-right">
-            <span class="zone-label">JUMP</span>
+          <!-- Touch buttons (movable via MOVE CONTROLS); a tap anywhere else on the track also jumps -->
+          <div class="tr-touch" id="tr-touch">
+            <div class="touch-zone touch-zone-left" id="touch-left" data-touch-id="duck" role="button" aria-label="Duck or slam">
+              <span class="zone-label">DUCK<br />SLAM</span>
+            </div>
+            <div class="touch-zone touch-zone-right" id="touch-right" data-touch-id="jump" role="button" aria-label="Jump">
+              <span class="zone-label">JUMP</span>
+            </div>
           </div>
 
           <!-- Start Overlay -->

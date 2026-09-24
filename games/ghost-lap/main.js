@@ -688,7 +688,7 @@ function handleEvents(race) {
     } else if (e.type === "noAdvantage") {
       banner("OFF TRACK", "NO ADVANTAGE • NO STRIKE", "#8a95a8", 1.4, 12);
     } else if (e.type === "ersBlocked") {
-      const why = { drs: "NOT WITH DRS OPEN", empty: "BATTERY FLAT • BRAKE TO HARVEST", lap: "LAP ALLOWANCE USED • RESETS AT THE LINE", throttle: "NEEDS THROTTLE" }[e.reason];
+      const why = { drs: "NOT WITH DRS OPEN", empty: "BATTERY FLAT • BRAKE TO HARVEST", throttle: "NEEDS THROTTLE" }[e.reason];
       if (e.reason !== "throttle") {
         sfx.deny();
         banner("ERS LOCKED", why, "#8a95a8", 1.6, 12);

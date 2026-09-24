@@ -83,16 +83,16 @@ export const DRIVERS = [
   { name: "G. FERRARO", code: "FER", color: "#b5179e", accent: "#4cc9f0" },
   { name: "O. HALVORSEN", code: "HAL", color: "#06d6a0", accent: "#073b4c" }
 ];
-// ERS: the battery (0–1) charges under braking and deploys for extra shove. Strategy lives in
-// the limits — a per-lap deploy budget, a per-lap harvest cap, and no deploying with DRS open.
+// ERS: the battery (0–1) charges under braking and deploys for extra shove. Use it whenever there's
+// charge (not with DRS open); every braking zone puts a chunk back, up to a cap on what one lap can
+// recover, so the strategy is where to spend what the brakes give you.
 export const ERS = {
-  start: 0.6,
-  power: 1.22, // engine force multiplier while deploying (also lifts top speed by about 7%)
-  top: 1, // no separate top-speed bonus
-  drain: 0.17, // battery per second of deployment (about 6s from full)
-  perLap: 0.6, // most battery that can be spent in one lap
-  harvest: 0.42, // battery per second of full braking from top speed
-  harvestLap: 0.55 // most battery that can be recovered in one lap
+  start: 0.8,
+  power: 1.3, // engine force multiplier while deploying
+  top: 1.04, // and about +13 km/h on the top speed
+  drain: 0.1, // battery per second of deployment (10 s from full)
+  harvest: 0.6, // battery per second of hard braking (a big stop is worth ~20-30%)
+  harvestLap: 0.8 // most battery that can be recovered in one lap (~8 s of boost)
 };
 
 // Stewarding is looser than F1 but still fair. F1: all four wheels past the white line, three
@@ -654,12 +654,10 @@ export function aiInput(car, race, dt) {
   }
   // Launch: full beans off the line
   if (fwd < 60 && race.phase === "racing") throttle = 1;
-  // ERS: deploy out of slow corners and when attacking or defending, keeping budget for later in the lap
-  const lapFrac = (((car.s / track.L) % 1) + 1) % 1;
-  const budgetLeft = ERS.perLap - car.ersUsedLap;
+  // ERS: deploy out of slow corners and when attacking or defending; spend freely when the battery's full
   const pressure = (car.gapAhead > 0 && car.gapAhead < 1.2) || car.defending;
   const exit = fwd < CAR.top * 0.7 && throttle > 0.8;
-  const spare = budgetLeft > ERS.perLap * (1 - lapFrac) * 0.6;
+  const spare = car.battery > 0.5;
   const ers = throttle > 0.8 && car.battery > 0.08 && (exit || pressure || spare) && (sk.pace >= 0.8 || exit);
   return { throttle, brake, steer, handbrake: false, drs: true, ers };
 }
@@ -789,6 +787,9 @@ function crossLine(race, car) {
     car.sectorStart = t;
     car.sector = 0;
     car.lapValid = true;
+    // The out-lap / run from the grid doesn't eat into lap 1's ERS harvest cap
+    car.ersUsedLap = 0;
+    car.ersHarvestLap = 0;
     return;
   }
   const lapTime = t - car.lapStart;
@@ -954,18 +955,18 @@ export function stepRace(race, playerInput, dt) {
       }
     }
 
-    // ERS deploy: blocked while DRS is open, capped per lap, needs charge and throttle
-    const ersBudget = ERS.perLap - car.ersUsedLap;
+    // ERS deploy: needs charge and throttle, blocked while DRS is open
     const wantErs = !!input.ers && race.phase === "racing";
-    const canErs = wantErs && !car.drsOpen && car.battery > 0.002 && ersBudget > 0.002 && (input.throttle ?? 0) > 0.3 && car.fwd > 30;
+    const canErs = wantErs && !car.drsOpen && car.battery > 0.002 && (input.throttle ?? 0) > 0.3 && car.fwd > 30;
     if (car.isPlayer && wantErs && !canErs && !car.ersBlockedShown) {
       car.ersBlockedShown = true;
-      const reason = car.drsOpen ? "drs" : car.battery <= 0.002 ? "empty" : ersBudget <= 0.002 ? "lap" : "throttle";
+      const reason = car.drsOpen ? "drs" : car.battery <= 0.002 ? "empty" : "throttle";
       emit(race, { type: "ersBlocked", car: car.id, reason });
     }
-    if (!wantErs || canErs) car.ersBlockedShown = false;
+    // One "ERS LOCKED" message per press, not a flicker every time a sliver of charge comes and goes
+    if (!wantErs) car.ersBlockedShown = false;
     if (canErs) {
-      const use = Math.min(car.battery, ersBudget, ERS.drain * dt);
+      const use = Math.min(car.battery, ERS.drain * dt);
       car.battery -= use;
       car.ersUsedLap += use;
     }
@@ -980,12 +981,14 @@ export function stepRace(race, playerInput, dt) {
     const hit = stepCar(car, input, track, dt, mods);
     if (hit && car.isPlayer) emit(race, { type: "wall", car: car.id, speed: car.speed });
 
-    // Harvest under braking (MGU-K), capped per lap
+    // Harvest under braking (MGU-K), capped per lap. Slow-speed braking recovers less.
+    car.harvesting = false;
     if ((input.brake ?? 0) > 0.05 && car.fwd > 60 && car.battery < 1) {
       const room = Math.max(0, ERS.harvestLap - car.ersHarvestLap);
-      const h = Math.min(room, 1 - car.battery, input.brake * ERS.harvest * Math.min(1, car.fwd / CAR.top) * dt);
+      const h = Math.min(room, 1 - car.battery, input.brake * ERS.harvest * clamp(car.fwd / (CAR.top * 0.5), 0.35, 1) * dt);
       car.battery += h;
       car.ersHarvestLap += h;
+      car.harvesting = h > 0;
     }
 
     // Track limits: judged when the car rejoins. Kerb-hopping is fine; the whole car has to be past

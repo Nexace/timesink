@@ -131,8 +131,9 @@ function speedPanel(ctx, car, x, y, drsState, now = 0) {
   if (car.slip) text(ctx, "TOW", x + 90, y + 95, { size: 9, color: "#6fd3ff" });
   if (car.surface !== "track") text(ctx, car.surface === "kerb" ? "KERB" : "OFF", x + 136, y + 95, { size: 9, color: "#ff9a3c" });
   if (car.ersOn) text(ctx, "DEPLOY", x + 190, y + 95, { size: 9, color: Math.sin(now * 14) > -0.3 ? "#ffd400" : "#b88a00" });
+  else if (car.harvesting) text(ctx, "HARVEST", x + 190, y + 95, { size: 9, color: "#22e36b" });
 
-  // ERS: battery (tall bar) and this lap's remaining deploy budget (thin bar)
+  // ERS: battery (tall bar) and what the brakes can still recover this lap (thin bar)
   const bx = x + 306;
   const by = y + 12;
   const bh = 74;
@@ -140,7 +141,7 @@ function speedPanel(ctx, car, x, y, drsState, now = 0) {
   ctx.fillStyle = "rgba(255,255,255,0.08)";
   ctx.fillRect(bx, by, 26, bh);
   const lvl = Math.max(0, Math.min(1, car.battery ?? 0));
-  const col = locked ? "#55606f" : car.ersOn ? "#ffd400" : lvl < 0.15 ? "#ff4d5e" : "#22c3ff";
+  const col = locked ? "#55606f" : car.ersOn ? "#ffd400" : car.harvesting ? "#22e36b" : lvl < 0.15 ? "#ff4d5e" : "#22c3ff";
   ctx.fillStyle = col;
   ctx.fillRect(bx + 2, by + bh - 2 - (bh - 4) * lvl, 22, (bh - 4) * lvl);
   ctx.strokeStyle = "rgba(255,255,255,0.25)";
@@ -151,10 +152,10 @@ function speedPanel(ctx, car, x, y, drsState, now = 0) {
     ctx.lineTo(bx + 26, by + (bh * k) / 4);
     ctx.stroke();
   }
-  const budget = Math.max(0, ERS.perLap - (car.ersUsedLap ?? 0)) / ERS.perLap;
+  const budget = Math.max(0, ERS.harvestLap - (car.ersHarvestLap ?? 0)) / ERS.harvestLap;
   ctx.fillStyle = "rgba(255,255,255,0.08)";
   ctx.fillRect(bx + 32, by, 8, bh);
-  ctx.fillStyle = "#ff9a3c";
+  ctx.fillStyle = "#22e36b";
   ctx.fillRect(bx + 32, by + bh - bh * budget, 8, bh * budget);
   text(ctx, locked ? "LOCK" : "ERS", bx + 20, y + 100, { size: 7, color: locked ? "#8a95a8" : "#8fb4ff", align: "center" });
   text(ctx, `${Math.round(lvl * 100)}%`, bx + 13, by - 2 + 0, { size: 6, color: "#d7deea", align: "center" });

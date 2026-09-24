@@ -57,6 +57,9 @@ describe("Ghost Lap race simulation", () => {
     const race = createRace({ track, mode: "gp", laps: 3, seed: 4 });
     run(race, 8);
     const p = race.player;
+    // Just the player on track, so no rival can bump it mid-test (contact is exempt, tested below)
+    race.cars = race.cars.filter((c) => c.isPlayer);
+    race.order = race.order.filter((c) => c.isPlayer);
     // Hold the whole car past the kerb for a while, then rejoin at `backSpeed` (px/s)
     const excursion = (holdSteps, { backSpeed = 500, hit = false } = {}) => {
       const i = p.idx;
@@ -126,7 +129,7 @@ describe("Ghost Lap race simulation", () => {
     assert.ok(boosted.fwd > plain.fwd + 10, `ERS ${boosted.fwd} vs ${plain.fwd}`);
     assert.ok(boosted.used > 0 && plain.used === 0);
 
-    // Locked with DRS open, and a lap's allowance can't be exceeded
+    // Locked with DRS open; usable again as soon as there's charge
     straight();
     p.battery = 1;
     p.ersUsedLap = 0;
@@ -139,9 +142,16 @@ describe("Ghost Lap race simulation", () => {
     assert.equal(p.ersOn, false);
     assert.equal(p.battery, before);
     p.drsOpen = false;
-    p.ersUsedLap = ERS.perLap;
+    p.battery = 0;
     stepRace(race, { throttle: 1, brake: 0, steer: 0, ers: true }, 1 / 120);
     assert.equal(p.ersOn, false);
+    // Flat battery: one hard stop from speed puts a real chunk back, and ERS works again
+    p.vx = Math.cos(p.heading) * 650;
+    p.vy = Math.sin(p.heading) * 650;
+    for (let k = 0; k < 40; k++) stepRace(race, { throttle: 0, brake: 1, steer: 0 }, 1 / 120);
+    assert.ok(p.battery > 0.15, `one stop recovered ${p.battery}`);
+    stepRace(race, { throttle: 1, brake: 0, steer: 0, ers: true }, 1 / 120);
+    assert.equal(p.ersOn, true);
   });
 
   it("corners need braking: grip grows with speed but slow corners are slow", () => {
@@ -233,5 +243,14 @@ describe("Ghost Lap race simulation", () => {
     const race = createRace({ track, mode: "gp", laps: 2, seed: 5, grid: ["player", ...field] });
     assert.equal(race.cars[0].isPlayer, true);
     assert.equal(race.cars.length, 20);
+  });
+
+  it("ERS: the out-lap doesn't use up lap 1's harvest cap", () => {
+    const race = createRace({ track, mode: "trial", seed: 3 });
+    const p = race.player;
+    p.ersHarvestLap = ERS.harvestLap;
+    for (let k = 0; k < 120 * 60 && p.laps < 0; k++) stepRace(race, aiInput(p, race, 1 / 120), 1 / 120);
+    assert.equal(p.laps, 0);
+    assert.ok(p.ersHarvestLap < 0.05, `harvested ${p.ersHarvestLap}`);
   });
 });

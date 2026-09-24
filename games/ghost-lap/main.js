@@ -4,9 +4,10 @@ import { saveScore } from "/shared/scores.js";
 import { setEngineHum } from "/shared/audio.js";
 import { vignette, glow } from "/shared/gfx.js";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingLap, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingLap, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP } from "./race.js";
 import { createWorld, drawCar, createMinimap, worldTransform } from "./render.js";
 import { drawHud, fmtLap, fmtSec } from "./hud.js";
+import { enableTouchLayout } from "/shared/touchlayout.js";
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -62,7 +63,7 @@ function getTrack(key) {
   }
   const meta = CAL[key] || CAL.monza;
   const c = CIRCUITS[meta.key];
-  const track = buildTrack({ key: meta.key, name: `${meta.name} — ${meta.country}`, pts: c.pts, lengthM: c.lengthM, drs: c.drs, drsMain: c.drsMain, theme: meta.theme, night: meta.night });
+  const track = buildTrack({ key: meta.key, name: `${meta.name} — ${meta.country}`, pts: c.pts, lengthM: c.lengthM, drs: c.drs, drsMain: c.drsMain, crossover: c.crossover, theme: meta.theme, night: meta.night });
   const entry = { meta, track, world: createWorld(track), minimap: createMinimap(track, 250) };
   trackCache.set(key, entry);
   // Worlds hold their own tile caches; keep only a couple around
@@ -88,7 +89,7 @@ function save(key, value) {
 }
 const PREFS_KEY = "timesink:ghost-lap:prefs";
 const RECORDS_KEY = "timesink:ghost-lap:records";
-let prefs = load(PREFS_KEY, { track: "monza", gpLaps: 5, duelLaps: 3, difficulty: "medium", gpQuali: true });
+let prefs = load(PREFS_KEY, { track: "monza", gpLaps: 5, duelLaps: 3, difficulty: "medium", gpQuali: true, gpBrakes: true });
 if (!CAL[prefs.track]) prefs.track = "monza";
 if (!DIFFICULTY[prefs.difficulty]) prefs.difficulty = "medium";
 // Real race distance: the fewest laps over 305 km (Monaco is the exception at 78 laps)
@@ -98,7 +99,7 @@ prefs.gpLaps = clampLaps(prefs.gpLaps);
 prefs.duelLaps = clampLaps(prefs.duelLaps);
 let records = load(RECORDS_KEY, { races: 0, gpWins: {}, podiums: 0, duels: {}, bestLaps: {} });
 
-const ghostKey = (track) => `timesink:ghost-lap:v4:${track}`;
+const ghostKey = (track) => `timesink:ghost-lap:v5:${track}`;
 function loadGhost(track) {
   try {
     const raw = localStorage.getItem(ghostKey(track));
@@ -145,6 +146,8 @@ let controls = (() => {
   return c;
 })();
 let settings = load("timesink:ghost-lap:settings", DEFAULT_SETTINGS);
+// Brakes can be softened but never stronger than the car's (the bots get 100% too)
+settings.brakeForce = Math.max(40, Math.min(100, Number(settings.brakeForce) || 100));
 let rebindingAction = null;
 const saveControls = () => save("timesink:ghost-lap:controls", controls);
 const saveSettings = () => save("timesink:ghost-lap:settings", settings);
@@ -353,7 +356,8 @@ window.addEventListener("keyup", (e) => {
 });
 window.addEventListener("blur", () => Object.keys(keys).forEach((k) => (keys[k] = false)));
 
-// Touch pad
+// Touch pad (the player can move and resize the buttons: MOVE CONTROLS in the stage bar)
+enableTouchLayout({ id: "ghost-lap", frame: $("touch-pad"), items: [...document.querySelectorAll("#touch-pad [data-key]")].map((b) => ((b.dataset.touchId = b.dataset.key), b)) });
 document.querySelectorAll("#touch-pad [data-key]").forEach((btn) => {
   const k = btn.dataset.key;
   const set = (v) => (e) => {
@@ -579,7 +583,9 @@ function startRace(config) {
     laps: quali ? Infinity : config.laps,
     difficulty: config.difficulty,
     seed: (Date.now() & 0xffffff) + 1,
-    grid: quali ? null : config.grid || null
+    grid: quali ? null : config.grid || null,
+    // Grand Prix option: brakes heat up, fade when overheated and wear out (for every car)
+    brakes: config.mode === "gp" && prefs.gpBrakes !== false
   });
   const cam = newCam(race.player);
   cam.zoom = 1.05;
@@ -687,6 +693,17 @@ function handleEvents(race) {
       else banner("CORNER CUT", "LAP TIME DELETED", "#ff4d5e", 2.6);
     } else if (e.type === "noAdvantage") {
       banner("OFF TRACK", "NO ADVANTAGE • NO STRIKE", "#8a95a8", 1.4, 12);
+    } else if (e.type === "brakesHot") {
+      sfx.warn();
+      banner("BRAKES OVERHEATING", "THEY'RE FADING • BRAKE EARLIER AND LIGHTER, LIFT AND COAST", "#ff4d5e", 2.6, 14);
+      announce("Brakes overheating.");
+    } else if (e.type === "brakesWorn") {
+      sfx.warn();
+      banner("BRAKES WORN", "LESS STOPPING POWER • BRAKE EARLIER", "#ff9a3c", 2.8, 14);
+      announce("Brakes worn.");
+    } else if (e.type === "drsDetect") {
+      const gap = Number.isFinite(e.gap) ? `+${e.gap.toFixed(2)}s` : "NO CAR IN FRONT";
+      banner("DRS DETECTION", e.eligible ? `${gap} • DRS ENABLED FOR THE NEXT ZONE` : `${gap} • NEED UNDER ${DRS_GAP.toFixed(1)}s`, e.eligible ? "#22e36b" : "#8a95a8", 1.8, 12);
     } else if (e.type === "ersBlocked") {
       const why = { drs: "NOT WITH DRS OPEN", empty: "BATTERY FLAT • BRAKE TO HARVEST", throttle: "NEEDS THROTTLE" }[e.reason];
       if (e.reason !== "throttle") {
@@ -991,8 +1008,8 @@ function showSetup(mode) {
   const lapOpts = [1, 3, 5, 10, 20];
   const title = { gp: "GRAND PRIX", duel: "DUEL", trial: "TIME TRIAL" }[mode];
   const blurb = {
-    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Qualify with one flying lap to set your grid slot, or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
-    duel: "Head-to-head against one bot. Pick how fast it drives — Impossible is quicker than the car you drive.",
+    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Everyone drives the same car. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify with one flying lap to set your grid slot, or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
+    duel: "Head-to-head against one bot in the same car as yours: same engine, grip, brakes, ERS and DRS. Levels only change how well it drives. Impossible uses almost all of the car.",
     trial: "Flying laps on an empty circuit. Your best clean lap becomes a ghost; running wide deletes the lap."
   }[mode];
   const cards = CALENDAR.map((c) => {
@@ -1025,7 +1042,8 @@ function showSetup(mode) {
             : `<div class="gl-opt gl-opt--laps"><span>LAPS</span>${lapOpts.map((l) => `<button type="button" class="gl-chip" data-laps="${l}">${l}</button>`).join("")}<button type="button" class="gl-chip" data-laps="full">FULL</button>
                  <span class="gl-stepper"><button type="button" class="gl-chip" data-lapstep="-1" aria-label="One lap fewer">−</button><output class="gl-laps-val" aria-live="polite">${laps}</output><button type="button" class="gl-chip" data-lapstep="1" aria-label="One lap more">+</button></span></div>
                <div class="gl-opt"><span>${mode === "duel" ? "BOT" : "AI LEVEL"}</span>${(mode === "gp" ? [...DIFFICULTY_ORDER, "mixed"] : DIFFICULTY_ORDER).map((d) => `<button type="button" class="gl-chip ${d === prefs.difficulty ? "is-on" : ""}" data-diff="${d}" aria-pressed="${d === prefs.difficulty}">${DIFFICULTY[d].label}</button>`).join("")}</div>
-               ${mode === "gp" ? `<div class="gl-opt"><span>GRID</span><button type="button" class="gl-chip ${prefs.gpQuali ? "is-on" : ""}" data-quali="1" aria-pressed="${prefs.gpQuali}">QUALIFYING</button><button type="button" class="gl-chip ${!prefs.gpQuali ? "is-on" : ""}" data-quali="0" aria-pressed="${!prefs.gpQuali}">SKIP • RANDOM GRID</button></div>` : ""}`
+               ${mode === "gp" ? `<div class="gl-opt"><span>GRID</span><button type="button" class="gl-chip ${prefs.gpQuali ? "is-on" : ""}" data-quali="1" aria-pressed="${prefs.gpQuali}">QUALIFYING</button><button type="button" class="gl-chip ${!prefs.gpQuali ? "is-on" : ""}" data-quali="0" aria-pressed="${!prefs.gpQuali}">SKIP • RANDOM GRID</button></div>
+               <div class="gl-opt"><span>BRAKES</span><button type="button" class="gl-chip ${prefs.gpBrakes !== false ? "is-on" : ""}" data-brakes="1" aria-pressed="${prefs.gpBrakes !== false}">HEAT &amp; WEAR</button><button type="button" class="gl-chip ${prefs.gpBrakes === false ? "is-on" : ""}" data-brakes="0" aria-pressed="${prefs.gpBrakes === false}">OFF</button></div>` : ""}`
         }
       </div>
     </div>`;
@@ -1091,6 +1109,16 @@ overlay.addEventListener("click", (e) => {
     setLaps((setupMode === "gp" ? prefs.gpLaps : prefs.duelLaps) + Number(b.dataset.lapstep));
     syncLaps();
     save(PREFS_KEY, prefs);
+    return;
+  }
+  if (b.dataset.brakes) {
+    sfx.click();
+    prefs.gpBrakes = b.dataset.brakes === "1";
+    save(PREFS_KEY, prefs);
+    overlay.querySelectorAll("[data-brakes]").forEach((el) => {
+      el.classList.toggle("is-on", el === b);
+      el.setAttribute("aria-pressed", String(el === b));
+    });
     return;
   }
   if (b.dataset.quali) {
@@ -1247,7 +1275,8 @@ function renderScene(s, now) {
   }
   for (const c of race.cars) {
     if (c.x < view.left - 60 || c.x > view.right + 60 || c.y < view.top - 60 || c.y > view.bottom + 60) continue;
-    if (!c.isPlayer) drawCar(ctx, c, t);
+    // Cars on their cool-down lap are out of the race (and no longer collide): show them faded
+    if (!c.isPlayer) drawCar(ctx, c, t, c.finished && session?.race === race ? { alpha: 0.45 } : {});
   }
   if (race.player) {
     const p = race.player;

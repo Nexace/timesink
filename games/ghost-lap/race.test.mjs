@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, project, aiInput, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, project, aiInput, DIRTY_AIR, BRAKES, brakeEfficiency, DRS_GAP, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap } from "./race.js";
 
 const track = buildTrack({ key: "monza", name: "Monza", pts: CIRCUITS.monza.pts, lengthM: CIRCUITS.monza.lengthM, theme: "park" });
 
@@ -227,12 +227,12 @@ describe("Ghost Lap race simulation", () => {
 
   it("fields 19 rivals, adds Noob below Very Easy, and MIXED spans every level", () => {
     assert.equal(DIFFICULTY_ORDER[0], "noob");
-    assert.ok(DIFFICULTY.noob.pace < DIFFICULTY.veryEasy.pace);
+    assert.ok(DIFFICULTY.noob.corner < DIFFICULTY.veryEasy.corner);
     assert.equal(makeField({ mode: "gp", difficulty: "hard", seed: 3 }).length, 19);
     const mixed = makeField({ mode: "gp", difficulty: "mixed", seed: 3 });
-    const paces = new Set(mixed.map((f) => f.skill.pace));
+    const paces = new Set(mixed.map((f) => f.skill.corner));
     assert.equal(paces.size, DIFFICULTY_ORDER.length);
-    for (let k = 1; k < mixed.length; k++) assert.ok(mixed[k].skill.pace <= mixed[k - 1].skill.pace);
+    for (let k = 1; k < mixed.length; k++) assert.ok(mixed[k].skill.corner <= mixed[k - 1].skill.corner);
   });
 
   it("qualifying: quicker drivers set quicker laps, and a grid can put the player on pole", () => {
@@ -252,5 +252,135 @@ describe("Ghost Lap race simulation", () => {
     for (let k = 0; k < 120 * 60 && p.laps < 0; k++) stepRace(race, aiInput(p, race, 1 / 120), 1 / 120);
     assert.equal(p.laps, 0);
     assert.ok(p.ersHarvestLap < 0.05, `harvested ${p.ersHarvestLap}`);
+  });
+
+  it("bots drive the same car: same launch, same top speed, same ERS as the player", () => {
+    const race = createRace({ track, mode: "duel", laps: 3, difficulty: "impossible", seed: 2 });
+    run(race, 1);
+    const [a, b] = race.cars;
+    const bot = a.isPlayer ? b : a;
+    const me = a.isPlayer ? a : b;
+    // Put both on the same straight, side by side, flat out with ERS: they must stay level
+    const i = track.drs[0].from;
+    for (const [c, side] of [[me, -30], [bot, 30]]) {
+      c.x = track.path[i][0] + track.nor[i][0] * side;
+      c.y = track.path[i][1] + track.nor[i][1] * side;
+      c.heading = Math.atan2(track.tan[i][1], track.tan[i][0]);
+      c.vx = track.tan[i][0] * 300;
+      c.vy = track.tan[i][1] * 300;
+      c.battery = 1;
+      c.steer = 0;
+    }
+    const botInput = { throttle: 1, brake: 0, steer: 0, ers: true };
+    const saved = bot.isPlayer;
+    for (let k = 0; k < 120; k++) {
+      // Drive the bot with the same pedal inputs through the same physics step
+      bot.isPlayer = true;
+      race.player = bot;
+      stepRace(race, botInput, 1 / 240);
+      bot.isPlayer = saved;
+      me.isPlayer = true;
+      race.player = me;
+      stepRace(race, botInput, 1 / 240);
+    }
+    assert.ok(Math.abs(me.fwd - bot.fwd) < 3, `player ${me.fwd} vs bot ${bot.fwd}`);
+  });
+
+  it("dirty air: a car close behind in a corner has less grip; clean air has full grip", () => {
+    const race = createRace({ track, mode: "duel", laps: 3, seed: 2 });
+    run(race, 6);
+    const [lead, chase] = race.cars;
+    const i = lead.idx;
+    const put = (c, back) => {
+      const k = (i - back + track.n) % track.n;
+      c.x = track.path[k][0];
+      c.y = track.path[k][1];
+      c.heading = Math.atan2(track.tan[k][1], track.tan[k][0]);
+    };
+    put(lead, 0);
+    put(chase, 8);
+    stepRace(race, null, 1 / 120);
+    assert.ok(chase.dirty > 0.4, `close behind: ${chase.dirty}`);
+    assert.equal(lead.dirty, 0);
+    put(chase, 60);
+    stepRace(race, null, 1 / 120);
+    assert.equal(chase.dirty, 0);
+    assert.ok(DIRTY_AIR.grip > 0 && DIRTY_AIR.grip < 0.3);
+  });
+
+  it("cars are solid: a rear-end hit pushes them apart and slows the chaser", () => {
+    const race = createRace({ track, mode: "duel", laps: 3, seed: 2 });
+    run(race, 6);
+    const [a, b] = race.cars;
+    const i = a.idx;
+    const h = Math.atan2(track.tan[i][1], track.tan[i][0]);
+    for (const [c, back, v] of [[a, 0, 200], [b, 3, 400]]) {
+      const k = (i - back + track.n) % track.n;
+      c.x = track.path[k][0];
+      c.y = track.path[k][1];
+      c.heading = h;
+      c.vx = Math.cos(h) * v;
+      c.vy = Math.sin(h) * v;
+    }
+    stepRace(race, null, 1 / 120);
+    const gap = Math.hypot(a.x - b.x, a.y - b.y);
+    assert.ok(gap >= 40, `bodies overlap: ${gap}`);
+    const along = (c) => c.vx * Math.cos(h) + c.vy * Math.sin(h);
+    assert.ok(along(b) < 380 && along(a) > 200, `chaser ${along(b)}, leader ${along(a)}`);
+  });
+
+  it("DRS in a race: crossing the detection line under 1.0 s behind any car enables it, over 1.0 s doesn't", () => {
+    const tryGap = (seconds) => {
+      const race = createRace({ track, mode: "duel", laps: 5, seed: 2 });
+      run(race, 6);
+      const [a, b] = race.cars;
+      const me = a.isPlayer ? a : b;
+      const rival = a.isPlayer ? b : a;
+      const z = track.drs[0];
+      const v = 400;
+      // Both on lap 2, rolling down the road toward the detection line, `seconds` apart
+      for (const [c, back] of [[rival, 30], [me, 30 + (v * seconds) / 10]]) {
+        const k = (z.detect - Math.round(back) + track.n) % track.n;
+        c.laps = 1;
+        c.x = track.path[k][0];
+        c.y = track.path[k][1];
+        c.heading = Math.atan2(track.tan[k][1], track.tan[k][0]);
+        c.vx = track.tan[k][0] * v;
+        c.vy = track.tan[k][1] * v;
+        c.idx = k;
+        c.drsEligible = false;
+      }
+      const events = [];
+      for (let k = 0; k < 360 && !events.length; k++) {
+        const hold = { throttle: 0.5, brake: 0, steer: 0, drs: true };
+        stepRace(race, hold, 1 / 120);
+        events.push(...race.events.filter((e) => e.type === "drsDetect"));
+      }
+      return { eligible: me.drsEligible, event: events[0] };
+    };
+    const close = tryGap(0.5);
+    assert.equal(close.eligible, true);
+    assert.ok(close.event && close.event.gap < DRS_GAP, JSON.stringify(close.event));
+    const far = tryGap(1.6);
+    assert.equal(far.eligible, false);
+  });
+
+  it("brakes: hard use overheats and fades them, and wears them out; the option is off by default", () => {
+    assert.equal(createRace({ track, mode: "gp", laps: 3, seed: 1 }).player.brakeTemp, undefined);
+    const race = createRace({ track, mode: "gp", laps: 3, seed: 1, brakes: true });
+    run(race, 6);
+    const p = race.player;
+    assert.ok(Math.abs(p.brakeTemp - BRAKES.start) < 200);
+    // Stamp on the brakes from top speed over and over without letting them cool
+    for (let rep = 0; rep < 8; rep++) {
+      p.vx = Math.cos(p.heading) * CAR.top;
+      p.vy = Math.sin(p.heading) * CAR.top;
+      p.fwd = CAR.top;
+      for (let k = 0; k < 30; k++) stepRace(race, { throttle: 0, brake: 1, steer: 0 }, 1 / 120);
+    }
+    assert.ok(p.brakeTemp > BRAKES.fade, `temp ${p.brakeTemp}`);
+    assert.ok(p.brakeEff < 0.95, `efficiency ${p.brakeEff}`);
+    assert.ok(p.brakeLife < 1);
+    assert.ok(brakeEfficiency(600, 1) === 1 && brakeEfficiency(600, 0.05) < 0.7 && brakeEfficiency(200, 1) < 1);
   });
 });

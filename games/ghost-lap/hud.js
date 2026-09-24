@@ -1,5 +1,5 @@
 // Ghost Lap broadcast-style HUD, drawn in screen space on the race canvas.
-import { KMH, CAR, ERS, LIMITS } from "./race.js";
+import { KMH, CAR, ERS, LIMITS, BRAKES } from "./race.js";
 
 const DISPLAY = "'Press Start 2P', monospace";
 const BODY = "'VT323', 'Share Tech Mono', monospace";
@@ -102,7 +102,8 @@ function minimap(ctx, mm, race, x, y, ghost) {
 }
 
 function speedPanel(ctx, car, x, y, drsState, now = 0) {
-  panel(ctx, x, y, 384, 110);
+  panel(ctx, x, y, car.brakeTemp != null ? 452 : 384, 110);
+  if (car.brakeTemp != null) brakeGauge(ctx, car, x + 384, y, now);
   const kmh = Math.max(0, Math.round(car.fwd * KMH));
   text(ctx, String(kmh).padStart(3, "0"), x + 16, y + 58, { size: 34, color: "#ffffff" });
   text(ctx, "KM/H", x + 150, y + 58, { size: 10, color: "#8fb4ff" });
@@ -128,7 +129,9 @@ function speedPanel(ctx, car, x, y, drsState, now = 0) {
     ctx.fillRect(x + 16, y + 80, 60, 20);
   }
   text(ctx, "DRS", x + 46, y + 95, { size: 9, color: drsCol, align: "center" });
-  if (car.slip) text(ctx, "TOW", x + 90, y + 95, { size: 9, color: "#6fd3ff" });
+  // Behind another car: in a corner that's dirty air (less grip), on a straight it's a tow
+  if (car.dirty > 0.3 && Math.abs(car.steer) > 0.12) text(ctx, "DIRTY", x + 90, y + 95, { size: 9, color: "#ff9a3c" });
+  else if (car.slip) text(ctx, "TOW", x + 90, y + 95, { size: 9, color: "#6fd3ff" });
   if (car.surface !== "track") text(ctx, car.surface === "kerb" ? "KERB" : "OFF", x + 136, y + 95, { size: 9, color: "#ff9a3c" });
   if (car.ersOn) text(ctx, "DEPLOY", x + 190, y + 95, { size: 9, color: Math.sin(now * 14) > -0.3 ? "#ffd400" : "#b88a00" });
   else if (car.harvesting) text(ctx, "HARVEST", x + 190, y + 95, { size: 9, color: "#22e36b" });
@@ -159,6 +162,40 @@ function speedPanel(ctx, car, x, y, drsState, now = 0) {
   ctx.fillRect(bx + 32, by + bh - bh * budget, 8, bh * budget);
   text(ctx, locked ? "LOCK" : "ERS", bx + 20, y + 100, { size: 7, color: locked ? "#8a95a8" : "#8fb4ff", align: "center" });
   text(ctx, `${Math.round(lvl * 100)}%`, bx + 13, by - 2 + 0, { size: 6, color: "#d7deea", align: "center" });
+}
+
+// Brake gauge: disc temperature (tall bar, °C, coloured by the operating window) and brake life (thin bar)
+function brakeGauge(ctx, car, x, y, now) {
+  const bx = x + 4;
+  const by = y + 12;
+  const bh = 74;
+  const T = car.brakeTemp;
+  const lo = BRAKES.ambient;
+  const hi = 1400;
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(bx, by, 26, bh);
+  // Window markers: the green band is where the brakes work best
+  const yAt = (t) => by + bh - ((Math.min(hi, Math.max(lo, t)) - lo) / (hi - lo)) * bh;
+  ctx.fillStyle = "rgba(34, 227, 107, 0.16)";
+  ctx.fillRect(bx, yAt(BRAKES.window[1]), 26, yAt(BRAKES.window[0]) - yAt(BRAKES.window[1]));
+  const col = T > BRAKES.fade ? (Math.sin(now * 16) > 0 ? "#ff3b3b" : "#ff9a3c") : T > BRAKES.window[1] ? "#ffb020" : T < BRAKES.window[0] ? "#3aa0ff" : "#22e36b";
+  ctx.fillStyle = col;
+  ctx.fillRect(bx + 3, yAt(T), 20, by + bh - yAt(T));
+  ctx.strokeStyle = "#ff4d5e";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(bx, yAt(BRAKES.fade));
+  ctx.lineTo(bx + 26, yAt(BRAKES.fade));
+  ctx.stroke();
+  // Life left
+  const life = Math.max(0, car.brakeLife);
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(bx + 32, by, 8, bh);
+  ctx.fillStyle = life < BRAKES.worn ? "#ff4d5e" : life < 0.55 ? "#ffb020" : "#d7deea";
+  ctx.fillRect(bx + 32, by + bh - bh * life, 8, bh * life);
+  text(ctx, `${Math.round(T)}°`, bx + 13, by - 2, { size: 6, color: col, align: "center" });
+  text(ctx, T > BRAKES.fade ? "HOT!" : life < BRAKES.worn ? "WORN" : "BRK", bx + 20, y + 100, { size: 7, color: T > BRAKES.fade || life < BRAKES.worn ? "#ff4d5e" : "#8fb4ff", align: "center" });
+  text(ctx, `${Math.round(life * 100)}%`, bx + 36, by - 2, { size: 6, color: "#d7deea", align: "center" });
 }
 
 function timingPanel(ctx, race, car, x, y, w, extra) {

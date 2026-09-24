@@ -301,14 +301,19 @@ main.wrap.game-screen {
   display: none;
 }
 @media (pointer: coarse) {
+  /* Covers the whole stage so the buttons can be moved anywhere over it (they sit at the bottom by default) */
   .gl-touch {
     position: absolute;
-    inset: auto 0 0 0;
+    inset: 0;
     z-index: 4;
     display: flex;
     justify-content: space-between;
+    align-items: flex-end;
     padding: 10px;
     pointer-events: none;
+  }
+  html.touch-layout-editing .gl-touch {
+    z-index: 30;
   }
   .gl-touch__side {
     display: flex;

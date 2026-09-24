@@ -3,7 +3,7 @@
 import { fitCircuit, cornerRadii, resampleClosed } from "./circuits.js";
 
 export const PX_PER_M = 3.3; // world pixels per real metre of circuit length
-export const TRACK_WIDTH = 128;
+export const TRACK_WIDTH = 148;
 // The world runs a little slower than real life on these wider roads; the speedo still reads F1
 // numbers (700 px/s flat out ≈ 330 km/h).
 export const KMH = 0.47; // world px/s → displayed km/h
@@ -19,7 +19,10 @@ export const CAR = {
   gripLow: 450,
   gripHigh: 750,
   wheelbase: 30,
-  radius: 15
+  // Collision body: a capsule the size of the drawn car (44 px long, 21 px wide)
+  bodyHalf: 11.5,
+  bodyRad: 10.5,
+  steerRate: 10 // fastest the steering can turn (per second), the same for every driver
 };
 
 /** Lateral grip (px/s²) available at speed v. */
@@ -49,16 +52,20 @@ function steerSpeedFor(r) {
   return Math.max(60, v);
 }
 
+// Every bot drives exactly the same car as the player: same engine, grip, brakes, ERS, DRS and tow.
+// Levels differ only in the DRIVER: how close to the grip limit they take corners (corner), how late
+// and hard they brake (brake: share of the car's full braking they plan on), how much throttle they
+// dare use (commit), how tidy their line is (noise) and how quickly they react to the lights (react, s).
 export const DIFFICULTY = {
-  noob: { label: "NOOB", pace: 0.56, grip: 0.7, noise: 0.3 },
-  veryEasy: { label: "VERY EASY", pace: 0.66, grip: 0.78, noise: 0.22 },
-  easy: { label: "EASY", pace: 0.76, grip: 0.85, noise: 0.14 },
-  medium: { label: "MEDIUM", pace: 0.86, grip: 0.92, noise: 0.08 },
-  hard: { label: "HARD", pace: 0.93, grip: 0.97, noise: 0.04 },
-  veryHard: { label: "VERY HARD", pace: 0.98, grip: 1.0, noise: 0.02 },
-  impossible: { label: "IMPOSSIBLE", pace: 1.04, grip: 1.07, noise: 0 }
+  noob: { label: "NOOB", corner: 0.5, brake: 0.45, commit: 0.62, noise: 0.3, react: 0.55 },
+  veryEasy: { label: "VERY EASY", corner: 0.58, brake: 0.52, commit: 0.72, noise: 0.22, react: 0.45 },
+  easy: { label: "EASY", corner: 0.68, brake: 0.6, commit: 0.82, noise: 0.14, react: 0.38 },
+  medium: { label: "MEDIUM", corner: 0.79, brake: 0.69, commit: 0.9, noise: 0.08, react: 0.32 },
+  hard: { label: "HARD", corner: 0.88, brake: 0.78, commit: 0.95, noise: 0.04, react: 0.27 },
+  veryHard: { label: "VERY HARD", corner: 0.94, brake: 0.85, commit: 0.98, noise: 0.02, react: 0.23 },
+  impossible: { label: "IMPOSSIBLE", corner: 0.99, brake: 0.92, commit: 1, noise: 0, react: 0.19 }
 };
-DIFFICULTY.mixed = { label: "MIXED", pace: 0.86, grip: 0.92, noise: 0.08 };
+DIFFICULTY.mixed = { ...DIFFICULTY.medium, label: "MIXED" };
 export const DIFFICULTY_ORDER = ["noob", "veryEasy", "easy", "medium", "hard", "veryHard", "impossible"];
 
 // Fictional grid (names, 3-letter timing codes, livery)
@@ -135,11 +142,58 @@ function pathLength(path) {
  * The road is drawn much wider than a real one relative to the layout, so hairpin legs and parallel
  * sections (Zandvoort, Jeddah, Monaco, Baku…) can end up on top of each other. Push any two stretches
  * of road that run side by side apart until there's a strip of grass between them, spreading each
- * push smoothly along the track so the shape stays true. Real crossings (Suzuka's bridge) meet at a
- * steep angle and are left alone.
+ * push smoothly along the track so the shape stays true. Sections that meet at a steep angle are
+ * left alone (that's how Suzuka's bridge survives). If pushing ever shoves one part of a circuit
+ * across another (only Suzuka, `crossover`, may cross itself), it retries with a narrower gap.
  */
-function separateSections(path, need, step) {
-  let pts = path.map((p) => [p[0], p[1]]);
+function separateSections(path, need, step, crossover = false) {
+  let best = null;
+  for (const gap of [need, need - 20, need - 40]) {
+    let pts = path.map((p) => [p[0], p[1]]);
+    for (let round = 0; round < 3; round++) {
+      const pushed = pushApart(pts, gap, step);
+      pts = resampleClosed(pushed.pts, step);
+      const eased = easeTightCorners(pts);
+      pts = resampleClosed(eased.pts, step);
+      if (!pushed.moved && !eased.moved) break;
+    }
+    best = pts;
+    if (crossover || !crossesItself(pts, gap, step)) break;
+  }
+  return best;
+}
+
+/** True if two separate parts of the centreline come within half a road width (a false crossing). */
+function crossesItself(pts, gap, step) {
+  const n = pts.length;
+  const minGap = Math.ceil((gap * 2.5) / step);
+  const lim = TRACK_WIDTH / 2;
+  const cell = lim;
+  const grid = new Map();
+  pts.forEach((p, i) => {
+    const k = Math.floor(p[0] / cell) * 65536 + Math.floor(p[1] / cell);
+    const list = grid.get(k);
+    if (list) list.push(i);
+    else grid.set(k, [i]);
+  });
+  for (let i = 0; i < n; i++) {
+    const cx = Math.floor(pts[i][0] / cell);
+    const cy = Math.floor(pts[i][1] / cell);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const j of grid.get((cx + dx) * 65536 + cy + dy) || []) {
+          if (Math.min(Math.abs(j - i), n - Math.abs(j - i)) < minGap) continue;
+          if (Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]) < lim) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function pushApart(input, need, step) {
+  let pts = input;
+  let moved = false;
   const n = pts.length;
   const minGap = Math.ceil((need * 2.5) / step);
   const cell = need;
@@ -185,6 +239,7 @@ function separateSections(path, need, step) {
       }
     }
     if (!hits) break;
+    moved = true;
     // Spread each push along the road so corners bend rather than kink
     let sm = disp;
     for (let pass = 0; pass < 3; pass++) {
@@ -210,10 +265,15 @@ function separateSections(path, need, step) {
     const gain = peakSm > 0 ? Math.min(6, (peakRaw / peakSm) * 0.35) : 0;
     pts = pts.map((p, i) => [p[0] + sm[i][0] * gain, p[1] + sm[i][1] * gain]);
   }
-  // Pushing can pinch a corner tighter than the real one: ease any that fall under the tightest
-  // radius the unmodified layouts use (~48 px) back out, locally
-  pts = resampleClosed(pts, step);
-  for (let iter = 0; iter < 200; iter++) {
+  return { pts, moved };
+}
+
+// Pushing can pinch a corner tighter than the real one: ease any that fall under the tightest
+// radius the unmodified layouts use (~48 px) back out, locally
+function easeTightCorners(input) {
+  let pts = input;
+  let moved = false;
+  for (let iter = 0; iter < 300; iter++) {
     const r = cornerRadii(pts, 4);
     let tight = 0;
     const m = pts.length;
@@ -227,8 +287,169 @@ function separateSections(path, need, step) {
       return [p[0] + ((a[0] + b[0]) / 2 - p[0]) * 0.4, p[1] + ((a[1] + b[1]) / 2 - p[1]) * 0.4];
     });
     if (!tight) break;
+    moved = true;
   }
-  return resampleClosed(pts, step);
+  return { pts, moved };
+}
+
+// Brakes (Grand Prix option): carbon brakes work best from ~350 to ~950 °C. Braking heats them in
+// proportion to the braking power (how hard x how fast); airflow cools them, more at speed. Cold
+// brakes bite less, past 1000 °C they fade, and they wear with use: far faster when overheated.
+// Worn-out brakes lose stopping power and run hotter. The same for every car on the grid.
+export const BRAKES = {
+  ambient: 180, // °C the discs settle to with no braking
+  start: 420, // warmed up on the formation lap
+  heat: 2100, // °C/s at full braking from top speed
+  cool: 0.1, // share of the gap to ambient shed per second (x airflow)
+  window: [350, 950],
+  fade: 1000, // above this the brakes start to fade
+  wear: 0.014, // life used per second of full braking from top speed (x more when overheating)
+  worn: 0.3, // below this much life left the brakes lose bite
+  regenShare: 0.2 // share of the braking the MGU-K does while it's harvesting
+};
+/** Share of full braking force the brakes can give at this temperature (°C) and life (0-1). */
+export function brakeEfficiency(temp, life) {
+  const cold = temp < BRAKES.window[0] ? 0.82 + (0.18 * clamp(temp - BRAKES.ambient, 0, 170)) / 170 : 1;
+  const fade = temp > BRAKES.fade ? 1 - Math.min(0.5, ((temp - BRAKES.fade) / 400) * 0.5) : 1;
+  const worn = life < BRAKES.worn ? 0.55 + (0.45 * Math.max(0, life)) / BRAKES.worn : 1;
+  return cold * fade * worn;
+}
+
+// DRS: the gap to the car in front at the detection line that enables it
+export const DRS_GAP = 1.0;
+
+function updateBrakes(race, car, input, mods, fwdBefore, dt) {
+  const v = Math.max(0, Math.min(fwdBefore, car.fwd)) / CAR.top;
+  const b = fwdBefore > 25 && (input.brake ?? 0) > 0 ? input.brake * (mods.brake ?? 1) : 0;
+  const worn = 1 + (1 - car.brakeLife) * 0.6;
+  const heat = BRAKES.heat * b * v * worn * (car.harvesting ? 1 - BRAKES.regenShare : 1);
+  const cool = BRAKES.cool * (car.brakeTemp - BRAKES.ambient) * (0.35 + v);
+  const was = car.brakeTemp;
+  car.brakeTemp = Math.max(BRAKES.ambient, car.brakeTemp + (heat - cool) * dt);
+  const over = Math.max(0, (car.brakeTemp - BRAKES.fade) / 300);
+  const lifeWas = car.brakeLife;
+  car.brakeLife = Math.max(0, car.brakeLife - BRAKES.wear * b * v * (1 + 5 * over) * dt);
+  car.brakeEff = brakeEfficiency(car.brakeTemp, car.brakeLife);
+  if (!car.isPlayer) return;
+  // Warn once per overheat: the warning re-arms after the brakes have cooled back into the window
+  if (car.brakeTemp > BRAKES.fade && !car.brakeWarned) {
+    car.brakeWarned = true;
+    emit(race, { type: "brakesHot", car: car.id, temp: car.brakeTemp });
+  } else if (car.brakeTemp < BRAKES.window[1] - 100) car.brakeWarned = false;
+  if (lifeWas >= BRAKES.worn && car.brakeLife < BRAKES.worn) emit(race, { type: "brakesWorn", car: car.id });
+}
+
+// Wake behind a car: dirty air starts just off its gearbox and fades out ~9 car lengths back
+export const DIRTY_AIR = { from: 40, reach: 380, width: 44, grip: 0.14 };
+// How fast a bot can open the throttle (per second): the same as the quickest player setting
+const AI_THROTTLE_RATE = 6.6;
+
+/**
+ * Solid cars: each car is a capsule the size of its body. Overlapping cars are pushed fully apart,
+ * the closing speed is absorbed (a little bounce), side-by-side rubbing scrubs speed through friction,
+ * and an off-centre hit twists the car. Two passes so a pile-up settles instead of cars sinking in.
+ */
+function resolveContacts(race) {
+  const cars = race.cars;
+  const HL = CAR.bodyHalf;
+  const R = CAR.bodyRad;
+  const reach = 2 * (HL + R);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let a = 0; a < cars.length; a++) {
+      for (let b = a + 1; b < cars.length; b++) {
+        const A = cars[a];
+        const B = cars[b];
+        // Cars on their cool-down lap are out of the race: they no longer collide
+        if (A.finished || B.finished) continue;
+        if (Math.abs(B.x - A.x) > reach || Math.abs(B.y - A.y) > reach) continue;
+        const [pa, pb] = closestOnBodies(A, B, HL);
+        let nx = pb[0] - pa[0];
+        let ny = pb[1] - pa[1];
+        let d = Math.hypot(nx, ny);
+        if (d >= 2 * R) continue;
+        if (d < 1e-6) {
+          nx = B.x - A.x || 1;
+          ny = B.y - A.y;
+          d = 0;
+        }
+        const len = Math.hypot(nx, ny) || 1;
+        nx /= len;
+        ny /= len;
+        const push = (2 * R - d) / 2;
+        A.x -= nx * push;
+        A.y -= ny * push;
+        B.x += nx * push;
+        B.y += ny * push;
+        if (pass) continue;
+        const rv = (B.vx - A.vx) * nx + (B.vy - A.vy) * ny;
+        if (rv < 0) {
+          // Equal masses: share the closing speed, keeping 20% of it as a bounce
+          const j = (-rv * 1.2) / 2;
+          A.vx -= nx * j;
+          A.vy -= ny * j;
+          B.vx += nx * j;
+          B.vy += ny * j;
+          // Friction along the contact: rubbing cars drag each other toward the same speed
+          const tx = -ny;
+          const ty = nx;
+          const rt = (B.vx - A.vx) * tx + (B.vy - A.vy) * ty;
+          const f = clamp(rt / 2, -j * 0.35, j * 0.35);
+          A.vx += tx * f;
+          A.vy += ty * f;
+          B.vx -= tx * f;
+          B.vy -= ty * f;
+          // A hit away from the middle of the car twists it
+          const cx = (pa[0] + pb[0]) / 2;
+          const cy = (pa[1] + pb[1]) / 2;
+          for (const [car, sgn] of [[A, -1], [B, 1]]) {
+            const rx = cx - car.x;
+            const ry = cy - car.y;
+            const torque = (rx * ny - ry * nx) * sgn * j;
+            car.heading = wrapAngle(car.heading + clamp(torque * 0.00004, -0.08, 0.08));
+          }
+        }
+        if (Math.abs(rv) > 40) A.lastHit = B.lastHit = race.t;
+        if ((A.isPlayer || B.isPlayer) && Math.abs(rv) > 60) emit(race, { type: "contact", speed: Math.abs(rv) });
+      }
+    }
+  }
+}
+
+/** Closest points between two cars' body centrelines (each a segment +/-HL along its heading). */
+function closestOnBodies(A, B, HL) {
+  const ax = Math.cos(A.heading) * HL;
+  const ay = Math.sin(A.heading) * HL;
+  const bx = Math.cos(B.heading) * HL;
+  const by = Math.sin(B.heading) * HL;
+  const p1x = A.x - ax;
+  const p1y = A.y - ay;
+  const p2x = B.x - bx;
+  const p2y = B.y - by;
+  const d1x = 2 * ax;
+  const d1y = 2 * ay;
+  const d2x = 2 * bx;
+  const d2y = 2 * by;
+  const rx = p1x - p2x;
+  const ry = p1y - p2y;
+  const a = d1x * d1x + d1y * d1y;
+  const e = d2x * d2x + d2y * d2y;
+  const f = d2x * rx + d2y * ry;
+  const c = d1x * rx + d1y * ry;
+  const bb = d1x * d2x + d1y * d2y;
+  const den = a * e - bb * bb;
+  let s = den > 1e-9 ? clamp((bb * f - c * e) / den, 0, 1) : 0;
+  let t = (bb * s + f) / e;
+  if (t < 0) {
+    t = 0;
+    s = clamp(-c / a, 0, 1);
+  } else if (t > 1) {
+    t = 1;
+    s = clamp((bb - c) / a, 0, 1);
+  }
+  return [
+    [p1x + d1x * s, p1y + d1y * s],
+    [p2x + d2x * t, p2y + d2y * t]
+  ];
 }
 
 /** Build a raceable world track from a circuit definition { key, name, pts, lengthM, theme, night }. */
@@ -238,7 +459,7 @@ export function buildTrack(def) {
   const margin = 520;
   const W = Math.round(1760 * k + margin * 2);
   const H = Math.round(800 * k + margin * 2);
-  const path = separateSections(fitCircuit(def.pts, W, H, margin, STEP), TRACK_WIDTH + 64, STEP);
+  const path = separateSections(fitCircuit(def.pts, W, H, margin, STEP), TRACK_WIDTH + 64, STEP, !!def.crossover);
   const n = path.length;
   const w = TRACK_WIDTH;
 
@@ -394,11 +615,11 @@ export function buildTrack(def) {
  * on the line's own curvature, then braking zones propagated backwards (the brakes' full force, less a
  * small margin). This is the "speed plan" a driver follows.
  */
-function profileFor(track, m) {
+function profileFor(track, m, b = 0.86) {
   const { n, lineRadii, lineDs } = track;
   const v = new Float64Array(n);
   for (let i = 0; i < n; i++) v[i] = Math.min(CAR.top * 1.2, cornerSpeed(Math.max(lineRadii[i], 8), m));
-  const B = CAR.brake * 0.86;
+  const B = CAR.brake * b;
   for (let pass = 0; pass < 2; pass++) {
     for (let i = n - 1; i >= 0; i--) {
       const nxt = v[(i + 1) % n];
@@ -408,11 +629,13 @@ function profileFor(track, m) {
   return v;
 }
 
-export function speedProfile(track, m) {
-  const key = Math.round(m * 200);
+export function speedProfile(track, m, b = 0.86) {
+  const km = Math.round(m * 200);
+  const kb = Math.round(b * 100);
+  const key = km * 1000 + kb;
   let prof = track.profiles.get(key);
   if (!prof) {
-    prof = profileFor(track, key / 200);
+    prof = profileFor(track, km / 200, kb / 100);
     track.profiles.set(key, prof);
   }
   return prof;
@@ -540,7 +763,7 @@ export function stepCar(car, input, track, dt, mods = {}) {
   if (fwd > top) fwd = Math.max(top, fwd - 900 * dt);
 
   // Steering: bicycle model, capped by available lateral grip
-  const steerRate = input.steerRate || (car.isPlayer ? 7 : 10);
+  const steerRate = Math.min(CAR.steerRate, input.steerRate || CAR.steerRate);
   car.steer += clamp(input.steer - car.steer, -steerRate * dt, steerRate * dt);
   const maxSteer = maxSteerAt(fwd);
   let yaw = (fwd * Math.tan(car.steer * maxSteer)) / CAR.wheelbase;
@@ -614,17 +837,33 @@ export function aiInput(car, race, dt) {
   const sk = car.skill;
   const fwd = Math.max(0, car.fwd);
 
-  // Follow a speed plan for this driver's grip: weaker drivers leave more margin in every corner
-  const m = sk.grip * (0.975 - sk.noise * 0.45);
-  const prof = speedProfile(track, m);
+  // Follow a speed plan: how close to the grip limit this driver corners and how late they brake.
+  // In dirty air the car has less grip, and the driver knows it.
+  const m = sk.corner * (1 - DIRTY_AIR.grip * (car.dirty || 0));
+  // Brake management: plan on the braking the car actually has (cold, fading or worn brakes stop
+  // shorter), and when they run hot, brake earlier and lighter (lift and coast) to let them cool
+  const hot = car.brakeTemp > BRAKES.window[1] - 40;
+  const prof = speedProfile(track, m, sk.brake * (car.brakeEff ?? 1) * (hot ? 0.8 : 1));
   const look = 1 + Math.round((fwd * 0.04) / STEP);
-  let target = Math.min(prof[(car.idx + look) % n], CAR.top * sk.pace * (car.drsOpen ? 1.12 : 1) * (car.slip ? 1.05 : 1) * 1.02);
+  let target = prof[(car.idx + look) % n];
 
-  // Racecraft: don't drive into the car ahead on the same piece of road
+  // Racecraft: don't drive into the car ahead on the same piece of road. A car that's stopped or
+  // spun is an obstacle, not someone to queue behind: slow down and go round it.
+  let dodge = null;
   for (const o of race.cars) {
-    if (o === car) continue;
+    if (o === car || o.finished) continue;
     const gap = o.total - car.total;
-    if (gap > 0 && gap < 90 && Math.abs(o.d - car.d) < 26) target = Math.min(target, Math.max(0, o.fwd) + (gap - 34) * 2.5);
+    if (gap <= 0 || gap > 160) continue;
+    const blocked = Math.abs(o.d - car.d) < CAR.bodyRad * 2 + 4;
+    if (o.speed < 60) {
+      if (gap < 160 && Math.abs(o.d - car.d) < CAR.bodyRad * 2 + 18) {
+        const room = track.width / 2 - 14;
+        const left = o.d - (CAR.bodyRad * 2 + 16);
+        const right = o.d + (CAR.bodyRad * 2 + 16);
+        dodge = Math.abs(left) <= room && (Math.abs(right) > room || Math.abs(left - car.d) < Math.abs(right - car.d)) ? left : right;
+        target = Math.min(target, 140);
+      }
+    } else if (blocked && gap < 110) target = Math.min(target, Math.max(0, o.fwd) + (gap - 52) * 2.5);
   }
   car.aiTarget = target;
 
@@ -633,7 +872,7 @@ export function aiInput(car, race, dt) {
   const preview = (car.idx + 2 + Math.round(fwd * 0.06 / STEP)) % n;
   const tn = track.tan[preview];
   const headingErr = wrapAngle(Math.atan2(tn[1], tn[0]) - car.heading);
-  const wantD = clamp(line[preview] + car.lineBias, -(track.width / 2 - 16), track.width / 2 - 16);
+  const wantD = clamp(dodge ?? line[preview] + car.lineBias, -(track.width / 2 - 16), track.width / 2 - 16);
   const cross = car.d - wantD;
   car.noiseT += dt;
   const wobble = sk.noise ? Math.sin(car.noiseT * 1.7) * sk.noise * 0.12 : 0;
@@ -644,7 +883,7 @@ export function aiInput(car, race, dt) {
 
   let throttle = 0;
   let brake = 0;
-  if (fwd > target + 6) brake = clamp((fwd - target) / 22, 0.35, 1);
+  if (fwd > target + 6) brake = clamp((fwd - target) / 22, 0.35, hot ? 0.75 : 1);
   else throttle = clamp((target - fwd) / 30 + 0.5, 0, 1);
   // Exit traction: feed the throttle in while still turning, and lift when running out of road
   if (throttle > 0) {
@@ -652,13 +891,29 @@ export function aiInput(car, race, dt) {
     throttle *= clamp(1 - car.sliding * 2.5, 0.3, 1);
     if (edge > -24 && Math.sign(car.d) === Math.sign(car.d - wantD)) throttle *= clamp(1 - (edge + 24) / 30, 0.15, 1);
   }
-  // Launch: full beans off the line
-  if (fwd < 60 && race.phase === "racing") throttle = 1;
+  // Launch: full beans off the line, once the driver has reacted to the lights
+  if (fwd < 60 && race.phase === "racing") throttle = race.t < (car.react || 0) ? 0 : 1;
+  // Less confident drivers never use all the throttle (same car, less of it)
+  throttle = Math.min(throttle, sk.commit ?? 1);
+
+  // Stuck (spun, facing the wall, wedged against another car): back out and turn to face the road
+  if (race.phase === "racing" && !car.finished && race.t > (car.react || 0) + 1) {
+    const lost = Math.abs(headingErr) > 1.4;
+    if (car.speed < 25 || (lost && fwd < 120)) car.stuckT = (car.stuckT || 0) + dt;
+    else car.stuckT = 0;
+    if (car.stuckT > 0.8 && !car.recoverT) car.recoverT = 1.1;
+  }
+  if (car.recoverT > 0) {
+    car.recoverT = Math.max(0, car.recoverT - dt);
+    if (!car.recoverT) car.stuckT = 0;
+    // Reversing turns the car the other way, so steer against the error
+    return { throttle: 0, brake: 1, steer: clamp(-headingErr * 2, -1, 1), handbrake: false, drs: false, ers: false };
+  }
   // ERS: deploy out of slow corners and when attacking or defending; spend freely when the battery's full
   const pressure = (car.gapAhead > 0 && car.gapAhead < 1.2) || car.defending;
   const exit = fwd < CAR.top * 0.7 && throttle > 0.8;
   const spare = car.battery > 0.5;
-  const ers = throttle > 0.8 && car.battery > 0.08 && (exit || pressure || spare) && (sk.pace >= 0.8 || exit);
+  const ers = throttle > 0.8 && car.battery > 0.08 && (exit || pressure || spare) && (sk.corner >= 0.84 || exit);
   return { throttle, brake, steer, handbrake: false, drs: true, ers };
 }
 
@@ -700,7 +955,12 @@ export function makeField({ mode, difficulty = "medium", seed = 1 }) {
     else {
       // Spread the field around the chosen level: front-runners a touch quicker
       const spread = mode === "duel" ? 0 : ((mid - rank) / Math.max(1, mid)) * 0.05;
-      skill = { ...base, pace: base.pace + spread, grip: base.grip + spread * 0.6 };
+      skill = {
+        ...base,
+        corner: clamp(base.corner + spread * 0.5, 0.5, 0.99),
+        brake: clamp(base.brake + spread * 0.5, 0.45, 0.92),
+        commit: clamp(base.commit + spread * 0.4, 0.55, 1)
+      };
     }
     return { id: `ai${rank}`, livery: rank >= DRIVERS.length ? { ...liv, code: liv.code + rank } : liv, skill };
   });
@@ -726,7 +986,7 @@ export function qualifyingLap(track, skill, rand = Math.random) {
   return Infinity;
 }
 
-export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1, grid = null }) {
+export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1, grid = null, brakes = false }) {
   const rand = seededRand(seed);
   const cars = [];
   // Grid order, front to back: "player" or a field entry. By default the player starts in the middle
@@ -740,6 +1000,15 @@ export function createRace({ track, mode, laps = 5, difficulty = "medium", seed 
     if (entry === "player") cars.push(makeCar("player", PLAYER_LIVERY, track.grid[k], { isPlayer: true }));
     else cars.push(makeCar(entry.id, entry.livery, track.grid[k], { skill: entry.skill }));
   });
+  // Bots react to the lights like a person would (quicker drivers, quicker starts)
+  for (const c of cars) if (!c.isPlayer) c.react = (c.skill.react ?? 0.3) * (0.8 + rand() * 0.4);
+  if (brakes) {
+    for (const c of cars) {
+      c.brakeTemp = BRAKES.start;
+      c.brakeLife = 1;
+      c.brakeEff = 1;
+    }
+  }
   for (const c of cars) {
     const pr = project(track, c.x, c.y, -1);
     c.idx = pr.i;
@@ -765,6 +1034,8 @@ export function createRace({ track, mode, laps = 5, difficulty = "medium", seed 
     lights: 0,
     lightsOutAt: 4.6 + rand() * 1.1,
     reaction: null,
+    brakes: !!brakes,
+    drsLine: [],
     flag: false, // chequered flag shown
     events: [],
     bestLap: Infinity,
@@ -927,6 +1198,11 @@ export function stepRace(race, playerInput, dt) {
       continue;
     }
     const input = car.isPlayer ? playerInput || { throttle: 0, brake: 0, steer: 0, handbrake: false, drs: false } : aiInput(car, race, dt);
+    if (!car.isPlayer) {
+      // Bots work the pedal like a person: the throttle can't snap open (brakes are instant for everyone)
+      car.thrCmd = input.throttle < (car.thrCmd ?? 0) ? input.throttle : Math.min(input.throttle, (car.thrCmd ?? 0) + AI_THROTTLE_RATE * dt);
+      input.throttle = car.thrCmd;
+    }
 
     // DRS: eligible within 1s of the car ahead at the detection point (always in a time trial)
     const zone = track.drs.find((z) => (z.from <= z.to ? car.idx >= z.from && car.idx <= z.to : car.idx >= z.from || car.idx <= z.to));
@@ -941,18 +1217,23 @@ export function stepRace(race, playerInput, dt) {
     }
     if (car.drsOpen && input.brake > 0.1) car.drsOpen = false;
 
-    // Slipstream: tucked in behind another car
+    // Air: behind another car you're in its wake. On the straights that's a tow (less drag, more top
+    // speed); in the corners it's dirty air (turbulent air robs the wings of downforce, so less grip).
+    // Out in clean air you get the full grip.
     car.slip = false;
+    car.dirty = 0;
+    const hx = Math.cos(car.heading);
+    const hy = Math.sin(car.heading);
     for (const o of race.cars) {
-      if (o === car) continue;
+      if (o === car || o.finished) continue;
       const dx = o.x - car.x;
       const dy = o.y - car.y;
-      const along = dx * Math.cos(car.heading) + dy * Math.sin(car.heading);
-      const side = Math.abs(-dx * Math.sin(car.heading) + dy * Math.cos(car.heading));
-      if (along > 30 && along < 240 && side < 26) {
-        car.slip = true;
-        break;
-      }
+      const along = dx * hx + dy * hy;
+      const side = Math.abs(-dx * hy + dy * hx);
+      if (along < DIRTY_AIR.from || along > DIRTY_AIR.reach || side > DIRTY_AIR.width) continue;
+      const w = (1 - (along - DIRTY_AIR.from) / (DIRTY_AIR.reach - DIRTY_AIR.from)) * (1 - side / DIRTY_AIR.width);
+      car.dirty = Math.max(car.dirty, w);
+      if (along < 260 && side < 26) car.slip = true;
     }
 
     // ERS deploy: needs charge and throttle, blocked while DRS is open
@@ -974,10 +1255,16 @@ export function stepRace(race, playerInput, dt) {
     const ersPow = canErs ? ERS.power : 1;
     const ersTop = canErs ? ERS.top : 1;
 
-    const mods = car.isPlayer
-      ? { power: ersPow, top: ersTop * (car.drsOpen ? 1.12 : 1) * (car.slip ? 1.05 : 1), brake: input.brakeMult ?? 1 }
-      : { power: Math.sqrt(car.skill.pace) * ersPow, grip: car.skill.grip, top: ersTop * car.skill.pace * (car.drsOpen ? 1.12 : 1) * (car.slip ? 1.05 : 1) };
+    // One car for everyone: the same engine, ERS, DRS, tow and grip. (The player's brake setting can
+    // only soften the pedal, never add braking the bots don't have.)
+    const mods = {
+      power: ersPow,
+      top: ersTop * (car.drsOpen ? 1.12 : 1) * (car.slip ? 1.05 : 1),
+      grip: 1 - DIRTY_AIR.grip * car.dirty,
+      brake: (car.isPlayer ? Math.min(1, input.brakeMult ?? 1) : 1) * (car.brakeEff ?? 1)
+    };
     const prevIdx = car.idx;
+    const fwdBefore = car.fwd;
     const hit = stepCar(car, input, track, dt, mods);
     if (hit && car.isPlayer) emit(race, { type: "wall", car: car.id, speed: car.speed });
 
@@ -990,6 +1277,9 @@ export function stepRace(race, playerInput, dt) {
       car.ersHarvestLap += h;
       car.harvesting = h > 0;
     }
+    // Brakes after the harvest: while the MGU-K is recharging the battery it takes part of the
+    // braking load, so the discs run a little cooler
+    if (car.brakeTemp != null) updateBrakes(race, car, input, mods, fwdBefore, dt);
 
     // Track limits: judged when the car rejoins. Kerb-hopping is fine; the whole car has to be past
     // the kerb for a moment, and it only counts if the car came back with its speed (an advantage).
@@ -1052,54 +1342,27 @@ export function stepRace(race, playerInput, dt) {
 
     const before = car.idx;
     trackProgress(race, car, prevIdx);
-    // DRS detection
-    for (const z of track.drs) {
+    // DRS detection, as in F1: crossing a detection line less than 1.0 s after ANY other car (a
+    // rival or a backmarker) enables DRS in the zone that follows. From lap 2 on.
+    track.drs.forEach((z, zi) => {
       const passed = (z.detect - prevIdx + track.n) % track.n;
       const movedBy = (before - prevIdx + track.n) % track.n;
-      if (movedBy > 0 && movedBy < track.n / 2 && passed > 0 && passed <= movedBy) {
-        if (race.mode === "trial") car.drsEligible = true;
-        else {
-          const pos = byPos.indexOf(car);
-          const ahead = pos > 0 ? byPos[pos - 1] : null;
-          const gap = ahead ? gapBetween(race, ahead, car) : Infinity;
-          car.drsEligible = car.laps >= 1 && gap < 1.0;
-        }
+      if (!(movedBy > 0 && movedBy < track.n / 2 && passed > 0 && passed <= movedBy)) return;
+      if (race.mode === "trial") {
+        car.drsEligible = true;
+        return;
       }
-    }
+      const last = race.drsLine[zi];
+      const gap = last && last.id !== car.id ? race.t - last.t : Infinity;
+      car.drsEligible = car.laps >= 1 && gap < DRS_GAP;
+      race.drsLine[zi] = { id: car.id, t: race.t };
+      if (car.isPlayer && car.laps >= 1) emit(race, { type: "drsDetect", car: car.id, gap, eligible: car.drsEligible });
+    });
   }
 
   // Car-to-car contact
+  resolveContacts(race);
   const cars = race.cars;
-  for (let a = 0; a < cars.length; a++) {
-    for (let b = a + 1; b < cars.length; b++) {
-      const A = cars[a];
-      const B = cars[b];
-      const dx = B.x - A.x;
-      const dy = B.y - A.y;
-      const d2 = dx * dx + dy * dy;
-      const min = CAR.radius * 2;
-      if (d2 > 0 && d2 < min * min) {
-        const d = Math.sqrt(d2);
-        const nx = dx / d;
-        const ny = dy / d;
-        const push = (min - d) / 2;
-        A.x -= nx * push;
-        A.y -= ny * push;
-        B.x += nx * push;
-        B.y += ny * push;
-        const rv = (B.vx - A.vx) * nx + (B.vy - A.vy) * ny;
-        if (rv < 0) {
-          const j = -rv * 0.65;
-          A.vx -= nx * j;
-          A.vy -= ny * j;
-          B.vx += nx * j;
-          B.vy += ny * j;
-        }
-        if (Math.abs(rv) > 40) A.lastHit = B.lastHit = race.t;
-        if ((A.isPlayer || B.isPlayer) && Math.abs(rv) > 60) emit(race, { type: "contact", speed: Math.abs(rv) });
-      }
-    }
-  }
 
   // AI racecraft. Attack: when closing on the car ahead, go for the inside of the next corner (or the
   // side it leaves open). Defend: with a quicker car right behind before a corner, cover the inside.
@@ -1117,7 +1380,7 @@ export function stepRace(race, playerInput, dt) {
     let behind = null;
     let behindGap = Infinity;
     for (const o of cars) {
-      if (o === car) continue;
+      if (o === car || o.finished) continue;
       const gap = o.total - car.total;
       if (gap > 0 && gap < aheadGap) {
         aheadGap = gap;

@@ -43,6 +43,37 @@ main.wrap.game-screen {
   display: none;
 }
 
+/* Qualifying: keep the best lap so far and skip the remaining laps */
+.gl-submit {
+  position: absolute;
+  top: 14%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 10px 16px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: #04101c;
+  background: #22e36b;
+  border: 2px solid #eafff0;
+  box-shadow: 0 0 18px rgba(34, 227, 107, 0.45);
+  cursor: pointer;
+}
+.gl-submit small {
+  margin-left: 6px;
+  font-size: 7px;
+  opacity: 0.75;
+}
+.gl-submit.is-end {
+  color: #fff;
+  background: #3a4458;
+  border-color: #8a95a8;
+  box-shadow: none;
+}
+.gl-submit[hidden] {
+  display: none;
+}
+
 .gl-kicker {
   margin: 0;
   font-family: var(--font-display);

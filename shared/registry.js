@@ -131,7 +131,7 @@ export const games = [
     howToPlay: {
       goal: "Qualify, then win 20-car Grands Prix, beat a bot from Noob to Impossible, or chase your own ghost on real-length F1 circuits.",
       steps: [
-        "Pick a mode, a circuit, the lap count and the AI level (Noob to Impossible, or Mixed). A Grand Prix starts with a one-lap qualifying session for your grid slot, or skip it for a random grid.",
+        "Pick a mode, a circuit, the lap count and the AI level (Noob to Impossible, or Mixed). A Grand Prix starts with qualifying: three flying laps each, and your best clean lap sets your grid slot (a live timing tower shows every driver's laps as they come in; SUBMIT LAP ends your session early), or skip it for a random grid.",
         "Don't touch the throttle until the five red lights go out: holding it early locks the throttle until you let go.",
         "Corners have real grip limits: brake in a straight line, because kerbs and grass cost grip and speed. Stewards are lenient but fair: kerbs are yours, and running wide only counts if the whole car goes past the kerb and you keep your speed (five warnings, then 3 second penalties). Cutting across the inside of a corner is a warning the first time, then +2 seconds. Being pushed off by another car never counts, and any offence deletes that lap's time.",
         "Every bot drives the same car as you, with the same engine, grip, brakes, ERS and DRS. Levels only change how well they drive. Behind another car you get a tow on the straights, but dirty air in the corners (less grip, shown as DIRTY). Cars are solid: contact pushes, scrubs speed and can spin you.",

@@ -63,10 +63,52 @@ function timingTower(ctx, race, x, y) {
   });
 }
 
-function lapList(ctx, car, bestTrail, x, y) {
+// Live qualifying tower: everyone's best lap (gap to the fastest), how far into their run they are,
+// and a flash of each new lap as it comes in (purple = fastest overall, green = personal best,
+// yellow = slower, red = deleted)
+function qualiTower(ctx, rows, x, y, title) {
+  const rowH = 20;
+  const w = 300;
+  panel(ctx, x, y, w, 30 + rows.length * rowH);
+  text(ctx, title, x + 12, y + 20, { size: 9, color: "#8fb4ff" });
+  text(ctx, "LIVE", x + w - 12, y + 20, { size: 8, color: "#ff4d5e", align: "right" });
+  const pole = rows[0] && Number.isFinite(rows[0].best) ? rows[0].best : null;
+  rows.forEach((r, k) => {
+    const ry = y + 30 + k * rowH;
+    if (r.flash) {
+      ctx.fillStyle = r.flash;
+      ctx.globalAlpha = 0.22;
+      ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
+      ctx.globalAlpha = 1;
+    } else if (r.isPlayer) {
+      ctx.fillStyle = "rgba(0, 136, 255, 0.28)";
+      ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
+    }
+    const ty = ry + 14;
+    const timed = Number.isFinite(r.best);
+    text(ctx, timed ? String(k + 1).padStart(2, " ") : " -", x + 10, ty, { size: 9, color: k === 0 && timed ? "#ffd400" : "#fff" });
+    ctx.fillStyle = r.color;
+    ctx.fillRect(x + 40, ry + 4, 4, rowH - 8);
+    text(ctx, r.code, x + 52, ty, { size: 9, color: r.isPlayer ? "#6fd3ff" : "#e8ecf4" });
+    text(ctx, r.status, x + 112, ty, { size: 7, color: r.status === "GARAGE" ? "#55606f" : r.status === "DONE" ? "#8a95a8" : "#22e36b" });
+    let t;
+    let col = "#c9d2e3";
+    if (r.flash) {
+      t = r.flashValid ? fmtLap(r.flashTime * 1000) : "DELETED";
+      col = r.flash;
+    } else if (!timed) t = "NO TIME";
+    else if (k === 0 || !pole) {
+      t = fmtLap(r.best * 1000);
+      col = "#ffd400";
+    } else t = `+${(r.best - pole).toFixed(3)}`;
+    text(ctx, t, x + w - 12, ry + 15, { font: BODY, size: 17, color: col, align: "right" });
+  });
+}
+
+function lapList(ctx, car, bestTrail, x, y, title = "TIME TRIAL") {
   const laps = car.lapTimes.slice(-6);
   panel(ctx, x, y, 238, 60 + Math.max(1, laps.length) * 24);
-  text(ctx, "TIME TRIAL", x + 12, y + 20, { size: 9, color: "#8fb4ff" });
+  text(ctx, title, x + 12, y + 20, { size: 9, color: "#8fb4ff" });
   text(ctx, `BEST ${fmtLap(car.bestLap * 1000)}`, x + 12, y + 42, { font: BODY, size: 22, color: "#b44dff" });
   if (!laps.length) text(ctx, "SET A FLYING LAP", x + 12, y + 70, { font: BODY, size: 20, color: "#6c7a96" });
   laps.forEach((l, k) => {
@@ -282,7 +324,8 @@ export function drawHud(ctx, s) {
   const car = race.player;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  if (race.mode === "trial" && car) lapList(ctx, car, s.bestTrail, 16, 16);
+  if (race.mode === "trial" && car && s.qualiBoard) qualiTower(ctx, s.qualiBoard, 16, 16, `QUALIFYING • LAP ${Math.min(car.lapTimes.length + 1, s.quali)}/${s.quali}`);
+  else if (race.mode === "trial" && car) lapList(ctx, car, s.bestTrail, 16, 16, "TIME TRIAL");
   else timingTower(ctx, race, 16, 16);
 
   // Lap counter + race clock

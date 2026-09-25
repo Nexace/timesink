@@ -4,7 +4,7 @@ import { saveScore } from "/shared/scores.js";
 import { setEngineHum } from "/shared/audio.js";
 import { vignette, glow } from "/shared/gfx.js";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingLap, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP } from "./race.js";
 import { createWorld, drawCar, createMinimap, worldTransform } from "./render.js";
 import { drawHud, fmtLap, fmtSec } from "./hud.js";
 import { enableTouchLayout } from "/shared/touchlayout.js";
@@ -336,6 +336,11 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (screen !== "race") return;
+  if (e.code === "Enter" && !e.repeat && canSubmitQuali()) {
+    e.preventDefault();
+    submitQuali();
+    return;
+  }
   const map = { accel: "up", brake: "down", left: "left", right: "right", drift: "drift", drs: "drs", ers: "ers" };
   let used = false;
   for (const [action, k] of Object.entries(map)) {
@@ -585,7 +590,9 @@ function startRace(config) {
     seed: (Date.now() & 0xffffff) + 1,
     grid: quali ? null : config.grid || null,
     // Grand Prix option: brakes heat up, fade when overheated and wear out (for every car)
-    brakes: config.mode === "gp" && prefs.gpBrakes !== false
+    brakes: config.mode === "gp" && prefs.gpBrakes !== false,
+    // Qualifying is a proper flying lap: you start rolling ~200 m before the line
+    flying: quali
   });
   const cam = newCam(race.player);
   cam.zoom = 1.05;
@@ -606,7 +613,8 @@ function startRace(config) {
     recT: 0,
     lastLaps: race.player.laps,
     delta: null,
-    qualiLap: null
+    qualiLaps: [],
+    qualiBoard: quali ? createQualiBoard(config.field) : null
   };
   acc = 0;
   Object.keys(keys).forEach((k) => (keys[k] = false));
@@ -614,7 +622,7 @@ function startRace(config) {
   overlay.hidden = true;
   overlay.innerHTML = "";
   canvas.focus({ preventScroll: true });
-  if (quali) banner("QUALIFYING", "One flying lap sets your grid slot • running wide deletes it", "#00f0ff", 4);
+  if (quali) banner(`QUALIFYING • ${QUALI_LAPS} FLYING LAPS`, "You're already rolling: push! Your best clean lap sets your grid slot", "#00f0ff", 4);
   else if (config.mode === "trial") banner("TIME TRIAL", ghost ? `Beat your ghost: ${fmtSec(ghost.time)}` : "Cross the line to start a flying lap", "#00f0ff", 3.5);
   else {
     const slot = race.cars.findIndex((c) => c.isPlayer) + 1;
@@ -662,6 +670,25 @@ function handleEvents(race) {
     } else if (e.car !== pid && e.type !== "flag") continue;
     else if (e.type === "sector") {
       // colour shown in the HUD
+    } else if (e.type === "lap" && s.config.stage === "quali") {
+      // Qualifying: three timed laps in a row, the best clean one counts
+      s.qualiLaps.push({ time: e.time, valid: e.valid });
+      const n = s.qualiLaps.length;
+      const best = Math.min(...s.qualiLaps.filter((l) => l.valid).map((l) => l.time));
+      const isBest = e.valid && e.time <= best;
+      if (isBest) sfx.good();
+      const bestTxt = Number.isFinite(best) ? `BEST ${fmtSec(best)}` : "NO CLEAN LAP YET";
+      banner(
+        `QUALI LAP ${n}/${QUALI_LAPS}${e.valid ? "" : " DELETED"}`,
+        `${fmtSec(e.time)}${isBest && n > 1 ? " • NEW BEST" : ""} • ${n < QUALI_LAPS ? `${bestTxt} • ${QUALI_LAPS - n} TO GO` : bestTxt}`,
+        e.valid ? (isBest ? "#22e36b" : "#ffffff") : "#ff4d5e",
+        2.8
+      );
+      announce(`Qualifying lap ${n}: ${fmtSec(e.time)}${e.valid ? "" : ", deleted"}.`);
+      onTrialLap(e, race.player);
+      const me = s.qualiBoard?.rows.find((r) => r.entry === "player");
+      if (me) boardLap(s.qualiBoard, me, { time: e.time, valid: e.valid });
+      if (n >= QUALI_LAPS) s.endAt = performance.now() + 1800;
     } else if (e.type === "lap") {
       const c = race.player;
       if (!e.valid) banner(`LAP ${e.lap} DELETED`, `${fmtSec(e.time)} • TRACK LIMITS`, "#ff4d5e", 2.6);
@@ -676,10 +703,6 @@ function handleEvents(race) {
       }
       announce(`Lap ${e.lap}: ${fmtSec(e.time)}${e.valid ? "" : ", deleted"}.`);
       if (race.mode === "trial") onTrialLap(e, c);
-      if (s.config.stage === "quali" && !s.qualiLap) {
-        s.qualiLap = { time: e.time, valid: e.valid };
-        s.endAt = performance.now() + 1600;
-      }
       if (race.mode !== "trial" && !c.finished && c.laps === race.laps - 1) banner("FINAL LAP", "", "#ffd400", 2);
     } else if (e.type === "limits") {
       sfx.warn();
@@ -815,6 +838,29 @@ function resumeRace() {
   canvas.focus({ preventScroll: true });
 }
 
+// Qualifying: after the first timed lap the player can keep their best lap and skip the rest
+const submitBtn = $("quali-submit");
+const canSubmitQuali = () =>
+  !!session && screen === "race" && !session.paused && session.config.stage === "quali" && session.qualiLaps.length >= 1 && session.qualiLaps.length < QUALI_LAPS && !session.endAt;
+function submitQuali() {
+  if (!canSubmitQuali()) return;
+  sfx.click();
+  session.endAt = 0;
+  finishSession(false);
+}
+submitBtn?.addEventListener("click", submitQuali);
+let submitShown = null;
+function syncQualiSubmit() {
+  const show = canSubmitQuali();
+  const clean = show && session.qualiLaps.some((l) => l.valid);
+  const key = show ? (clean ? "submit" : "end") : "hide";
+  if (key === submitShown || !submitBtn) return;
+  submitShown = key;
+  submitBtn.hidden = !show;
+  submitBtn.classList.toggle("is-end", key === "end");
+  submitBtn.innerHTML = key === "end" ? "END QUALIFYING (NO CLEAN LAP) <small>ENTER</small>" : "SUBMIT LAP &#10003; <small>ENTER</small>";
+}
+
 function finishSession(retired = false) {
   const s = session;
   const race = s.race;
@@ -839,15 +885,90 @@ function finishSession(retired = false) {
   showResults(rows, retired);
 }
 
-// Rivals set their laps on an empty track with their own race pace; a deleted lap starts from the back
+// ── Live qualifying board ──
+// The rivals run their three flying laps on their own empty track, pushing harder than in the race. Each
+// bot's run is worked out up front (one bot per frame, so nothing stutters), then its laps are revealed
+// on the board at the moment they'd cross the line: bots head out at staggered times, like real
+// qualifying. The final grid uses exactly the same laps, so the board and the results always agree.
+function createQualiBoard(field) {
+  const rows = [
+    { entry: "player", code: PLAYER_LIVERY.code, color: PLAYER_LIVERY.color, laps: [], best: Infinity, flashAt: -99 },
+    ...field.map((f) => ({ entry: f, code: f.livery.code, color: f.livery.color, run: null, start: 0, frac: Math.random(), laps: [], best: Infinity, flashAt: -99 }))
+  ];
+  return { rows, pending: rows.filter((r) => r.entry !== "player"), fastest: Infinity };
+}
+
+function runBot(board, row, track) {
+  row.run = qualifyingRun(track, row.entry.skill);
+  // Out on track some time within the first lap and a half of the session
+  row.start = row.frac * (Number.isFinite(row.run[0].time) ? row.run[0].time : 40) * 1.5;
+  board.pending = board.pending.filter((r) => r !== row);
+}
+
+// A lap has come in: update that driver's best, the board's fastest, and flash the row
+function boardLap(board, row, lap) {
+  row.laps.push(lap);
+  const wasPole = board.rows.every((r) => r === row || row.best <= r.best);
+  const pb = lap.valid && lap.time < row.best;
+  if (pb) row.best = lap.time;
+  const overall = pb && lap.time < board.fastest;
+  if (overall) board.fastest = lap.time;
+  row.flashAt = performance.now();
+  row.flash = !lap.valid ? "#ff4d5e" : overall ? "#b44dff" : pb ? "#22e36b" : "#ffd23f";
+  row.flashTime = lap.time;
+  row.flashValid = lap.valid;
+  // Somebody else takes provisional pole: tell the player
+  if (overall && row.entry !== "player" && !wasPole && board.rows.filter((r) => Number.isFinite(r.best)).length > 1) {
+    banner("PROVISIONAL POLE", `${row.code} • ${fmtSec(lap.time)}`, "#b44dff", 1.8, 12);
+  }
+}
+
+function updateQualiBoard(s) {
+  const board = s.qualiBoard;
+  if (board.pending.length) runBot(board, board.pending[0], s.race.track);
+  const t = s.race.t;
+  for (const row of board.rows) {
+    if (!row.run) continue;
+    let end = row.start;
+    for (let k = 0; k < row.run.length; k++) {
+      end += Number.isFinite(row.run[k].time) ? row.run[k].time : 60;
+      if (k < row.laps.length) continue;
+      if (t >= end) boardLap(board, row, row.run[k]);
+      break;
+    }
+  }
+}
+
+/** Rows for the HUD tower, quickest first; drivers without a time yet sit below, in the order they went out. */
+function qualiBoardRows(s) {
+  const board = s.qualiBoard;
+  const t = s.race.t;
+  const now = performance.now();
+  const rows = board.rows.map((r) => {
+    let status;
+    if (r.entry === "player") status = r.laps.length >= QUALI_LAPS ? "DONE" : `L${r.laps.length + 1}/${QUALI_LAPS}`;
+    else if (!r.run || t < r.start) status = "GARAGE";
+    else status = r.laps.length >= QUALI_LAPS ? "DONE" : `L${r.laps.length + 1}/${QUALI_LAPS}`;
+    const flashing = now - r.flashAt < 3000;
+    return { code: r.code, color: r.color, isPlayer: r.entry === "player", best: r.best, status, flash: flashing ? r.flash : null, flashTime: r.flashTime, flashValid: r.flashValid };
+  });
+  rows.sort((a, b) => a.best - b.best || (a.status === "GARAGE") - (b.status === "GARAGE"));
+  return rows;
+}
+
 function showQualifying() {
   const s = session;
   screen = "results";
   const track = s.race.track;
-  const mine = s.qualiLap && s.qualiLap.valid ? s.qualiLap.time : Infinity;
+  const mine = Math.min(...s.qualiLaps.filter((l) => l.valid).map((l) => l.time));
+  // Rivals keep their full three-lap runs (the same laps the live board was showing)
+  const board = s.qualiBoard;
+  while (board.pending.length) runBot(board, board.pending[0], track);
   const rows = [
     { entry: "player", name: PLAYER_LIVERY.name, code: PLAYER_LIVERY.code, color: PLAYER_LIVERY.color, time: mine },
-    ...s.config.field.map((f) => ({ entry: f, name: f.livery.name, code: f.livery.code, color: f.livery.color, time: qualifyingLap(track, f.skill) }))
+    ...board.rows
+      .filter((r) => r.entry !== "player")
+      .map((r) => ({ entry: r.entry, name: r.entry.livery.name, code: r.code, color: r.color, time: bestQualiLap(r.run) }))
   ].sort((a, b) => a.time - b.time);
   s.qualiGrid = rows.map((r) => r.entry);
   const pole = rows[0].time;
@@ -864,10 +985,10 @@ function showQualifying() {
       </tr>`;
     })
     .join("");
-  const title = !Number.isFinite(mine) ? "LAP DELETED" : myPos === 1 ? "POLE POSITION" : `QUALIFIED P${myPos}`;
+  const title = !Number.isFinite(mine) ? "NO TIME" : myPos === 1 ? "POLE POSITION" : `QUALIFIED P${myPos}`;
   const note = !Number.isFinite(mine)
-    ? "Your lap was deleted for track limits, so you start from the back of the grid."
-    : `Your lap: ${fmtSec(mine)}. Run it again for a better slot, or take the grid as it stands.`;
+    ? `No clean lap in ${s.qualiLaps.length || QUALI_LAPS} tries (track limits), so you start from the back of the grid.`
+    : `Your laps: ${s.qualiLaps.map((l) => (l.valid ? fmtSec(l.time) : "deleted")).join(" • ")}. ${s.qualiLaps.length < QUALI_LAPS ? `Submitted after ${s.qualiLaps.length} of ${QUALI_LAPS} laps.` : `Best of ${QUALI_LAPS} counts, same for every driver.`} Run it again for a better slot, or take the grid as it stands.`;
   overlay.hidden = false;
   overlay.innerHTML = `
     <div class="gl-menu gl-menu--wide">
@@ -1008,7 +1129,7 @@ function showSetup(mode) {
   const lapOpts = [1, 3, 5, 10, 20];
   const title = { gp: "GRAND PRIX", duel: "DUEL", trial: "TIME TRIAL" }[mode];
   const blurb = {
-    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Everyone drives the same car. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify with one flying lap to set your grid slot, or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
+    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Everyone drives the same car. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify over three flying laps (your best clean lap sets your grid slot), or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
     duel: "Head-to-head against one bot in the same car as yours: same engine, grip, brakes, ERS and DRS. Levels only change how well it drives. Impossible uses almost all of the car.",
     trial: "Flying laps on an empty circuit. Your best clean lap becomes a ghost; running wide deletes the lap."
   }[mode];
@@ -1365,7 +1486,9 @@ function frame(now) {
   }
 
   const view = session || demo;
+  if (session?.qualiBoard && session.race.phase === "racing" && !session.paused) updateQualiBoard(session);
   if (view) renderScene(view, now);
+  syncQualiSubmit();
   if (session && screen !== "home") {
     const c = session.race.player;
     const inZone = c && session.race.track.drs.some((z) => (z.from <= z.to ? c.idx >= z.from && c.idx <= z.to : c.idx >= z.from || c.idx <= z.to));
@@ -1376,6 +1499,8 @@ function frame(now) {
       now: now / 1000,
       ghost: session.ghostPos,
       bestTrail: session.ghost,
+      qualiBoard: session.qualiBoard ? qualiBoardRows(session) : null,
+      quali: session.config.stage === "quali" ? QUALI_LAPS : 0,
       delta: session.delta,
       drsState: c.drsOpen ? "open" : c.drsEligible && inZone ? "ready" : c.drsEligible ? "armed" : "off",
       W,

@@ -57,13 +57,13 @@ function steerSpeedFor(r) {
 // and hard they brake (brake: share of the car's full braking they plan on), how much throttle they
 // dare use (commit), how tidy their line is (noise) and how quickly they react to the lights (react, s).
 export const DIFFICULTY = {
-  noob: { label: "NOOB", corner: 0.5, brake: 0.45, commit: 0.62, noise: 0.3, react: 0.55 },
-  veryEasy: { label: "VERY EASY", corner: 0.58, brake: 0.52, commit: 0.72, noise: 0.22, react: 0.45 },
-  easy: { label: "EASY", corner: 0.68, brake: 0.6, commit: 0.82, noise: 0.14, react: 0.38 },
-  medium: { label: "MEDIUM", corner: 0.79, brake: 0.69, commit: 0.9, noise: 0.08, react: 0.32 },
-  hard: { label: "HARD", corner: 0.88, brake: 0.78, commit: 0.95, noise: 0.04, react: 0.27 },
-  veryHard: { label: "VERY HARD", corner: 0.94, brake: 0.85, commit: 0.98, noise: 0.02, react: 0.23 },
-  impossible: { label: "IMPOSSIBLE", corner: 0.99, brake: 0.92, commit: 1, noise: 0, react: 0.19 }
+  noob: { label: "NOOB", corner: 0.62, brake: 0.55, commit: 0.74, noise: 0.24, react: 0.5 },
+  veryEasy: { label: "VERY EASY", corner: 0.7, brake: 0.63, commit: 0.82, noise: 0.17, react: 0.42 },
+  easy: { label: "EASY", corner: 0.79, brake: 0.71, commit: 0.89, noise: 0.11, react: 0.35 },
+  medium: { label: "MEDIUM", corner: 0.87, brake: 0.79, commit: 0.95, noise: 0.06, react: 0.29 },
+  hard: { label: "HARD", corner: 0.92, brake: 0.84, commit: 0.98, noise: 0.03, react: 0.24 },
+  veryHard: { label: "VERY HARD", corner: 0.97, brake: 0.91, commit: 1, noise: 0.01, react: 0.2 },
+  impossible: { label: "IMPOSSIBLE", corner: 1.06, brake: 1.0, commit: 1, noise: 0, react: 0.16 }
 };
 DIFFICULTY.mixed = { ...DIFFICULTY.medium, label: "MIXED" };
 export const DIFFICULTY_ORDER = ["noob", "veryEasy", "easy", "medium", "hard", "veryHard", "impossible"];
@@ -957,8 +957,8 @@ export function makeField({ mode, difficulty = "medium", seed = 1 }) {
       const spread = mode === "duel" ? 0 : ((mid - rank) / Math.max(1, mid)) * 0.05;
       skill = {
         ...base,
-        corner: clamp(base.corner + spread * 0.5, 0.5, 0.99),
-        brake: clamp(base.brake + spread * 0.5, 0.45, 0.92),
+        corner: clamp(base.corner + spread * 0.5, 0.5, 1.08),
+        brake: clamp(base.brake + spread * 0.5, 0.45, 1),
         commit: clamp(base.commit + spread * 0.4, 0.55, 1)
       };
     }
@@ -970,23 +970,42 @@ export function makeField({ mode, difficulty = "medium", seed = 1 }) {
  * One flying lap for an AI driver on an empty track (qualifying). Returns the lap time in seconds,
  * with a little random "form" so the order isn't identical every weekend.
  */
-export function qualifyingLap(track, skill, rand = Math.random) {
-  const race = createRace({ track, mode: "trial", seed: 1 });
-  const car = race.cars[0];
-  car.isPlayer = false;
-  car.skill = skill;
-  race.player = null;
-  const dt = 1 / 120;
-  for (let k = 0; k < 400 * 120; k++) {
-    stepRace(race, null, dt);
-    const lap = car.lapTimes.find((l) => l.valid);
-    if (lap) return lap.time * (1 + (rand() - 0.5) * 0.008);
-    if (car.lapTimes.length > 3) break;
-  }
-  return Infinity;
+/** A driver on a qualifying lap pushes harder than in the race: closer to the limit, later on the brakes. */
+export function qualifyingSkill(skill) {
+  return {
+    ...skill,
+    corner: Math.min(1.1, skill.corner + 0.03),
+    brake: Math.min(1.02, skill.brake + 0.04),
+    commit: Math.min(1, (skill.commit ?? 1) + 0.04),
+    noise: (skill.noise ?? 0) * 0.5
+  };
 }
 
-export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1, grid = null, brakes = false }) {
+// Qualifying: everyone gets this many timed laps in a row (from a flying start); the best clean one counts
+export const QUALI_LAPS = 3;
+
+/** A bot's whole qualifying run: QUALI_LAPS flying laps, each [{ time, valid }] with its own bit of form. */
+export function qualifyingRun(track, skill, rand = Math.random) {
+  const race = createRace({ track, mode: "trial", seed: 1, flying: true });
+  const car = race.cars[0];
+  car.isPlayer = false;
+  car.skill = qualifyingSkill(skill);
+  race.player = null;
+  const dt = 1 / 120;
+  for (let k = 0; k < 150 * QUALI_LAPS * 120 && car.lapTimes.length < QUALI_LAPS; k++) stepRace(race, null, dt);
+  const laps = car.lapTimes.slice(0, QUALI_LAPS).map((l) => ({ time: l.time * (1 + (rand() - 0.5) * 0.008), valid: l.valid }));
+  while (laps.length < QUALI_LAPS) laps.push({ time: Infinity, valid: false });
+  return laps;
+}
+
+/** Best clean lap of a qualifying run (Infinity if every lap was deleted). */
+export const bestQualiLap = (laps) => Math.min(...laps.filter((l) => l.valid).map((l) => l.time));
+
+export function qualifyingLap(track, skill, rand = Math.random) {
+  return bestQualiLap(qualifyingRun(track, skill, rand));
+}
+
+export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1, grid = null, brakes = false, flying = false }) {
   const rand = seededRand(seed);
   const cars = [];
   // Grid order, front to back: "player" or a field entry. By default the player starts in the middle
@@ -1000,6 +1019,20 @@ export function createRace({ track, mode, laps = 5, difficulty = "medium", seed 
     if (entry === "player") cars.push(makeCar("player", PLAYER_LIVERY, track.grid[k], { isPlayer: true }));
     else cars.push(makeCar(entry.id, entry.livery, track.grid[k], { skill: entry.skill }));
   });
+  // Qualifying is a flying lap: start on the racing line ~200 m before the line, already at speed
+  if (flying) {
+    const k = (track.n - 60 + track.n) % track.n;
+    for (const c of cars) {
+      const v = Math.min(track.vmax[k], CAR.top * 0.9);
+      c.x = track.path[k][0] + track.nor[k][0] * track.line[k];
+      c.y = track.path[k][1] + track.nor[k][1] * track.line[k];
+      c.heading = Math.atan2(track.tan[k][1], track.tan[k][0]);
+      c.vx = track.tan[k][0] * v;
+      c.vy = track.tan[k][1] * v;
+      c.fwd = v;
+      c.speed = v;
+    }
+  }
   // Bots react to the lights like a person would (quicker drivers, quicker starts)
   for (const c of cars) if (!c.isPlayer) c.react = (c.skill.react ?? 0.3) * (0.8 + rand() * 0.4);
   if (brakes) {

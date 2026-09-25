@@ -22,7 +22,7 @@
       </div>
 
       <div class="av-screen">
-        <div class="av-canvas-container">
+        <div class="av-canvas-container" data-stage>
           <!-- Flight Telemetry HUD -->
           <div class="av-hud">
             <div class="hud-group">
@@ -74,7 +74,7 @@
           <canvas id="av-canvas" width="960" height="540"></canvas>
 
           <!-- Aircraft Hangar Selection Modal -->
-          <div class="av-hangar-modal" id="av-hangar-modal" style="display: none;">
+          <div class="av-hangar-modal" id="av-hangar-modal" data-stage-menu style="display: none;">
             <div class="hangar-header">
               <h2 class="av-modal-title">FIGHTER REQUISITION // HANGAR</h2>
               <p class="hangar-subtitle">SELECT AIRFRAME [KEYS 1-5 OR CLICK CARD] // PRESS [H] OR ESC TO RESUME</p>
@@ -89,7 +89,7 @@
           </div>
 
           <!-- Debrief / Game Over Modal -->
-          <div class="av-modal" id="av-debrief-modal" style="display: none;">
+          <div class="av-modal" id="av-debrief-modal" data-stage-menu style="display: none;">
             <h2 class="av-modal-title">MISSION DEBRIEFING</h2>
             <div id="debrief-stats" style="color: #fff; font-family: monospace; display: flex; flex-direction: column; gap: 6px;"></div>
             <button type="button" class="btn btn--primary" id="btn-debrief-retry">[ RETRY SORTIE ]</button>

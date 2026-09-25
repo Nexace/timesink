@@ -1,4 +1,4 @@
-import { initShell, toast, openModal, confirmDialog, escapeHtml, setStreak, getStreak, getOperator, prefersReducedMotion } from "../../shared/shell.js";
+import { initShell, toast, openModal, confirmDialog, escapeHtml, setStreak, getStreak, getOperator, prefersReducedMotion, setImmersive, isImmersive } from "../../shared/shell.js";
 import { saveScore } from "../../shared/scores.js";
 import { createStore, createPrefStore, exportCode, importCode } from "../../shared/storage.js";
 import { dailySeedKey } from "../../shared/rng.js";
@@ -1116,8 +1116,8 @@ const panels = createPanels(stage, {
 
 document.querySelectorAll("[data-fullscreen-toggle]").forEach((btn) =>
   btn.addEventListener("click", () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else stage.requestFullscreen?.().catch(() => {});
+    // The site's fullscreen mode: the map fills the screen on every device (incl. iPhone)
+    setImmersive(!isImmersive());
   }),
 );
 

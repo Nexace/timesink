@@ -120,7 +120,7 @@ export const games = [
   {
     slug: "ghost-lap",
     title: "Ghost Lap",
-    tagline: "Top-down Formula racing on all 24 real calendar circuits: 20-car Grands Prix with qualifying, bot duels and ghost time trials.",
+    tagline: "Top-down Formula racing on all 24 real calendar circuits plus 5 classics (India, Malaysia, Hockenheim, Nürburgring, Sochi): 20-car Grands Prix with qualifying, bot duels and ghost time trials.",
     kind: "racing",
     tags: ["racing", "f1", "time-trial"],
     accent: "blue",
@@ -134,7 +134,7 @@ export const games = [
         "Pick a mode, a circuit, the lap count and the AI level (Noob to Impossible, or Mixed). A Grand Prix starts with qualifying: three laps each from the line, and your best clean lap sets your grid slot (a live timing tower shows every driver's laps as they come in; SUBMIT LAP ends your session early), or skip it for a random grid.",
         "Don't touch the throttle until the five red lights go out: holding it early locks the throttle until you let go.",
         "Corners have real grip limits: brake in a straight line, because kerbs and grass cost grip and speed. Stewards are lenient but fair: kerbs are yours, and running wide only counts if the whole car goes past the kerb and you keep your speed (five warnings, then 3 second penalties). Cutting across the inside of a corner is a warning the first time, then +2 seconds. Being pushed off by another car never counts, and any offence deletes that lap's time.",
-        "Every bot drives the same car as you, with the same engine, grip, brakes, ERS and DRS. Levels only change how well they drive. Behind another car you get a tow on the straights, but dirty air in the corners (less grip, shown as DIRTY). Cars are solid: contact pushes, scrubs speed and can spin you.",
+        "Every level is a serious racer: up to Medium the bots drive your exact car (same engine, grip, brakes, ERS and DRS); from Hard up their cars are faster too (Hard +3%, Very Hard +6%, Impossible +10%). Behind another car you get a tow on the straights, but dirty air in the corners (less grip, shown as DIRTY). Cars are solid: contact pushes, scrubs speed and can spin you.",
         "Grand Prix brakes (option, on by default): the BRK gauge shows disc temperature and brake life. They work best in the green band (about 350-950 °C); over 1000 °C they fade, and they wear out faster. Worn brakes stop shorter. ERS harvesting takes some of the load off them. The bots manage theirs the same way.",
         "Within a second of the car ahead at the DRS detection line, you can open DRS once you enter the zone for extra top speed; tuck into a slipstream for a tow.",
         "ERS: braking charges the battery. Hold ERS for a power boost anywhere except while DRS is open. Deploying gives +30% power and a higher top speed until the battery is empty; every braking zone puts a chunk back (watch it turn green), up to 80% of the battery per lap, so spend it on corner exits, attacks and defending."

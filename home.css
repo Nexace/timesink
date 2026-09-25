@@ -12,7 +12,9 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: calc(100dvh - var(--header-h));
+  /* svh: the hero keeps one height while iOS collapses its address bar, so nothing jumps mid-scroll */
+  min-height: calc(100vh - var(--header-h));
+  min-height: calc(100svh - var(--header-h));
   padding: var(--s-6) var(--s-4);
   overflow: visible;
   background: transparent;
@@ -32,8 +34,7 @@
   gap: var(--s-2);
   margin-block: auto;
   transform-origin: center center;
-  transition: transform 0.2s ease-out;
-  will-change: transform;
+  will-change: transform, opacity;
 }
 
 .boot__scroll-cue {
@@ -83,17 +84,12 @@
   50% {
     transform: translateX(-50%) translateY(6px);
     opacity: 1;
-    box-shadow: 0 0 24px rgba(0, 240, 255, 0.4);
   }
 }
 
+/* Scroll effects only ever move / fade things (transform + opacity): the browser runs them on the GPU
+   without re-laying-out the page, so the scroll stays smooth on phones */
 @supports ((animation-timeline: scroll()) and (animation-range: 0% 100%)) {
-  .boot {
-    animation: hero-shrink linear both;
-    animation-timeline: scroll(root block);
-    animation-range: 0px 320px;
-  }
-
   .boot__content {
     animation: hero-lift linear both;
     animation-timeline: scroll(root block);
@@ -113,25 +109,21 @@
   }
 }
 
-@keyframes hero-shrink {
-  from {
-    min-height: calc(100dvh - var(--header-h));
-    padding-top: var(--s-6);
-    padding-bottom: var(--s-6);
-  }
-  to {
-    min-height: 240px;
-    padding-top: var(--s-6);
-    padding-bottom: var(--s-2);
+/* On phones the (very tall) games section isn't moved while scrolling: keeping it still is smoother */
+@media (hover: none) {
+  .games {
+    animation: none !important;
   }
 }
 
 @keyframes hero-lift {
   from {
-    transform: scale(1) translateY(0);
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
   }
   to {
-    transform: scale(0.92) translateY(-10px);
+    transform: translate3d(0, -60px, 0);
+    opacity: 0.25;
   }
 }
 
@@ -1128,10 +1120,12 @@
     word-break: break-word;
   }
 
+  /* One line on a phone: "TIMESINK.NET" sized to the screen instead of breaking mid-word */
   .boot__title {
-    font-size: clamp(1.8rem, 1.2rem + 6.5vw, 3.2rem);
+    /* the word is 12.4x its font size wide; 6.9vw fits 320-430 px screens with room for the glow */
+    font-size: min(3.2rem, 6.9vw);
     max-width: 100%;
-    word-break: break-word;
+    white-space: nowrap;
   }
 
   .boot__sub {
@@ -1162,5 +1156,15 @@
   .card:hover .card__thumb-inner,
   .card:focus-visible .card__thumb-inner {
     transform: none;
+  }
+}
+
+/* Phones: the scroll pill stays on one line */
+@media (max-width: 560px) {
+  .boot__scroll-cue {
+    gap: var(--s-2);
+    padding: 8px 14px;
+    font-size: 8px;
+    white-space: nowrap;
   }
 }

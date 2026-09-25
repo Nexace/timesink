@@ -22,7 +22,7 @@
       </div>
 
       <div class="lt-screen">
-        <div class="lt-canvas-container">
+        <div class="lt-canvas-container" data-stage>
           <!-- Telemetry HUD -->
           <div class="lt-hud">
             <div class="hud-group">
@@ -64,7 +64,7 @@
           <canvas id="lt-canvas" width="960" height="540"></canvas>
 
           <!-- Game Over Modal -->
-          <div class="lt-modal" id="lt-death-modal" style="display: none;">
+          <div class="lt-modal" id="lt-death-modal" data-stage-menu style="display: none;">
             <h2 class="lt-modal-title">THE LAST TOWER HAS FALLEN</h2>
             <div id="lt-death-stats" style="color:#fff; font-family:monospace; display:flex; flex-direction:column; gap:6px;"></div>
             <button type="button" class="btn btn--primary" onclick="window.location.reload()">[ REBUILD DEFENSES ]</button>

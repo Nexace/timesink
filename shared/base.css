@@ -700,6 +700,7 @@ h4 {
 
 .panel__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s-3);
   padding: var(--s-2) var(--s-3);
@@ -1268,8 +1269,11 @@ body[data-page="game"] .toast__body {
 
 .console__group {
   display: flex;
+  flex-wrap: wrap; /* a long group wraps instead of pushing a phone page wider than the screen */
   align-items: center;
   gap: var(--s-2);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .console__label {
@@ -1914,3 +1918,216 @@ main.wrap.wrap:fullscreen::backdrop {
     gap: 6px;
   }
 }
+
+/* ============================================================
+   PHONES: one-line header (SYSINFO / USER-PROF / LOGOFF fold into ⋯), not pinned while scrolling,
+   and no live background blur anywhere (it is the most expensive thing to scroll on iOS)
+   ============================================================ */
+.hbtn--more {
+  display: none;
+}
+@media (max-width: 560px) {
+  :root {
+    --header-h: 50px;
+  }
+  .shell {
+    position: relative;
+    flex-wrap: nowrap;
+    gap: 8px;
+    min-height: var(--header-h);
+    padding: 6px 10px;
+    background: rgba(7, 10, 17, 0.94);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .shell__logo {
+    margin-right: 0;
+    font-size: 9px;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .shell__telemetry {
+    display: none;
+  }
+  .shell__nav {
+    position: relative;
+    flex-basis: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    margin-left: auto;
+    gap: 6px;
+  }
+  .shell__nav .hbtn {
+    min-height: 34px;
+    padding: 3px 9px;
+    font-size: 9px;
+  }
+  .hbtn--more {
+    display: inline-flex;
+    justify-content: center;
+    min-width: 40px;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .shell__nav > .hbtn--sysinfo,
+  .shell__nav > .hbtn--prof,
+  .shell__nav > .hbtn--logout,
+  .shell__nav > a.hbtn[target="_blank"] {
+    display: none;
+  }
+  .shell__nav.is-open > .hbtn--sysinfo,
+  .shell__nav.is-open > .hbtn--prof,
+  .shell__nav.is-open > .hbtn--logout {
+    display: flex;
+    position: absolute;
+    right: 0;
+    z-index: 5;
+    width: 140px;
+    justify-content: center;
+    background: #0b0e14;
+  }
+  .shell__nav.is-open > .hbtn--sysinfo {
+    top: calc(100% + 8px);
+  }
+  .shell__nav.is-open > .hbtn--prof {
+    top: calc(100% + 48px);
+  }
+  .shell__nav.is-open > .hbtn--logout {
+    top: calc(100% + 88px);
+  }
+}
+@media (hover: none), (max-width: 560px) {
+  *,
+  *::before,
+  *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  .stage-bar {
+    background: rgba(7, 10, 17, 0.9);
+  }
+}
+
+/* Phones: game titles stay short instead of wrapping onto four lines */
+@media (max-width: 560px) {
+  .stage-bar__title {
+    font-size: 15px;
+    line-height: 1.25;
+  }
+}
+
+/* ============================================================
+   IMMERSIVE FULLSCREEN (phones & tablets; shell.js setImmersive). The game fills the screen: the site
+   chrome is hidden, [data-stage] is sized to the screen keeping its shape (at the top in portrait, the
+   rest of the screen is room for the touch controls), [data-touch-frame] spreads the touch controls
+   over the whole screen and [data-stage-menu] opens in-game menus full screen.
+   ============================================================ */
+.immersive-bar {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 6px);
+  right: calc(env(safe-area-inset-right) + 6px);
+  z-index: 140; /* above dialogs (96): EXIT always works */
+  display: flex;
+  gap: 6px;
+}
+.immersive-bar .hbtn {
+  min-height: 34px;
+  padding: 4px 10px;
+  font-size: 9px;
+  color: #fff;
+  background: rgba(7, 10, 17, 0.72);
+}
+html.is-immersive,
+html.is-immersive body {
+  height: 100%;
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+html.is-immersive .shell,
+html.is-immersive .footer,
+html.is-immersive main > .stage-bar,
+html.is-immersive .console,
+html.is-immersive .skip-link,
+html.is-immersive [data-immersive-hide],
+html.is-immersive .hbtn--fullscreen-float {
+  display: none !important;
+}
+html.is-immersive main#main {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #000;
+}
+/* Anything wrapping the stage stops limiting its width (page max-widths, side padding) */
+html.is-immersive main :has([data-stage]) {
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+/* Landscape: a stage that doesn't fill the height is centred vertically */
+html.is-immersive:not(.is-portrait) main#main {
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+}
+html.is-immersive [data-stage] {
+  --imm-top: 0px;
+  --imm-h: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - var(--imm-top));
+  width: min(100%, calc(var(--imm-h) * var(--stage-ar, 1.7778))) !important;
+  max-width: none !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  aspect-ratio: var(--stage-ar, 1.7778) !important;
+  margin: var(--imm-top) auto 0 !important;
+  border-radius: 0 !important;
+}
+/* Portrait: leave a strip at the top for the EXIT button */
+html.is-immersive.is-portrait [data-stage] {
+  --imm-top: 46px;
+}
+html.is-immersive [data-stage-fill] {
+  width: 100% !important;
+  max-width: none !important;
+  height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+}
+html.is-immersive [data-touch-frame] {
+  position: fixed !important;
+  top: env(safe-area-inset-top) !important;
+  right: env(safe-area-inset-right) !important;
+  bottom: env(safe-area-inset-bottom) !important;
+  left: env(safe-area-inset-left) !important;
+  z-index: 40 !important;
+}
+/* Portrait: tips land in the empty space under the game, not on top of it */
+html.is-immersive.is-portrait body[data-page="game"] .toast-stack {
+  top: 50%;
+}
+/* The move-controls toolbar sits under the fullscreen EXIT / CONTROLS buttons, not on top of them */
+html.is-immersive .touch-layout-bar {
+  top: calc(env(safe-area-inset-top) + 48px);
+}
+/* While moving the controls they come to the front, above any open menu */
+html.is-immersive.touch-layout-editing [data-touch-frame] {
+  z-index: 70 !important;
+}
+html.is-immersive [data-stage-menu] {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 60 !important;
+}
+

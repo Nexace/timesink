@@ -10,7 +10,13 @@
 // Items keep their own event handlers. While editing, a capture listener on the frame swallows the
 // touches so dragging a button never fires it.
 
-const STORE = (id) => `timesink:touch-layout:${id}`;
+// One layout per screen shape: the normal page, fullscreen portrait and fullscreen landscape
+const layoutMode = () => {
+  if (typeof document === "undefined" || !document.documentElement.classList.contains("is-immersive")) return "";
+  return window.innerHeight > window.innerWidth ? ":fs-portrait" : ":fs-landscape";
+};
+const STORE = (id) => `timesink:touch-layout:${id}${layoutMode()}`;
+let currentMode = null;
 const MIN_SCALE = 0.7;
 const MAX_SCALE = 1.6;
 const layouts = [];
@@ -52,6 +58,21 @@ export function enableTouchLayout({ id, frame, items }) {
   for (const it of entry.items) it.el.dataset.touchMove = "";
   frame.classList.add("touch-layout-frame");
   layouts.push(entry);
+  if (currentMode === null) {
+    currentMode = layoutMode();
+    // Entering / leaving fullscreen or turning the phone: switch to that shape's saved layout
+    const onShape = () => {
+      const mode = layoutMode();
+      if (mode === currentMode) return;
+      currentMode = mode;
+      for (const e of layouts) {
+        e.state = load(e.id);
+        apply(e);
+      }
+    };
+    window.addEventListener("immersivechange", onShape);
+    window.addEventListener("resize", onShape);
+  }
   apply(entry);
   guard(entry);
   addToggle();

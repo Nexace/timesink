@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { CIRCUITS, fitCircuit, cornerRadii } from "./circuits.js";
 
 describe("Ghost Lap real F1 circuits", () => {
-  it("ships all 24 calendar layouts", () => {
-    assert.equal(Object.keys(CIRCUITS).length, 24);
+  it("ships all 24 calendar layouts plus 5 classic circuits", () => {
+    assert.equal(Object.keys(CIRCUITS).length, 29);
+    for (const key of ["india", "malaysia", "hockenheim", "nurburgring", "russia"]) assert.ok(CIRCUITS[key], key);
   });
 
   it("fits every circuit inside the stage margin with evenly spaced points", () => {

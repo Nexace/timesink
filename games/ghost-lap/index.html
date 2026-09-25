@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>GHOST LAP — SYS://TIMESINK.NET</title>
-    <meta name="description" content="Top-down Formula racing on all 24 real calendar circuits: 20-car Grands Prix with qualifying, 1v1 duels against seven bot difficulties, and ghost time trials with track limits, DRS and sector timing." />
+    <meta name="description" content="Top-down Formula racing on all 24 real calendar circuits plus 5 classics (India, Malaysia, Hockenheim, Nürburgring, Sochi): 20-car Grands Prix with qualifying, 1v1 duels against seven bot difficulties, and ghost time trials with track limits, DRS and sector timing." />
     <meta name="theme-color" content="#0B0E0B" />
     <link rel="stylesheet" href="/shared/tokens.css" />
     <link rel="stylesheet" href="/shared/base.css" />
@@ -21,9 +21,9 @@
         </span>
       </div>
 
-      <div class="gl-stage" id="stage">
+      <div class="gl-stage" id="stage" data-stage>
         <canvas id="race-canvas" width="1760" height="800" aria-label="Race view" tabindex="0"></canvas>
-        <div class="gl-touch" id="touch-pad" aria-hidden="true">
+        <div class="gl-touch" id="touch-pad" aria-hidden="true" data-touch-frame>
           <div class="gl-touch__side">
             <button type="button" data-key="left">&#9664;</button>
             <button type="button" data-key="right">&#9654;</button>
@@ -31,16 +31,16 @@
           <div class="gl-touch__side">
             <button type="button" data-key="drs">DRS</button>
             <button type="button" data-key="ers">ERS</button>
-            <button type="button" data-key="brake">BRK</button>
+            <button type="button" data-key="brake" aria-label="Brake, hold to reverse">BRK<br /><small>REV</small></button>
             <button type="button" data-key="up">GAS</button>
           </div>
         </div>
         <button type="button" class="gl-submit" id="quali-submit" hidden>SUBMIT LAP &#10003; <small>ENTER</small></button>
-        <div class="gl-overlay" id="overlay" role="dialog" aria-modal="false" aria-label="Ghost Lap menu"></div>
+        <div class="gl-overlay" id="overlay" data-stage-menu role="dialog" aria-modal="false" aria-label="Ghost Lap menu"></div>
         <p class="sr-only" aria-live="polite" id="race-announcer"></p>
       </div>
 
-      <div class="gl-controls-hint" id="gl-controls-hint"></div>
+      <div class="gl-controls-hint" id="gl-controls-hint" data-immersive-hide></div>
 
       <!-- Controls & Settings Modal -->
       <div class="gl-modal" id="modal-controls" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modal-controls-title">

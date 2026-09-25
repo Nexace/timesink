@@ -30,17 +30,31 @@ function text(ctx, str, x, y, { font = DISPLAY, size = 10, color = "#fff", align
   ctx.fillText(str, x, y);
 }
 
-function timingTower(ctx, race, x, y) {
+// Which rows a tower shows: all of them, or (on a small screen) the top three plus the ones around
+// the player. Returns [[position index, row], ...] in order.
+function towerRows(rows, maxRows, isMe) {
+  const all = rows.map((r, k) => [k, r]);
+  if (!maxRows || rows.length <= maxRows) return all;
+  const me = Math.max(0, rows.findIndex(isMe));
+  const keep = new Set([0, 1, 2]);
+  const room = maxRows - 3;
+  let from = Math.max(3, Math.min(me - Math.floor(room / 2), rows.length - room));
+  for (let k = from; k < from + room; k++) keep.add(k);
+  return all.filter(([k]) => keep.has(k));
+}
+
+function timingTower(ctx, race, x, y, maxRows = 0) {
   const rows = race.order;
   // A 20-car field gets a compact tower so it still clears the speed panel
   const big = rows.length > 12;
   const rowH = big ? 21 : 26;
   const w = 238;
-  panel(ctx, x, y, w, 30 + rows.length * rowH);
+  const shown = towerRows(rows, maxRows, (c) => c.isPlayer);
+  panel(ctx, x, y, w, 30 + shown.length * rowH);
   text(ctx, race.mode === "duel" ? "DUEL" : "RACE ORDER", x + 12, y + 20, { size: 9, color: "#8fb4ff" });
   text(ctx, "GAP", x + w - 12, y + 20, { size: 8, color: "#6c7a96", align: "right" });
-  rows.forEach((c, k) => {
-    const ry = y + 30 + k * rowH;
+  shown.forEach(([k, c], slot) => {
+    const ry = y + 30 + slot * rowH;
     if (c.isPlayer) {
       ctx.fillStyle = "rgba(0, 136, 255, 0.28)";
       ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
@@ -66,15 +80,16 @@ function timingTower(ctx, race, x, y) {
 // Live qualifying tower: everyone's best lap (gap to the fastest), how far into their run they are,
 // and a flash of each new lap as it comes in (purple = fastest overall, green = personal best,
 // yellow = slower, red = deleted)
-function qualiTower(ctx, rows, x, y, title) {
+function qualiTower(ctx, rows, x, y, title, maxRows = 0) {
   const rowH = 20;
   const w = 300;
-  panel(ctx, x, y, w, 30 + rows.length * rowH);
+  const shown = towerRows(rows, maxRows, (r) => r.isPlayer);
+  panel(ctx, x, y, w, 30 + shown.length * rowH);
   text(ctx, title, x + 12, y + 20, { size: 9, color: "#8fb4ff" });
   text(ctx, "LIVE", x + w - 12, y + 20, { size: 8, color: "#ff4d5e", align: "right" });
   const pole = rows[0] && Number.isFinite(rows[0].best) ? rows[0].best : null;
-  rows.forEach((r, k) => {
-    const ry = y + 30 + k * rowH;
+  shown.forEach(([k, r], slot) => {
+    const ry = y + 30 + slot * rowH;
     if (r.flash) {
       ctx.fillStyle = r.flash;
       ctx.globalAlpha = 0.22;
@@ -265,11 +280,10 @@ function timingPanel(ctx, race, car, x, y, w, extra) {
   if (car.penalty) text(ctx, `+${car.penalty}s`, x + w - 20 - pips * 10, y + 18, { size: 8, color: "#ff4d5e", align: "right" });
 }
 
-function lightsGantry(ctx, race, W) {
+function lightsGantry(ctx, race, W, y = 120) {
   const lit = race.lights;
   const w = 5 * 70 + 30;
   const x = (W - w) / 2;
-  const y = 120;
   ctx.fillStyle = "#0b0d12";
   ctx.fillRect(x, y, w, 110);
   ctx.strokeStyle = "#2a2f3a";
@@ -295,54 +309,97 @@ function lightsGantry(ctx, race, W) {
   }
 }
 
-function banners(ctx, list, W, now) {
-  let y = 250;
+function banners(ctx, list, W, now, y = 250) {
+  const maxW = W - 24;
   for (const b of list) {
     const left = b.until - now;
     if (left <= 0) continue;
     const a = Math.min(1, left / 0.4) * Math.min(1, (now - b.at) / 0.15);
     ctx.globalAlpha = a;
-    ctx.font = `${b.size || 16}px ${DISPLAY}`;
-    const tw = ctx.measureText(b.text).width;
-    const bw = Math.max(tw, b.sub ? b.sub.length * 9 : 0) + 60;
-    const bh = b.sub ? 70 : 46;
+    let size = b.size || 16;
+    ctx.font = `${size}px ${DISPLAY}`;
+    let tw = ctx.measureText(b.text).width;
+    if (tw + 60 > maxW) {
+      size = Math.max(9, Math.floor((size * (maxW - 60)) / tw));
+      ctx.font = `${size}px ${DISPLAY}`;
+      tw = ctx.measureText(b.text).width;
+    }
+    // Subtitle: one line if it fits, otherwise wrapped by words over as many lines as it needs
+    ctx.font = `22px ${BODY}`;
+    const lines = [];
+    if (b.sub) {
+      let line = "";
+      for (const word of b.sub.split(" ")) {
+        const next = line ? `${line} ${word}` : word;
+        if (line && ctx.measureText(next).width + 60 > maxW) {
+          lines.push(line);
+          line = word;
+        } else line = next;
+      }
+      if (line) lines.push(line);
+    }
+    const subW = Math.max(0, ...lines.map((l) => ctx.measureText(l).width));
+    const bw = Math.min(maxW, Math.max(tw, subW) + 60);
+    const bh = 46 + lines.length * 24;
     ctx.fillStyle = "rgba(6, 9, 16, 0.86)";
     ctx.fillRect((W - bw) / 2, y, bw, bh);
     ctx.fillStyle = b.color;
     ctx.fillRect((W - bw) / 2, y, 6, bh);
     ctx.fillRect((W + bw) / 2 - 6, y, 6, bh);
-    text(ctx, b.text, W / 2, y + 30, { size: b.size || 16, color: b.color, align: "center" });
-    if (b.sub) text(ctx, b.sub, W / 2, y + 56, { font: BODY, size: 22, color: "#d7deea", align: "center" });
+    text(ctx, b.text, W / 2, y + 30, { size, color: b.color, align: "center" });
+    lines.forEach((l, k) => text(ctx, l, W / 2, y + 56 + k * 24, { font: BODY, size: 22, color: "#d7deea", align: "center" }));
     ctx.globalAlpha = 1;
     y += bh + 10;
   }
 }
 
-/** state: { race, minimap, banners, now, ghost, bestTrail, delta, drsState, W, H } */
+/**
+ * state: { race, minimap, banners, now, ghost, bestTrail, delta, drsState, W, H, hudScale, bottomInset }
+ * The HUD is laid out in "HUD units": the canvas is W x H pixels and one unit is hudScale pixels, so
+ * a phone's small canvas still gets readable panels. A tall screen (portrait) gets its own layout.
+ */
 export function drawHud(ctx, s) {
-  const { race, W, H } = s;
+  const { race } = s;
+  const U = s.hudScale || 1;
+  const W = s.W / U;
+  const H = s.H / U;
+  const Hb = H - (s.bottomInset || 0); // bottom panels sit above any on-screen touch controls
+  const portrait = W < H * 1.2;
   const car = race.player;
   ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  if (race.mode === "trial" && car && s.qualiBoard) qualiTower(ctx, s.qualiBoard, 16, 16, `QUALIFYING • LAP ${Math.min(car.lapTimes.length + 1, s.quali)}/${s.quali}`);
+  ctx.setTransform(U, 0, 0, U, 0, 0);
+  // Towers show as many rows as fit above the bottom panels (and stay short on a tall screen)
+  const towerRoom = (car ? Hb - 126 - (portrait ? 120 : 0) : H) - 16 - 12 - 30;
+  const rowsFor = (rowH) => Math.max(5, Math.min(portrait ? 9 : 99, Math.floor(towerRoom / rowH)));
+  if (race.mode === "trial" && car && s.qualiBoard) qualiTower(ctx, s.qualiBoard, 16, 16, `QUALIFYING • LAP ${Math.min(car.lapTimes.length + 1, s.quali)}/${s.quali}`, rowsFor(20));
   else if (race.mode === "trial" && car) lapList(ctx, car, s.bestTrail, 16, 16, "TIME TRIAL");
-  else timingTower(ctx, race, 16, 16);
+  else timingTower(ctx, race, 16, 16, rowsFor(race.order.length > 12 ? 21 : 26));
 
-  // Lap counter + race clock
-  panel(ctx, W / 2 - 150, 14, 300, 58);
+  // Minimap top-right (smaller on a tall screen), lap counter + race clock top-centre or under the map
+  const mmScale = portrait ? 0.6 : 1;
+  const mmW = (s.minimap.img.width + 8) * mmScale;
+  ctx.save();
+  const mmY = 14 + (s.topRightInset || 0); // clear of the fullscreen EXIT / CONTROLS buttons
+  ctx.translate(W - mmW - 16, mmY);
+  ctx.scale(mmScale, mmScale);
+  minimap(ctx, s.minimap, race, 0, 0, s.ghost);
+  ctx.restore();
+  const lapW = portrait ? mmW : 300;
+  const lapX = portrait ? W - mmW - 16 : W / 2 - 150;
+  const lapY = portrait ? mmY + mmW + 8 : 14;
+  const lapBig = portrait ? 11 : 14;
+  panel(ctx, lapX, lapY, lapW, 58);
   if (race.mode === "trial") {
-    text(ctx, `LAP ${Math.max(1, (car?.laps ?? 0) + 1)}`, W / 2, 40, { size: 14, color: "#fff", align: "center" });
-    text(ctx, race.track.name.toUpperCase(), W / 2, 62, { font: BODY, size: 18, color: "#8fb4ff", align: "center" });
+    text(ctx, `LAP ${Math.max(1, (car?.laps ?? 0) + 1)}`, lapX + lapW / 2, lapY + 26, { size: lapBig, color: "#fff", align: "center" });
+    text(ctx, race.track.name.toUpperCase(), lapX + lapW / 2, lapY + 48, { font: BODY, size: portrait ? 15 : 18, color: "#8fb4ff", align: "center" });
   } else {
     const lapNow = Math.min(race.laps, Math.max(1, (car ? car.laps : race.order[0].laps) + 1));
-    text(ctx, `LAP ${lapNow}/${race.laps}`, W / 2, 40, { size: 14, color: race.flag ? "#ffd400" : "#fff", align: "center" });
-    text(ctx, race.phase === "racing" || race.phase === "finished" ? fmtSec(race.t) : "GRID", W / 2, 62, { font: BODY, size: 20, color: "#8fb4ff", align: "center" });
+    text(ctx, `LAP ${lapNow}/${race.laps}`, lapX + lapW / 2, lapY + 26, { size: lapBig, color: race.flag ? "#ffd400" : "#fff", align: "center" });
+    text(ctx, race.phase === "racing" || race.phase === "finished" ? fmtSec(race.t) : "GRID", lapX + lapW / 2, lapY + 48, { font: BODY, size: 20, color: "#8fb4ff", align: "center" });
   }
 
-  minimap(ctx, s.minimap, race, W - s.minimap.img.width - 24, 14, s.ghost);
-
   if (car) {
-    speedPanel(ctx, car, 16, H - 126, s.drsState, s.now);
+    speedPanel(ctx, car, 16, Hb - 126, s.drsState, s.now);
     let extra = null;
     if (race.mode === "trial" && s.delta != null) {
       extra = { text: `${s.delta <= 0 ? "-" : "+"}${Math.abs(s.delta).toFixed(3)}`, color: s.delta <= 0 ? "#22e36b" : "#ff4d5e" };
@@ -354,18 +411,25 @@ export function drawHud(ctx, s) {
       if (behind) parts.push(`▼ ${behind.gapAhead.toFixed(2)}`);
       extra = { text: parts.join("   "), color: "#d7deea" };
     }
-    timingPanel(ctx, race, car, W / 2 - 200, H - 126, 400, extra);
-    // Last / best lap
-    panel(ctx, W - 250, H - 126, 234, 110);
-    const last = car.lapTimes[car.lapTimes.length - 1];
-    text(ctx, "LAST", W - 234, H - 92, { size: 8, color: "#6c7a96" });
-    text(ctx, last ? fmtLap(last.time * 1000) : "--:--.---", W - 30, H - 90, { font: BODY, size: 24, color: last && !last.valid ? "#ff4d5e" : "#e8ecf4", align: "right" });
-    text(ctx, "BEST", W - 234, H - 58, { size: 8, color: "#6c7a96" });
-    text(ctx, fmtLap(car.bestLap * 1000), W - 30, H - 56, { font: BODY, size: 24, color: "#b44dff", align: "right" });
-    if (race.reaction != null && race.t < 6) text(ctx, `REACTION ${race.reaction.toFixed(3)}s`, W - 234, H - 26, { size: 8, color: "#ffd23f" });
+    if (portrait) {
+      // Tall screen: lap timing stacked above the speed panel; no room for the last / best box
+      timingPanel(ctx, race, car, 16, Hb - 126 - 120, Math.min(400, W - 32), extra);
+    } else {
+      timingPanel(ctx, race, car, W / 2 - 200, Hb - 126, 400, extra);
+      // Last / best lap
+      panel(ctx, W - 250, Hb - 126, 234, 110);
+      const last = car.lapTimes[car.lapTimes.length - 1];
+      text(ctx, "LAST", W - 234, Hb - 92, { size: 8, color: "#6c7a96" });
+      text(ctx, last ? fmtLap(last.time * 1000) : "--:--.---", W - 30, Hb - 90, { font: BODY, size: 24, color: last && !last.valid ? "#ff4d5e" : "#e8ecf4", align: "right" });
+      text(ctx, "BEST", W - 234, Hb - 58, { size: 8, color: "#6c7a96" });
+      text(ctx, fmtLap(car.bestLap * 1000), W - 30, Hb - 56, { font: BODY, size: 24, color: "#b44dff", align: "right" });
+      if (race.reaction != null && race.t < 6) text(ctx, `REACTION ${race.reaction.toFixed(3)}s`, W - 234, Hb - 26, { size: 8, color: "#ffd23f" });
+    }
   }
 
-  if (race.phase === "lights") lightsGantry(ctx, race, W);
-  banners(ctx, s.banners, W, s.now);
+  if (race.phase === "lights") lightsGantry(ctx, race, W, portrait ? Math.round(H * 0.34) : 120);
+  // Banners sit just under the start lights while they're up
+  // (a short landscape screen starts them higher so they clear the bottom panels)
+  banners(ctx, s.banners, W, s.now, portrait ? Math.round(H * 0.34) + (race.phase === "lights" ? 124 : 0) : Math.min(250, Math.max(90, Hb - 290)));
   ctx.restore();
 }

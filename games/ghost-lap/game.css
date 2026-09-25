@@ -643,3 +643,48 @@ main.wrap.game-screen {
     gap: 6px;
   }
 }
+
+/* Fullscreen on a phone / tablet: the race view adapts to any shape, so it simply fills the screen.
+   Portrait keeps a strip at the bottom for the touch buttons (and the top one for EXIT). */
+html.is-immersive .gl-stage[data-stage] {
+  width: 100% !important;
+  height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  aspect-ratio: auto !important;
+  margin: 0 !important;
+  border: 0 !important;
+}
+html.is-immersive.is-portrait .gl-stage[data-stage] {
+  height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 46px - 170px) !important;
+  margin-top: 46px !important;
+}
+
+/* Qualifying SUBMIT on a tall screen: a compact button on the right, clear of the live timing tower;
+   in fullscreen portrait it sits in the touch-button strip under the track */
+@media (orientation: portrait) {
+  .gl-submit {
+    top: 28%;
+    right: 2%;
+    left: auto;
+    transform: none;
+    padding: 8px 10px;
+    font-size: 9px;
+  }
+  .gl-submit small {
+    display: none;
+  }
+}
+html.is-immersive.is-portrait .gl-submit {
+  position: fixed;
+  top: auto;
+  right: auto;
+  bottom: calc(env(safe-area-inset-bottom) + 96px);
+  left: 50%;
+  z-index: 45;
+  transform: translateX(-50%);
+}
+
+.gl-touch button small {
+  font-size: 7px;
+  opacity: 0.8;
+}
+

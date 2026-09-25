@@ -18,8 +18,43 @@ const canvas = $("race-canvas");
 const ctx = canvas.getContext("2d");
 const overlay = $("overlay");
 const announcer = $("race-announcer");
-const W = canvas.width;
-const H = canvas.height;
+// Canvas size. Desktop: the 1760x800 race view. Phones & tablets: the canvas takes the exact shape of
+// its screen area (a portrait phone gets a tall view, not a letterboxed strip) at up to 2x pixel
+// density, and the HUD is drawn in bigger "HUD units" (hudScale px each) so it stays readable.
+let W = canvas.width;
+let H = canvas.height;
+let hudScale = 1;
+let hudBottom = 0; // HUD units kept clear at the bottom for touch buttons drawn over the canvas
+let hudTopRight = 0; // ...and at the top right for the fullscreen EXIT / CONTROLS buttons
+const stageEl = $("stage");
+function sizeCanvas() {
+  const r = stageEl.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  let w = 1760;
+  // Desktop keeps the 1760-wide view; its height follows the stage (800 on the page, the monitor's
+  // shape in fullscreen) so nothing is ever stretched
+  let h = Math.round(Math.max(560, Math.min(1400, (1760 * r.height) / r.width)));
+  let u = 1;
+  if (r.width < 1100) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    w = Math.round(r.width * dpr);
+    h = Math.round(r.height * dpr);
+    u = Math.max(0.6, w / (r.width < r.height * 1.2 ? 560 : 1200));
+  }
+  hudScale = u;
+  const root = document.documentElement.classList;
+  const coarse = !!window.matchMedia?.("(pointer: coarse)").matches;
+  // The touch buttons sit over the canvas except in fullscreen portrait (there they get their own strip)
+  hudBottom = coarse && !(root.contains("is-immersive") && root.contains("is-portrait")) ? (84 * (w / r.width)) / u : 0;
+  hudTopRight = root.contains("is-immersive") && !root.contains("is-portrait") ? (44 * (w / r.width)) / u : 0;
+  if (w !== W || h !== H) {
+    canvas.width = W = w;
+    canvas.height = H = h;
+  }
+}
+new ResizeObserver(sizeCanvas).observe(stageEl);
+window.addEventListener("immersivechange", sizeCanvas);
+sizeCanvas();
 const SIM_DT = 1 / 120;
 
 // ==========================================
@@ -49,8 +84,14 @@ const CALENDAR = [
   ["interlagos", "Interlagos", "Brazil", "park", false],
   ["lasvegas", "Las Vegas Strip", "USA", "street", true],
   ["qatar", "Lusail", "Qatar", "desert", true],
-  ["abudhabi", "Yas Marina", "Abu Dhabi", "desert", true]
-].map(([key, name, country, theme, night], k) => ({ key, name, country, theme, night, round: k + 1 }));
+  ["abudhabi", "Yas Marina", "Abu Dhabi", "desert", true],
+  // Classic circuits, off the current calendar
+  ["india", "Buddh International", "India", "desert", false, true],
+  ["malaysia", "Sepang", "Malaysia", "park", false, true],
+  ["hockenheim", "Hockenheim", "Germany", "park", false, true],
+  ["nurburgring", "Nürburgring", "Germany", "park", false, true],
+  ["russia", "Sochi Autodrom", "Russia", "park", false, true]
+].map(([key, name, country, theme, night, classic = false], k) => ({ key, name, country, theme, night, classic, round: k + 1 }));
 const CAL = Object.fromEntries(CALENDAR.map((c) => [c.key, c]));
 
 const trackCache = new Map();
@@ -363,8 +404,11 @@ window.addEventListener("blur", () => Object.keys(keys).forEach((k) => (keys[k] 
 
 // Touch pad (the player can move and resize the buttons: MOVE CONTROLS in the stage bar)
 enableTouchLayout({ id: "ghost-lap", frame: $("touch-pad"), items: [...document.querySelectorAll("#touch-pad [data-key]")].map((b) => ((b.dataset.touchId = b.dataset.key), b)) });
+// Touch buttons press the same inputs as the keys. BRK is the S key: it brakes, and held at a
+// standstill it drives backwards.
+const TOUCH_KEYS = { brake: "down" };
 document.querySelectorAll("#touch-pad [data-key]").forEach((btn) => {
-  const k = btn.dataset.key;
+  const k = TOUCH_KEYS[btn.dataset.key] || btn.dataset.key;
   const set = (v) => (e) => {
     e.preventDefault();
     keys[k] = v;
@@ -1065,7 +1109,7 @@ function goHome() {
   overlay.hidden = false;
   overlay.innerHTML = `
     <div class="gl-title">
-      <p class="gl-kicker">WORLD CIRCUIT SERIES // 24 ROUNDS</p>
+      <p class="gl-kicker">WORLD CIRCUIT SERIES // 24 ROUNDS + 5 CLASSICS</p>
       <h2 class="gl-title__logo">GHOST<br />LAP</h2>
       <p class="gl-title__tag">Lights out and away we go.</p>
       <div class="gl-menu__list">
@@ -1127,8 +1171,8 @@ function showSetup(mode) {
   const lapOpts = [1, 3, 5, 10, 20];
   const title = { gp: "GRAND PRIX", duel: "DUEL", trial: "TIME TRIAL" }[mode];
   const blurb = {
-    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Everyone drives the same car. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify over three laps from the line (your best clean lap sets your grid slot), or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
-    duel: "Head-to-head against one bot in the same car as yours: same engine, grip, brakes, ERS and DRS. Levels only change how well it drives. Impossible uses almost all of the car.",
+    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Up to Medium the bots drive your exact car; from Hard up their cars are faster. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify over three laps from the line (your best clean lap sets your grid slot), or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
+    duel: "Head-to-head against one bot. Every level is a real racer; up to Medium it drives your exact car, and from Hard up its car is faster too (Hard +3%, Very Hard +6%, Impossible +10%).",
     trial: "Flying laps on an empty circuit. Your best clean lap becomes a ghost; running wide deletes the lap."
   }[mode];
   const cards = CALENDAR.map((c) => {
@@ -1136,7 +1180,7 @@ function showSetup(mode) {
     const km = (CIRCUITS[c.key].lengthM / 1000).toFixed(3);
     return `<button type="button" class="gl-track ${c.key === prefs.track ? "is-on" : ""}" data-track="${c.key}" aria-pressed="${c.key === prefs.track}">
       <img src="${thumbOf(c.key)}" alt="" width="150" height="84" />
-      <span class="gl-track__round">R${String(c.round).padStart(2, "0")}${c.night ? " ☾" : ""}</span>
+      <span class="gl-track__round">${c.classic ? "CLASSIC" : `R${String(c.round).padStart(2, "0")}`}${c.night ? " ☾" : ""}</span>
       <b>${escapeHtml(c.name)}</b>
       <small>${escapeHtml(c.country)} • ${km} km${best ? ` • PB ${fmtSec(best)}` : ""}</small>
     </button>`;
@@ -1326,9 +1370,10 @@ function drawRacingLine(race, view) {
     const off = track.line[i];
     const x = p[0] + track.nor[i][0] * off;
     const y = p[1] + track.nor[i][1] * off;
-    const v = track.vmax[i];
-    const next = track.vmax[(i + 6) % n];
-    const col = next < v - 40 ? "rgba(255, 60, 70, 0.75)" : v < CAR.top * 0.97 ? "rgba(255, 190, 40, 0.7)" : "rgba(40, 230, 110, 0.6)";
+    // From what the car really does on the line: red = brake here, amber = lift (a small slow-down,
+    // or holding speed at the grip limit mid-corner), green = full throttle
+    const g = track.guide[i];
+    const col = g === 2 ? "rgba(255, 60, 70, 0.8)" : g === 1 ? "rgba(255, 190, 40, 0.75)" : "rgba(40, 230, 110, 0.6)";
     if (!cur || cur.col !== col) {
       flush();
       cur = { col, pts: cur ? [cur.pts[cur.pts.length - 1]] : [] };
@@ -1502,7 +1547,10 @@ function frame(now) {
       delta: session.delta,
       drsState: c.drsOpen ? "open" : c.drsEligible && inZone ? "ready" : c.drsEligible ? "armed" : "off",
       W,
-      H
+      H,
+      hudScale,
+      bottomInset: hudBottom,
+      topRightInset: hudTopRight
     });
   }
   requestAnimationFrame(frame);

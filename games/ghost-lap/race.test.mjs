@@ -230,7 +230,7 @@ describe("Ghost Lap race simulation", () => {
     assert.ok(DIFFICULTY.noob.corner < DIFFICULTY.veryEasy.corner);
     assert.equal(makeField({ mode: "gp", difficulty: "hard", seed: 3 }).length, 19);
     const mixed = makeField({ mode: "gp", difficulty: "mixed", seed: 3 });
-    const paces = new Set(mixed.map((f) => f.skill.corner));
+    const paces = new Set(mixed.map((f) => `${f.skill.corner}/${f.skill.brake}/${f.skill.boost}`));
     assert.equal(paces.size, DIFFICULTY_ORDER.length);
     for (let k = 1; k < mixed.length; k++) assert.ok(mixed[k].skill.corner <= mixed[k - 1].skill.corner);
   });
@@ -383,4 +383,49 @@ describe("Ghost Lap race simulation", () => {
     assert.ok(p.brakeLife < 1);
     assert.ok(brakeEfficiency(600, 1) === 1 && brakeEfficiency(600, 0.05) < 0.7 && brakeEfficiency(200, 1) < 1);
   });
+
+  it("stored fastest lines match their tracks, are used, and are quicker than the elastic line", async () => {
+    const { RACING_LINES } = await import("./lines.js");
+    const { CIRCUITS } = await import("./circuits.js");
+    const { trackShapeKey, lineLapTime } = await import("./race.js");
+    assert.ok(Object.keys(RACING_LINES).length >= 20);
+    for (const key of Object.keys(RACING_LINES)) {
+      const def = { key, ...CIRCUITS[key] };
+      const elastic = buildTrack({ ...def, elasticLine: true });
+      const fast = buildTrack(def);
+      assert.equal(RACING_LINES[key].shape, trackShapeKey(elastic.path), `${key}: re-run scripts/optimize-lines.mjs`);
+      assert.ok(lineLapTime(fast, fast.line) < lineLapTime(elastic, elastic.line), `${key} line not quicker`);
+      assert.ok(fast.line.every((o) => Math.abs(o) <= fast.width / 2 - 16 + 1e-9), `${key} line leaves the road`);
+    }
+  });
+
+  it("line guide: brake before slow corners, full throttle on the straights", () => {
+    const g = track.guide;
+    const counts = [0, 0, 0];
+    for (const x of g) counts[x]++;
+    assert.ok(counts[0] > track.n * 0.3, "mostly full throttle at Monza");
+    assert.ok(counts[2] > 10, "braking zones exist");
+    // Every braking zone ends in a slower section than it starts
+    for (let i = 0; i < track.n; i++) {
+      if (g[i] === 2 && g[(i + 1) % track.n] !== 2) assert.ok(track.plan[(i + 1) % track.n] < CAR.top * 0.95);
+    }
+  });
+
+  it("from Hard up the bots get a faster car, and each level is quicker than the one below", () => {
+    assert.equal(DIFFICULTY.medium.boost, 1);
+    assert.ok(DIFFICULTY.hard.boost > 1 && DIFFICULTY.veryHard.boost > DIFFICULTY.hard.boost && DIFFICULTY.impossible.boost > DIFFICULTY.veryHard.boost);
+    const lapFor = (d) => {
+      const race = createRace({ track, mode: "trial", seed: 1 });
+      const c = race.cars[0];
+      c.isPlayer = false;
+      c.skill = DIFFICULTY[d];
+      race.player = null;
+      for (let k = 0; k < 120 * 200 && c.lapTimes.length < 2; k++) stepRace(race, null, 1 / 120);
+      return c.lapTimes[1].time;
+    };
+    const med = lapFor("medium");
+    const imp = lapFor("impossible");
+    assert.ok(imp < med * 0.96, `impossible ${imp} vs medium ${med}`);
+  });
 });
+

@@ -7,7 +7,7 @@
 
 @media (max-width: 900px) {
   .dg-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr); /* a plain 1fr can't shrink below its content on small phones */
   }
 }
 
@@ -433,3 +433,9 @@
 .pixel-cutlery svg {
   filter: drop-shadow(3px 4px 0 rgba(0, 0, 0, 0.45));
 }
+
+.dg-main,
+.dg-rules-aside {
+  min-width: 0;
+}
+

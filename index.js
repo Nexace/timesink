@@ -241,8 +241,8 @@ function initHeroScroll() {
     CSS.supports("(animation-timeline: scroll()) and (animation-range: 0% 100%)");
 
   if (!hasNativeScrollTimeline && !prefersReducedMotion()) {
-    const boot = document.querySelector(".boot");
     const bootContent = document.querySelector(".boot__content");
+    const touch = window.matchMedia?.("(hover: none)").matches;
     const games = document.querySelector(".games");
     const scrollDistance = 320;
     let ticking = false;
@@ -252,19 +252,17 @@ function initHeroScroll() {
         requestAnimationFrame(() => {
           const y = window.scrollY || 0;
           const p = Math.min(1, Math.max(0, y / scrollDistance));
-          if (boot) {
-            boot.style.minHeight = `calc((100dvh - var(--header-h)) * ${1 - p} + 240px * ${p})`;
-            boot.style.paddingBottom = `calc(var(--s-8) * ${1 - p} + var(--s-2) * ${p})`;
-          }
+          // Only transform + opacity (GPU work, no page re-layout): matches the CSS scroll timeline
           if (bootContent) {
-            bootContent.style.transform = `scale(${1 - 0.08 * p}) translateY(${-10 * p}px)`;
+            bootContent.style.transform = `translate3d(0, ${-60 * p}px, 0)`;
+            bootContent.style.opacity = String(1 - 0.75 * p);
           }
           if (scrollCue) {
             scrollCue.style.opacity = String(Math.max(0, 1 - p * 2.2));
             scrollCue.style.pointerEvents = p > 0.4 ? "none" : "auto";
           }
-          if (games) {
-            games.style.transform = `translateY(${40 * (1 - p)}px)`;
+          if (games && !touch) {
+            games.style.transform = `translate3d(0, ${40 * (1 - p)}px, 0)`;
             games.style.opacity = String(0.85 + 0.15 * p);
           }
           ticking = false;

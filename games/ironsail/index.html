@@ -22,9 +22,9 @@
       </div>
 
       <div class="is-screen">
-        <div class="is-stage">
+        <div class="is-stage" data-stage>
           <canvas id="is-canvas" width="1600" height="900" tabindex="0" aria-label="Open sea"></canvas>
-          <div class="is-touch" id="is-touch" aria-hidden="true">
+          <div class="is-touch" id="is-touch" aria-hidden="true" data-touch-frame>
             <div class="is-touch__side">
               <button type="button" data-key="Escape" data-touch-id="pause">II</button>
               <button type="button" data-key="KeyM" data-touch-id="map">MAP</button>
@@ -34,7 +34,7 @@
               <button type="button" data-key="Space" data-touch-id="boost">ALL HANDS</button>
             </div>
           </div>
-          <div class="is-modal" id="is-modal" role="dialog" aria-label="Ironsail"></div>
+          <div class="is-modal" id="is-modal" data-stage-menu role="dialog" aria-label="Ironsail"></div>
         </div>
         <div class="console">
           <span class="console__group"><span class="console__label">STEER</span><span class="kbd">A</span><span class="kbd">D</span><span>OR HOLD MOUSE</span></span>

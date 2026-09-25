@@ -22,7 +22,7 @@
       </div>
 
       <div class="tr-screen">
-        <div class="tr-canvas-container">
+        <div class="tr-canvas-container" data-stage>
           <!-- HUD Overlay -->
           <div class="tr-hud">
             <div class="hud-left">
@@ -44,7 +44,7 @@
           <canvas id="game-canvas" width="1440" height="700"></canvas>
 
           <!-- Touch buttons (movable via MOVE CONTROLS); a tap anywhere else on the track also jumps -->
-          <div class="tr-touch" id="tr-touch">
+          <div class="tr-touch" id="tr-touch" data-touch-frame>
             <div class="touch-zone touch-zone-left" id="touch-left" data-touch-id="duck" role="button" aria-label="Duck or slam">
               <span class="zone-label">DUCK<br />SLAM</span>
             </div>

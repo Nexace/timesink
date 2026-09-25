@@ -111,7 +111,7 @@
 
 @media (max-width: 880px) {
   .gl-main-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr); /* a plain 1fr can't shrink below its content on small phones */
   }
 }
 
@@ -593,3 +593,9 @@
     min-height: 36px;
   }
 }
+
+.board-card,
+.sidebar-card {
+  min-width: 0;
+}
+

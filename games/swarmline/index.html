@@ -22,7 +22,7 @@
       </div>
 
       <div class="sl-screen">
-        <div class="sl-canvas-container">
+        <div class="sl-canvas-container" data-stage>
           <!-- Top XP Progress Bar -->
           <div class="sl-top-bar">
             <div class="sl-xp-fill" id="sl-xp-fill"></div>
@@ -72,7 +72,7 @@
           <canvas id="sl-canvas" width="960" height="540"></canvas>
 
           <!-- Level Up Modal -->
-          <div class="sl-modal" id="sl-modal" style="display: none;">
+          <div class="sl-modal" data-stage-menu id="sl-modal" style="display: none;">
             <div class="sl-modal-header">
               <span class="sl-modal-badge">LEVEL UP!</span>
               <h2 class="sl-modal-title">CHOOSE AN UPGRADE ARTIFACT</h2>
@@ -86,7 +86,7 @@
           </div>
 
           <!-- Treasure Chest Modal -->
-          <div class="sl-modal" id="sl-chest-modal" style="display: none;">
+          <div class="sl-modal" data-stage-menu id="sl-chest-modal" style="display: none;">
             <div class="sl-modal-header">
               <span class="sl-modal-badge" style="background:#ffd700;color:#000;">★ TREASURE OPENED ★</span>
               <h2 class="sl-modal-title" style="color:#ffd700;text-shadow:0 0 14px #ffd700;">CHEST LOOT ACQUIRED!</h2>
@@ -96,7 +96,7 @@
           </div>
 
           <!-- Pause Modal -->
-          <div class="sl-modal" id="sl-pause-modal" style="display: none;">
+          <div class="sl-modal" data-stage-menu id="sl-pause-modal" style="display: none;">
             <h2 class="sl-modal-title">SYSTEM PAUSED</h2>
             <div id="sl-pause-stats" class="sl-stats-grid"></div>
             <div class="modal-actions">
@@ -107,7 +107,7 @@
           </div>
 
           <!-- Game Over Modal -->
-          <div class="sl-modal" id="sl-death-modal" style="display: none;">
+          <div class="sl-modal" data-stage-menu id="sl-death-modal" style="display: none;">
             <h2 class="sl-modal-title" style="color:#ff2233;text-shadow:0 0 16px #ff2233;">YOU HAVE PERISHED</h2>
             <div id="sl-death-stats" class="sl-stats-grid"></div>
             <div class="modal-actions">

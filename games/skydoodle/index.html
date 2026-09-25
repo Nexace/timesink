@@ -22,7 +22,7 @@
       </div>
 
       <div class="sd-screen">
-        <div class="sd-canvas-container" id="sd-container">
+        <div class="sd-canvas-container" id="sd-container" data-stage>
           <!-- Canvas Viewport -->
           <canvas id="sd-canvas" width="480" height="720"></canvas>
 
@@ -46,7 +46,7 @@
           <div class="sd-powerups-hud" id="sd-powerups-hud"></div>
 
           <!-- Gyro Calibration Modal -->
-          <div class="sd-modal" id="modal-calibrate" hidden>
+          <div class="sd-modal" data-stage-menu id="modal-calibrate" hidden>
             <div class="modal-card">
               <div class="modal-title">📐 GYRO TILT CALIBRATION</div>
               <p class="modal-desc">Hold your phone comfortably at your preferred playing angle, then tap SET ZERO to calibrate neutral tilt.</p>
@@ -61,7 +61,7 @@
           </div>
 
           <!-- iOS 13+ Permission Prompt -->
-          <div class="sd-modal" id="modal-permission" hidden>
+          <div class="sd-modal" data-stage-menu id="modal-permission" hidden>
             <div class="modal-card">
               <div class="modal-title">📱 MOTION SENSORS REQUIRED</div>
               <p class="modal-desc">To tilt your phone to steer your climber, motion sensor permission is needed.</p>
@@ -73,13 +73,13 @@
           </div>
 
           <!-- Touch Fallback Steer Zones (Mobile) -->
-          <div class="touch-zones" id="touch-zones" aria-hidden="true">
+          <div class="touch-zones" id="touch-zones" aria-hidden="true" data-touch-frame>
             <div class="touch-zone left-zone" id="touch-left" data-touch-id="left" role="button" aria-label="Steer left"><span>◀<br />LEFT</span></div>
             <div class="touch-zone right-zone" id="touch-right" data-touch-id="right" role="button" aria-label="Steer right"><span>RIGHT<br />▶</span></div>
           </div>
 
           <!-- Game Over Modal -->
-          <div class="sd-modal" id="modal-gameover" hidden>
+          <div class="sd-modal" data-stage-menu id="modal-gameover" hidden>
             <div class="modal-card">
               <div class="modal-title gameover-title">CLIMB TERMINATED</div>
               <div class="death-reason" id="death-reason">FELL INTO THE VOID</div>
@@ -96,7 +96,7 @@
         </div>
 
         <!-- Controls Footer Reference -->
-        <div class="sd-controls-bar">
+        <div class="sd-controls-bar" data-immersive-hide>
           <span><b>[← / →]</b> or <b>[A / D]</b> Steer</span>
           <span><b>[SPACE]</b> or <b>TAP SCREEN</b> Shoot</span>
           <span><b>[PHONE TILT]</b> Gyro Steering</span>

@@ -1,6 +1,7 @@
 // Ghost Lap — pure race simulation (no DOM). Tracks at real-length scale, arcade car physics,
 // AI drivers, lap/sector timing, track limits, DRS, ERS, slipstream and race classification.
 import { fitCircuit, cornerRadii, resampleClosed } from "./circuits.js";
+import { RACING_LINES } from "./lines.js";
 
 export const PX_PER_M = 3.3; // world pixels per real metre of circuit length
 export const TRACK_WIDTH = 148;
@@ -52,18 +53,20 @@ function steerSpeedFor(r) {
   return Math.max(60, v);
 }
 
-// Every bot drives exactly the same car as the player: same engine, grip, brakes, ERS, DRS and tow.
-// Levels differ only in the DRIVER: how close to the grip limit they take corners (corner), how late
-// and hard they brake (brake: share of the car's full braking they plan on), how much throttle they
-// dare use (commit), how tidy their line is (noise) and how quickly they react to the lights (react, s).
+// Levels set the DRIVER: how close to the grip limit they take corners (corner), how late and hard
+// they brake (brake: share of the car's full braking they plan on), how much throttle they dare use
+// (commit), how tidy their line is (noise) and how quickly they react to the lights (react, s).
+// Every level is a serious racer. A bot already drives close to what the car can do, so from Hard up
+// the bots also get a faster CAR (boost: engine, top speed, grip and brakes x boost), because a good
+// human can beat a same-car bot. Up to Medium they drive exactly your car.
 export const DIFFICULTY = {
-  noob: { label: "NOOB", corner: 0.62, brake: 0.55, commit: 0.74, noise: 0.24, react: 0.5 },
-  veryEasy: { label: "VERY EASY", corner: 0.7, brake: 0.63, commit: 0.82, noise: 0.17, react: 0.42 },
-  easy: { label: "EASY", corner: 0.79, brake: 0.71, commit: 0.89, noise: 0.11, react: 0.35 },
-  medium: { label: "MEDIUM", corner: 0.87, brake: 0.79, commit: 0.95, noise: 0.06, react: 0.29 },
-  hard: { label: "HARD", corner: 0.92, brake: 0.84, commit: 0.98, noise: 0.03, react: 0.24 },
-  veryHard: { label: "VERY HARD", corner: 0.97, brake: 0.91, commit: 1, noise: 0.01, react: 0.2 },
-  impossible: { label: "IMPOSSIBLE", corner: 1.0, brake: 1.0, commit: 1, noise: 0, react: 0.16 }
+  noob: { label: "NOOB", corner: 0.88, brake: 0.8, commit: 0.96, noise: 0.06, react: 0.3, boost: 1 },
+  veryEasy: { label: "VERY EASY", corner: 0.92, brake: 0.85, commit: 0.98, noise: 0.04, react: 0.26, boost: 1 },
+  easy: { label: "EASY", corner: 0.96, brake: 0.9, commit: 1, noise: 0.02, react: 0.23, boost: 1 },
+  medium: { label: "MEDIUM", corner: 1, brake: 0.95, commit: 1, noise: 0.01, react: 0.2, boost: 1 },
+  hard: { label: "HARD", corner: 1, brake: 1, commit: 1, noise: 0, react: 0.18, boost: 1.03 },
+  veryHard: { label: "VERY HARD", corner: 1, brake: 1, commit: 1, noise: 0, react: 0.17, boost: 1.06 },
+  impossible: { label: "IMPOSSIBLE", corner: 1, brake: 1, commit: 1, noise: 0, react: 0.16, boost: 1.1 }
 };
 DIFFICULTY.mixed = { ...DIFFICULTY.medium, label: "MIXED" };
 export const DIFFICULTY_ORDER = ["noob", "veryEasy", "easy", "medium", "hard", "veryHard", "impossible"];
@@ -520,6 +523,10 @@ export function buildTrack(def) {
       }
     }
   }
+  // The fastest line: minimum-lap-time offsets computed offline (scripts/optimize-lines.mjs). They're
+  // used only when they were made for exactly this track shape; otherwise the elastic-band line stays.
+  const stored = def.key && !def.elasticLine ? RACING_LINES[def.key] : null;
+  if (stored && stored.shape === trackShapeKey(path)) decodeLine(stored, line, lim);
   const linePath = path.map((p, i) => [p[0] + nor[i][0] * line[i], p[1] + nor[i][1] * line[i]]);
   const lineRadii = cornerRadii(linePath, 8);
   const lineDs = linePath.map((p, i) => {
@@ -529,6 +536,8 @@ export function buildTrack(def) {
 
   // Reference speed profile along the racing line at full grip (drives the line guide and DRS zones)
   const vmax = profileFor({ n, lineRadii, lineDs }, 1);
+  // What the car actually does on that line (braking AND acceleration limits), for the line guide
+  const { v: plan, guide } = speedPlan(lineCornerRadii(linePath), lineDs, n);
 
   // DRS: as many zones as the real circuit has. Every real layout has one on the pit straight, so the
   // flat-out run through (or leading onto) the start line always gets one; the rest go to the longest
@@ -603,6 +612,8 @@ export function buildTrack(def) {
     lineDs,
     profiles: new Map(),
     vmax,
+    plan,
+    guide,
     drs,
     grid,
     width: w,
@@ -611,6 +622,136 @@ export function buildTrack(def) {
     sectors: [Math.floor(n / 3), Math.floor((2 * n) / 3)],
     loopEvery: 20
   };
+}
+
+// ── Lap-time model for the racing line (full grip, flat-out driver) ──
+const DRAG_K = (CAR.power * CAR.powerSpeed) / CAR.top ** 3;
+/** Acceleration flat out at speed v (engine minus drag), px/s², as stepCar applies it. */
+const flatOutAccel = (v) => CAR.power * Math.min(1, CAR.powerSpeed / Math.max(1, v)) - (10 + DRAG_K * v * v);
+/** Deceleration from just lifting off at speed v (drag only). */
+const coastDecel = (v) => 10 + DRAG_K * v * v;
+export const GUIDE = { FLAT: 0, LIFT: 1, BRAKE: 2 };
+
+/**
+ * The speed a car really carries round the line: no faster than each corner allows, accelerating
+ * out of corners with the engine it has, and braking (hard, 86% of the brakes) into the next one.
+ * guide per point: FLAT (full throttle), LIFT (a small slow-down, or holding speed at the grip limit)
+ * or BRAKE. Also returns the lap time.
+ */
+export function speedPlan(radii, ds, n, m = 1) {
+  const lim = new Float64Array(n);
+  for (let i = 0; i < n; i++) lim[i] = Math.min(CAR.top, cornerSpeed(Math.max(radii[i], 8), m));
+  const v = Float64Array.from(lim);
+  const B = CAR.brake * 0.86;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const a = Math.max(0, flatOutAccel(v[i]));
+      v[j] = Math.min(v[j], Math.sqrt(v[i] * v[i] + 2 * a * ds[i]));
+    }
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = n - 1; i >= 0; i--) {
+      const j = (i + 1) % n;
+      v[i] = Math.min(v[i], Math.sqrt(v[j] * v[j] + 2 * B * ds[i]));
+    }
+  }
+  let time = 0;
+  for (let i = 0; i < n; i++) time += (2 * ds[i]) / Math.max(1, v[i] + v[(i + 1) % n]);
+  // Guide: braking zones whose whole slow-down is small are "lift"; so is holding speed at the limit
+  const guide = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const decel = (v[i] * v[i] - v[j] * v[j]) / (2 * Math.max(1e-6, ds[i]));
+    if (decel > coastDecel(v[i]) * 1.05) guide[i] = GUIDE.BRAKE;
+    else if (decel > 0.5 || (v[j] <= v[i] + 0.01 && v[i] < CAR.top * 0.97)) guide[i] = GUIDE.LIFT;
+  }
+  for (let i = 0; i < n; i++) {
+    if (guide[i] !== GUIDE.BRAKE || guide[(i - 1 + n) % n] === GUIDE.BRAKE) continue;
+    let j = i;
+    let k = 0;
+    while (guide[j] === GUIDE.BRAKE && k++ < n) j = (j + 1) % n;
+    if (v[i] - v[j] < 60) for (let q = i; q !== j; q = (q + 1) % n) guide[q] = GUIDE.LIFT;
+  }
+  return { v, guide, time };
+}
+
+/** A fingerprint of the track shape: stored lines are only reused for the exact geometry. */
+export function trackShapeKey(path) {
+  let s = 0;
+  for (let i = 0; i < path.length; i += 7) s += path[i][0] * 1.3 + path[i][1] * 0.7;
+  return `${path.length}:${Math.round(s)}`;
+}
+
+function decodeLine(stored, line, lim) {
+  const offs = stored.offs;
+  const m = offs.length;
+  for (let i = 0; i < line.length; i++) {
+    const x = i / stored.step;
+    const k = Math.floor(x);
+    const f = x - k;
+    const a = offs[k % m];
+    const b = offs[(k + 1) % m];
+    line[i] = clamp(a + (b - a) * f, -lim, lim);
+  }
+}
+
+/**
+ * Corner radius along a line, judged at two scales and taking the tighter: a kink too short to show
+ * over 8 points still counts, so the optimiser can't "straighten" a corner with wiggles.
+ */
+export function lineCornerRadii(pts) {
+  const r8 = cornerRadii(pts, 8);
+  const r4 = cornerRadii(pts, 4);
+  return r8.map((r, i) => Math.min(r, r4[i]));
+}
+
+/** Lap time of a line (offsets from the centreline) on a track. */
+export function lineLapTime(track, line) {
+  const { n, path, nor } = track;
+  const pts = path.map((p, i) => [p[0] + nor[i][0] * line[i], p[1] + nor[i][1] * line[i]]);
+  const ds = pts.map((p, i) => Math.hypot(pts[(i + 1) % n][0] - p[0], pts[(i + 1) % n][1] - p[1]));
+  return speedPlan(lineCornerRadii(pts), ds, n).time;
+}
+
+/**
+ * Minimum-lap-time line: starting from the elastic-band line, nudge it across the track with smooth
+ * bumps (coarse to fine) and keep every nudge that makes the simulated lap quicker. Used offline.
+ */
+export function optimizeRacingLine(track, log = null, opts = { margin: 24, passes: [[24, 12, 4, 3], [16, 6, 3, 3]] }) {
+  const { n } = track;
+  // A little more margin from the edge than the elastic band, and only broad, smooth changes: a line a
+  // real car can follow (quick side-to-side flicks look fast on paper but no car can track them)
+  const lim = track.width / 2 - opts.margin;
+  const line = Float64Array.from(track.line);
+  let best = lineLapTime(track, line);
+  const start = best;
+  for (const [H, step, stride, sweeps] of opts.passes) {
+    const w = Array.from({ length: 2 * H + 1 }, (_, k) => 0.5 * (1 + Math.cos((Math.PI * (k - H)) / (H + 1))));
+    for (let sweep = 0; sweep < sweeps; sweep++) {
+      let gained = 0;
+      for (let c = 0; c < n; c += stride) {
+        for (const dir of [1, -1]) {
+          const saved = [];
+          for (let k = -H; k <= H; k++) {
+            const i = (c + k + n) % n;
+            saved.push(line[i]);
+            line[i] = clamp(line[i] + dir * step * w[k + H], -lim, lim);
+          }
+          const t = lineLapTime(track, line);
+          if (t < best - 1e-7) {
+            gained += best - t;
+            best = t;
+            break;
+          }
+          for (let k = -H; k <= H; k++) line[(c + k + n) % n] = saved[k + H];
+        }
+      }
+      if (log) log(`  bump ${H} step ${step} sweep ${sweep + 1}: ${best.toFixed(3)}s`);
+      if (gained < 1e-4) break;
+    }
+  }
+  return { line, time: best, start };
 }
 
 /**
@@ -849,11 +990,13 @@ export function aiInput(car, race, dt) {
 
   // Follow a speed plan: how close to the grip limit this driver corners and how late they brake.
   // In dirty air the car has less grip, and the driver knows it.
-  const m = sk.corner * (1 - DIRTY_AIR.grip * (car.dirty || 0));
+  // (a bot with a faster car knows it: it plans on its own grip and brakes)
+  const boost = sk.boost ?? 1;
+  const m = sk.corner * boost * (1 - DIRTY_AIR.grip * (car.dirty || 0));
   // Brake management: plan on the braking the car actually has (cold, fading or worn brakes stop
   // shorter), and when they run hot, brake earlier and lighter (lift and coast) to let them cool
   const hot = car.brakeTemp > BRAKES.window[1] - 40;
-  const prof = speedProfile(track, m, sk.brake * (car.brakeEff ?? 1) * (hot ? 0.8 : 1));
+  const prof = speedProfile(track, m, sk.brake * boost * (car.brakeEff ?? 1) * (hot ? 0.8 : 1));
   const look = 1 + Math.round((fwd * 0.04) / STEP);
   let target = prof[(car.idx + look) % n];
 
@@ -1287,11 +1430,14 @@ export function stepRace(race, playerInput, dt) {
 
     // One car for everyone: the same engine, ERS, DRS, tow and grip. (The player's brake setting can
     // only soften the pedal, never add braking the bots don't have.)
+    // One car for everyone (same ERS, DRS, tow, dirty air); from Hard up the bots' car is faster
+    // (skill.boost). The player's brake setting can only soften the pedal.
+    const boost = car.isPlayer ? 1 : car.skill.boost ?? 1;
     const mods = {
-      power: ersPow,
-      top: ersTop * (car.drsOpen ? 1.12 : 1) * (car.slip ? 1.05 : 1),
-      grip: 1 - DIRTY_AIR.grip * car.dirty,
-      brake: (car.isPlayer ? Math.min(1, input.brakeMult ?? 1) : 1) * (car.brakeEff ?? 1)
+      power: ersPow * boost,
+      top: ersTop * (car.drsOpen ? 1.12 : 1) * (car.slip ? 1.05 : 1) * boost,
+      grip: (1 - DIRTY_AIR.grip * car.dirty) * boost,
+      brake: (car.isPlayer ? Math.min(1, input.brakeMult ?? 1) : boost) * (car.brakeEff ?? 1)
     };
     const prevIdx = car.idx;
     const fwdBefore = car.fwd;

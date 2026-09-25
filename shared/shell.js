@@ -66,6 +66,7 @@ export function initShell({ crumb = null, showGameLinks = true, howToPlay = null
     <nav class="shell__nav" aria-label="Terminal">
       ${showGameLinks ? `<a class="hbtn" href="/" title="All games" aria-label="All games">${icon("gamepad", { size: 14 })}</a>` : ""}
       <button class="hbtn hbtn--sound" type="button" data-sound-hud title="Toggle Audio (MUTE/UNMUTE)" aria-label="Toggle Sound">SFX: [<b data-sound-state>ON</b>]</button>
+      <button class="hbtn hbtn--more" type="button" data-shell-more aria-expanded="false" aria-label="More options" title="More">&#8943;</button>
       <button class="hbtn hbtn--sysinfo" type="button" data-sysinfo>SYSINFO</button>
       <button class="hbtn hbtn--prof" type="button" data-user-prof>USER-PROF</button>
       <button class="hbtn hbtn--logout" type="button" data-logoff>LOGOFF</button>
@@ -78,6 +79,24 @@ export function initShell({ crumb = null, showGameLinks = true, howToPlay = null
   const main = body.querySelector("main");
   if (main) body.insertBefore(header, main);
   else body.appendChild(header);
+
+  // Phones: SYSINFO / USER-PROF / LOGOFF fold into a ⋯ menu so the header stays one line
+  const nav = header.querySelector(".shell__nav");
+  const more = header.querySelector("[data-shell-more]");
+  const setMore = (open) => {
+    nav.classList.toggle("is-open", open);
+    more.setAttribute("aria-expanded", String(open));
+  };
+  more.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setMore(!nav.classList.contains("is-open"));
+  });
+  nav.addEventListener("click", (e) => {
+    if (e.target.closest("[data-sysinfo], [data-user-prof], [data-logoff]")) setMore(false);
+  });
+  document.addEventListener("click", (e) => {
+    if (!nav.contains(e.target)) setMore(false);
+  });
 
   const isGamePage = window.location.pathname.includes("/games/") || crumb !== null;
   let game = null;
@@ -1005,33 +1024,110 @@ export function confirmDialog({
 
 // Every game page gets a FULLSCREEN toggle in its stage bar. It fullscreens the game's <main> (canvas,
 // HUD and controls together); Esc or the button leaves again. Pages with their own toggle keep it.
+// ── Fullscreen ──
+// One immersive mode for every device: the game fills the screen (on desktop and Android the browser
+// also goes truly fullscreen; iPhone has no fullscreen for web pages, so there the layout alone does it),
+// the site header / footer / title bar are hidden, the game's canvas area is sized to the screen
+// ([data-stage], keeping its shape), its touch controls spread over the whole screen
+// ([data-touch-frame]) and its in-game menus open full screen ([data-stage-menu]). Where the browser
+// allows it (Android) the browser bars are hidden too.
+const coarsePointer = () => !!window.matchMedia?.("(pointer: coarse)").matches;
+let immersive = false;
+let immersiveBar = null;
+let savedScroll = 0;
+let rotateHinted = false;
+
+export const isImmersive = () => immersive;
+
+function syncOrientation() {
+  document.documentElement.classList.toggle("is-portrait", window.innerHeight > window.innerWidth);
+}
+
+export function setImmersive(on) {
+  on = !!on;
+  if (on === immersive) return;
+  immersive = on;
+  const html = document.documentElement;
+  if (on) {
+    savedScroll = window.scrollY;
+    // Each stage keeps its game's shape, just bigger: the canvas's own proportions (the page layout
+    // may letterbox it), falling back to the stage box
+    document.querySelectorAll("[data-stage]").forEach((stage) => {
+      const c = stage.querySelector("canvas");
+      const r = stage.getBoundingClientRect();
+      const ar = c && c.width > 0 && c.height > 0 ? c.width / c.height : r.height > 0 ? r.width / r.height : 0;
+      if (ar > 0) stage.style.setProperty("--stage-ar", ar.toFixed(4));
+    });
+    html.classList.add("is-immersive");
+    const req = html.requestFullscreen || html.webkitRequestFullscreen;
+    if (req && !(document.fullscreenElement || document.webkitFullscreenElement)) {
+      try {
+        req.call(html)?.catch?.(() => {});
+      } catch {
+        /* not allowed here: the immersive layout still applies */
+      }
+    }
+    immersiveBar = document.createElement("div");
+    immersiveBar.className = "immersive-bar";
+    const move = document.querySelector("[data-touch-layout-btn]");
+    immersiveBar.innerHTML = `${move ? '<button type="button" class="hbtn" data-imm-move aria-label="Move controls">&#10021; CONTROLS</button>' : ""}<button type="button" class="hbtn" data-imm-exit aria-label="Exit fullscreen">&#10005; EXIT</button>`;
+    immersiveBar.querySelector("[data-imm-exit]").addEventListener("click", () => setImmersive(false));
+    immersiveBar.querySelector("[data-imm-move]")?.addEventListener("click", () => document.querySelector("[data-touch-layout-btn]")?.click());
+    document.body.append(immersiveBar);
+  } else {
+    html.classList.remove("is-immersive");
+    immersiveBar?.remove();
+    immersiveBar = null;
+    const fs = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fs === html) (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)?.catch?.(() => {});
+  }
+  syncOrientation();
+  document.querySelectorAll("[data-fullscreen-toggle]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(on));
+    if (b.dataset.fullscreenToggle === "shell") b.textContent = on ? "EXIT FULLSCREEN" : "⛶ FULLSCREEN";
+  });
+  window.dispatchEvent(new CustomEvent("immersivechange", { detail: { on } }));
+  // Canvas games size themselves from the page: let them re-measure
+  window.dispatchEvent(new Event("resize"));
+  if (!on) window.scrollTo(0, savedScroll);
+  else maybeRotateHint();
+}
+
+function maybeRotateHint() {
+  if (rotateHinted || window.innerHeight <= window.innerWidth) return;
+  const wide = [...document.querySelectorAll("[data-stage]")].some((s) => parseFloat(s.style.getPropertyValue("--stage-ar")) > 1.3);
+  if (!wide) return;
+  rotateHinted = true;
+  toast({ title: "TIP", body: "Turn your phone sideways for a bigger view.", icon: "sparkle", duration: 3500 });
+}
+
 function setupFullscreen() {
-  if (document.querySelector("[data-fullscreen-toggle]")) return;
   const target = document.getElementById("main") || document.querySelector("main");
+  if (!target) return;
+  syncOrientation();
+  window.addEventListener("resize", syncOrientation);
+  // Leaving the browser's fullscreen (Esc, Android back gesture) leaves immersive mode too
+  const onFsChange = () => {
+    if (immersive && !(document.fullscreenElement || document.webkitFullscreenElement)) setImmersive(false);
+  };
+  document.addEventListener("fullscreenchange", onFsChange);
+  document.addEventListener("webkitfullscreenchange", onFsChange);
+  // A game that wires its own fullscreen button (Mars Base) calls setImmersive itself on phones
+  if (document.querySelector("[data-fullscreen-toggle]")) return;
   const el = document.documentElement;
   const canFs = !!(el.requestFullscreen || el.webkitRequestFullscreen);
-  if (!target || !canFs) return;
+  if (!canFs && !coarsePointer()) return;
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "hbtn hbtn--fullscreen";
-  btn.dataset.fullscreenToggle = "";
+  btn.dataset.fullscreenToggle = "shell";
   btn.title = "Fullscreen (Esc to exit)";
-  const current = () => document.fullscreenElement || document.webkitFullscreenElement;
-  const sync = () => {
-    const on = current() === target;
-    btn.textContent = on ? "EXIT FULLSCREEN" : "⛶ FULLSCREEN";
-    btn.setAttribute("aria-pressed", String(on));
-    // Canvas games size themselves from the viewport; nudge them to re-measure
-    window.dispatchEvent(new Event("resize"));
-  };
   btn.addEventListener("click", () => {
-    if (current()) (document.exitFullscreen || document.webkitExitFullscreen).call(document)?.catch?.(() => {});
-    else (target.requestFullscreen || target.webkitRequestFullscreen).call(target)?.catch?.(() => {});
     btn.blur();
+    setImmersive(!immersive);
   });
-  document.addEventListener("fullscreenchange", sync);
-  document.addEventListener("webkitfullscreenchange", sync);
-  sync();
+  btn.textContent = "⛶ FULLSCREEN";
+  btn.setAttribute("aria-pressed", "false");
   const meta = document.querySelector(".stage-bar__meta");
   if (meta) meta.append(btn);
   else {

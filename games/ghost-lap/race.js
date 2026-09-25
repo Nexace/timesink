@@ -63,7 +63,7 @@ export const DIFFICULTY = {
   medium: { label: "MEDIUM", corner: 0.87, brake: 0.79, commit: 0.95, noise: 0.06, react: 0.29 },
   hard: { label: "HARD", corner: 0.92, brake: 0.84, commit: 0.98, noise: 0.03, react: 0.24 },
   veryHard: { label: "VERY HARD", corner: 0.97, brake: 0.91, commit: 1, noise: 0.01, react: 0.2 },
-  impossible: { label: "IMPOSSIBLE", corner: 1.06, brake: 1.0, commit: 1, noise: 0, react: 0.16 }
+  impossible: { label: "IMPOSSIBLE", corner: 1.0, brake: 1.0, commit: 1, noise: 0, react: 0.16 }
 };
 DIFFICULTY.mixed = { ...DIFFICULTY.medium, label: "MIXED" };
 export const DIFFICULTY_ORDER = ["noob", "veryEasy", "easy", "medium", "hard", "veryHard", "impossible"];
@@ -338,6 +338,9 @@ function updateBrakes(race, car, input, mods, fwdBefore, dt) {
   } else if (car.brakeTemp < BRAKES.window[1] - 100) car.brakeWarned = false;
   if (lifeWas >= BRAKES.worn && car.brakeLife < BRAKES.worn) emit(race, { type: "brakesWorn", car: car.id });
 }
+
+// How far past the tyres' grip a full steering input can ask for at speed (1 = exactly the limit)
+const STEER_ASSIST = 1.15;
 
 // Wake behind a car: dirty air starts just off its gearbox and fades out ~9 car lengths back
 export const DIRTY_AIR = { from: 40, reach: 380, width: 44, grip: 0.14 };
@@ -771,6 +774,13 @@ export function stepCar(car, input, track, dt, mods = {}) {
   // Friction circle: hard braking or wheelspin eats into the grip left for turning
   const longUse = Math.max((input.brake ?? 0) * (fwd > 60 ? 0.35 : 0), (input.throttle ?? 0) * 0.25 * Math.max(0, 1 - Math.abs(fwd) / CAR.top));
   const G = gripAt(Math.abs(fwd)) * gripMult * surfaceGrip * (input.handbrake ? 0.75 : 1) * (1 - longUse);
+  // Speed-sensitive steering (every car): at speed a full turn of the wheel asks for just past the
+  // grip limit rather than several times it, so steering hard runs the car wide (understeer) instead
+  // of scrubbing off a third of its speed. Corners still can't be taken flat: too fast = too wide.
+  if (!input.handbrake && Math.abs(fwd) > 1) {
+    const yawMax = (G * STEER_ASSIST) / Math.abs(fwd);
+    if (Math.abs(yaw) > yawMax) yaw = Math.sign(yaw) * yawMax;
+  }
   const need = Math.abs(yaw * fwd);
   car.sliding = need > G ? Math.min(1, (need - G) / G) : Math.max(0, car.sliding - dt * 3);
   if (need > G && Math.abs(fwd) > 1) {
@@ -957,7 +967,7 @@ export function makeField({ mode, difficulty = "medium", seed = 1 }) {
       const spread = mode === "duel" ? 0 : ((mid - rank) / Math.max(1, mid)) * 0.05;
       skill = {
         ...base,
-        corner: clamp(base.corner + spread * 0.5, 0.5, 1.08),
+        corner: clamp(base.corner + spread * 0.5, 0.5, 1.03),
         brake: clamp(base.brake + spread * 0.5, 0.45, 1),
         commit: clamp(base.commit + spread * 0.4, 0.55, 1)
       };
@@ -981,12 +991,13 @@ export function qualifyingSkill(skill) {
   };
 }
 
-// Qualifying: everyone gets this many timed laps in a row (from a flying start); the best clean one counts
+// Qualifying: everyone gets this many timed laps in a row, starting from the line; the best clean one counts
 export const QUALI_LAPS = 3;
 
-/** A bot's whole qualifying run: QUALI_LAPS flying laps, each [{ time, valid }] with its own bit of form. */
+/** A bot's whole qualifying run: QUALI_LAPS laps from the line, each [{ time, valid }] with its own bit of form. */
 export function qualifyingRun(track, skill, rand = Math.random) {
-  const race = createRace({ track, mode: "trial", seed: 1, flying: true });
+  // Same start as the player: from the line, so lap 1 includes the getaway and laps 2-3 are flying
+  const race = createRace({ track, mode: "trial", seed: 1 });
   const car = race.cars[0];
   car.isPlayer = false;
   car.skill = qualifyingSkill(skill);
@@ -1005,7 +1016,7 @@ export function qualifyingLap(track, skill, rand = Math.random) {
   return bestQualiLap(qualifyingRun(track, skill, rand));
 }
 
-export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1, grid = null, brakes = false, flying = false }) {
+export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1, grid = null, brakes = false }) {
   const rand = seededRand(seed);
   const cars = [];
   // Grid order, front to back: "player" or a field entry. By default the player starts in the middle
@@ -1019,20 +1030,6 @@ export function createRace({ track, mode, laps = 5, difficulty = "medium", seed 
     if (entry === "player") cars.push(makeCar("player", PLAYER_LIVERY, track.grid[k], { isPlayer: true }));
     else cars.push(makeCar(entry.id, entry.livery, track.grid[k], { skill: entry.skill }));
   });
-  // Qualifying is a flying lap: start on the racing line ~200 m before the line, already at speed
-  if (flying) {
-    const k = (track.n - 60 + track.n) % track.n;
-    for (const c of cars) {
-      const v = Math.min(track.vmax[k], CAR.top * 0.9);
-      c.x = track.path[k][0] + track.nor[k][0] * track.line[k];
-      c.y = track.path[k][1] + track.nor[k][1] * track.line[k];
-      c.heading = Math.atan2(track.tan[k][1], track.tan[k][0]);
-      c.vx = track.tan[k][0] * v;
-      c.vy = track.tan[k][1] * v;
-      c.fwd = v;
-      c.speed = v;
-    }
-  }
   // Bots react to the lights like a person would (quicker drivers, quicker starts)
   for (const c of cars) if (!c.isPlayer) c.react = (c.skill.react ?? 0.3) * (0.8 + rand() * 0.4);
   if (brakes) {

@@ -590,9 +590,7 @@ function startRace(config) {
     seed: (Date.now() & 0xffffff) + 1,
     grid: quali ? null : config.grid || null,
     // Grand Prix option: brakes heat up, fade when overheated and wear out (for every car)
-    brakes: config.mode === "gp" && prefs.gpBrakes !== false,
-    // Qualifying is a proper flying lap: you start rolling ~200 m before the line
-    flying: quali
+    brakes: config.mode === "gp" && prefs.gpBrakes !== false
   });
   const cam = newCam(race.player);
   cam.zoom = 1.05;
@@ -622,7 +620,7 @@ function startRace(config) {
   overlay.hidden = true;
   overlay.innerHTML = "";
   canvas.focus({ preventScroll: true });
-  if (quali) banner(`QUALIFYING • ${QUALI_LAPS} FLYING LAPS`, "You're already rolling: push! Your best clean lap sets your grid slot", "#00f0ff", 4);
+  if (quali) banner(`QUALIFYING • ${QUALI_LAPS} LAPS`, "Go from the line: lap 1 includes the start, laps 2 and 3 are flying. Your best clean lap sets your grid slot", "#00f0ff", 4);
   else if (config.mode === "trial") banner("TIME TRIAL", ghost ? `Beat your ghost: ${fmtSec(ghost.time)}` : "Cross the line to start a flying lap", "#00f0ff", 3.5);
   else {
     const slot = race.cars.findIndex((c) => c.isPlayer) + 1;
@@ -886,7 +884,7 @@ function finishSession(retired = false) {
 }
 
 // ── Live qualifying board ──
-// The rivals run their three flying laps on their own empty track, pushing harder than in the race. Each
+// The rivals run the same three laps from the line on their own empty track, pushing harder than in the race. Each
 // bot's run is worked out up front (one bot per frame, so nothing stutters), then its laps are revealed
 // on the board at the moment they'd cross the line: bots head out at staggered times, like real
 // qualifying. The final grid uses exactly the same laps, so the board and the results always agree.
@@ -1129,7 +1127,7 @@ function showSetup(mode) {
   const lapOpts = [1, 3, 5, 10, 20];
   const title = { gp: "GRAND PRIX", duel: "DUEL", trial: "TIME TRIAL" }[mode];
   const blurb = {
-    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Everyone drives the same car. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify over three flying laps (your best clean lap sets your grid slot), or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
+    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Everyone drives the same car. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify over three laps from the line (your best clean lap sets your grid slot), or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
     duel: "Head-to-head against one bot in the same car as yours: same engine, grip, brakes, ERS and DRS. Levels only change how well it drives. Impossible uses almost all of the car.",
     trial: "Flying laps on an empty circuit. Your best clean lap becomes a ghost; running wide deletes the lap."
   }[mode];

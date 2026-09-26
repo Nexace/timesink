@@ -435,7 +435,7 @@ function resolveContacts(race) {
           }
         }
         if (Math.abs(rv) > 40) A.lastHit = B.lastHit = race.t;
-        if ((A.isPlayer || B.isPlayer) && Math.abs(rv) > 60) emit(race, { type: "contact", speed: Math.abs(rv) });
+        if ((A.isPlayer || B.isPlayer) && Math.abs(rv) > 60) emit(race, { type: "contact", car: (A.isPlayer ? A : B).id, speed: Math.abs(rv) });
       }
     }
   }
@@ -1410,6 +1410,17 @@ function crossLine(race, car) {
     return;
   }
   const lapTime = t - car.lapStart;
+  // Crossing the line while off the track at racing speed (running wide out of the last corner), or
+  // part-way through a shortcut, deletes the lap being completed: that's the lap it helped. The
+  // strike or cut is still judged when the car rejoins, but it won't delete the new lap as well.
+  if (car.offTrack && car.offTime >= LIMITS.dwell && car.offSpeed > LIMITS.minSpeed && !car.offPushed && car.speed >= car.offSpeed * LIMITS.keep) {
+    car.lapValid = false;
+    car.offCarried = true;
+  }
+  if (car.cutGain > CUT_GAIN && car.cutGain - car.cutDriven * 0.8 > 0 && !car.cutPushed) {
+    car.lapValid = false;
+    car.cutCarried = true;
+  }
   const valid = car.lapValid;
   car.lapTimes.push({ time: lapTime, valid });
   car.laps += 1;
@@ -1463,16 +1474,22 @@ function trackProgress(race, car, prevIdx) {
   const moved = (car.idx - prevIdx + n) % n;
   const forward = moved > 0 && moved < n / 2;
   const back = moved >= n / 2;
-  // Line crossing (index wraps n-1 → 0)
+  // Line crossing (index wraps n-1 → 0). Reversing back over the line leaves a debt: the next forward
+  // crossing only brings the car back to where it was, it doesn't count as a lap (no farming laps by
+  // rocking back and forth over the line).
   if (forward && car.idx < prevIdx) {
-    if (car.laps < 0 || car.sector === 2) {
+    if (car.lineDebt > 0) {
+      car.lineDebt -= 1;
+      car.sector = 0;
+    } else if (car.laps < 0 || car.sector === 2) {
       if (car.laps >= 0) sectorDone(race, car, 2);
       crossLine(race, car);
       car.sector = 0;
       car.sectorColors = [null, null, null];
     }
   } else if (back && car.idx > prevIdx && car.laps >= 0) {
-    // Reversed over the line: undo the lap start so it can't be farmed
+    // Reversed back over the line: it has to be driven over again before the next one counts
+    car.lineDebt = (car.lineDebt || 0) + 1;
     car.sector = 2;
   }
   if (car.laps >= 0) {
@@ -1532,9 +1549,6 @@ export function stepRace(race, playerInput, dt) {
     race.reaction = race.t;
     emit(race, { type: "reaction", time: race.t });
   }
-
-  // Order by track position for DRS / slipstream / gaps
-  const byPos = race.cars.slice().sort((a, b) => (b.finished - a.finished) || (a.finished && b.finished ? a.finishTime - b.finishTime : b.total - a.total));
 
   for (const car of race.cars) {
     if (car.finished && race.mode !== "trial") {
@@ -1620,7 +1634,7 @@ export function stepRace(race, playerInput, dt) {
 
     // Harvest under braking (MGU-K), capped per lap. Slow-speed braking recovers less.
     car.harvesting = false;
-    if ((input.brake ?? 0) > 0.05 && car.fwd > 60 && car.battery < 1) {
+    if (!canErs && (input.brake ?? 0) > 0.05 && car.fwd > 60 && car.battery < 1) {
       const room = Math.max(0, ERS.harvestLap - car.ersHarvestLap);
       const h = Math.min(room, 1 - car.battery, input.brake * ERS.harvest * clamp(car.fwd / (CAR.top * 0.5), 0.35, 1) * dt);
       car.battery += h;
@@ -1648,11 +1662,13 @@ export function stepRace(race, playerInput, dt) {
       if (pushed) car.offPushed = true;
     } else if (car.offTrack && Math.abs(car.d) < halfW + 16) {
       car.offTrack = false;
+      const carried = car.offCarried;
+      car.offCarried = false;
       const gained = car.speed >= car.offSpeed * LIMITS.keep;
       // (across the inside of a corner is the corner-cut rule's business, below)
       if (car.laps >= 0 && !car.cutGain && car.offTime >= LIMITS.dwell && car.offSpeed > LIMITS.minSpeed && !car.offPushed && !pushed) {
         if (gained) {
-          car.lapValid = false;
+          if (!carried) car.lapValid = false;
           car.strikes += 1;
           let pen = 0;
           if (race.mode !== "trial" && car.strikes > LIMITS.warnings) {
@@ -1678,7 +1694,7 @@ export function stepRace(race, playerInput, dt) {
     if (!offRoad && car.cutGain) {
       const shortcut = car.cutGain - car.cutDriven * 0.8;
       if (car.cutGain > CUT_GAIN && shortcut > 0 && !car.cutPushed && car.laps >= 0) {
-        car.lapValid = false;
+        if (!car.cutCarried) car.lapValid = false;
         car.cuts = (car.cuts || 0) + 1;
         let pen = 0;
         if (race.mode !== "trial" && car.cuts > 1) {
@@ -1690,6 +1706,7 @@ export function stepRace(race, playerInput, dt) {
       car.cutGain = 0;
       car.cutDriven = 0;
       car.cutPushed = false;
+      car.cutCarried = false;
     }
 
     const before = car.idx;

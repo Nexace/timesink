@@ -1099,6 +1099,7 @@ export function createWorld(track) {
     return c;
   }
 
+  let paintCount = 0;
   function getTile(tx, ty, allowPaint) {
     const key = ty * cols + tx;
     let t = tiles.get(key);
@@ -1109,6 +1110,7 @@ export function createWorld(track) {
     }
     if (!allowPaint) return null;
     t = paintTile(tx, ty);
+    paintCount++;
     tiles.set(key, t);
     if (tiles.size > MAX_TILES) tiles.delete(tiles.keys().next().value);
     return t;
@@ -1160,6 +1162,29 @@ export function createWorld(track) {
         for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) tiles.delete((cy + dy) * cols + cx + dx);
       }
     },
+    /**
+     * Paint (at most) one tile the camera is about to need: where the view will be `ahead` seconds
+     * from now at velocity (vx, vy). Called with spare frame time, so by the time a new part of the
+     * track scrolls into view its tiles are ready and drawing never has to stop to paint them.
+     * Returns true if it painted one.
+     */
+    prefetch(cam, W, H, vx, vy, ahead = 1) {
+      const z = cam.zoom;
+      const hw = cam.angle ? Math.hypot(W, H) / 2 / z : W / 2 / z;
+      const hh = cam.angle ? hw : H / 2 / z;
+      for (const f of [0.5, 1]) {
+        const cx = cam.x + vx * ahead * f;
+        const cy = cam.y + vy * ahead * f;
+        for (let ty = Math.max(0, Math.floor((cy - hh) / TILE)); ty <= Math.min(rows - 1, Math.floor((cy + hh) / TILE)); ty++) {
+          for (let tx = Math.max(0, Math.floor((cx - hw) / TILE)); tx <= Math.min(cols - 1, Math.floor((cx + hw) / TILE)); tx++) {
+            if (tiles.has(ty * cols + tx)) continue;
+            getTile(tx, ty, true);
+            return true;
+          }
+        }
+      }
+      return false;
+    },
     /** Paint every tile the camera can see right now (used before a race starts). */
     warm(cam, W, H) {
       const z = cam.zoom;
@@ -1195,7 +1220,11 @@ export function createWorld(track) {
         ctx.restore();
       }
     },
-    tileCount: () => tiles.size
+    tileCount: () => tiles.size,
+    /** How many tiles have been painted so far (for performance checks). */
+    get painted() {
+      return paintCount;
+    }
   };
 }
 

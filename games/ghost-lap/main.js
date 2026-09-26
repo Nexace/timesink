@@ -792,7 +792,8 @@ function handleEvents(race) {
       banner("CHEQUERED FLAG", e.car === pid ? "YOU WIN!" : "", "#ffffff", 3);
     } else if (e.type === "finish" && e.car === pid) {
       s.endAt = performance.now() + 3200;
-      const pos = race.order.findIndex((c) => c.isPlayer) + 1;
+      // Position after penalties (as the results will show), not just the order on the road
+      const pos = classify(race).findIndex((r) => r.car.isPlayer) + 1;
       if (pos === 1) sfx.win();
       else sfx.good();
       banner(`P${pos}`, race.mode === "duel" ? (pos === 1 ? "DUEL WON" : "DUEL LOST") : "FINISH", pos === 1 ? "#ffd400" : "#ffffff", 3.2, 22);
@@ -1505,6 +1506,48 @@ function renderScene(s, now) {
 // ==========================================
 // MAIN LOOP
 // ==========================================
+// Smooth motion: the physics runs in fixed 1/120 s steps, but a screen refreshes at its own rate
+// (60, 120, 144 Hz...) so a frame can land 0, 1, 2 or 3 steps after the last. Drawing only the latest
+// step makes the cars (and the camera following them) judder, most visibly at speed on a straight.
+// So each frame draws every car part-way between its last two steps, by how far the clock has got
+// toward the next one. The real positions are put back straight after drawing.
+function rememberPositions(race) {
+  for (const c of race.cars) {
+    c.ix = c.x;
+    c.iy = c.y;
+    c.ih = c.heading;
+  }
+  race.it = race.t;
+}
+let blended = null;
+function blendPositions(race, alpha) {
+  blended = [];
+  for (const c of race.cars) {
+    if (c.ix == null) continue;
+    const dx = c.x - c.ix;
+    const dy = c.y - c.iy;
+    if (dx * dx + dy * dy > 120 * 120) continue; // a reset/teleport: don't smear across it
+    blended.push([c, c.x, c.y, c.heading]);
+    c.x = c.ix + dx * alpha;
+    c.y = c.iy + dy * alpha;
+    let dh = c.heading - c.ih;
+    dh -= Math.round(dh / (Math.PI * 2)) * Math.PI * 2;
+    c.heading = c.ih + dh * alpha;
+  }
+  if (race.it != null) {
+    blended.push([race, race.t]);
+    race.t = race.it + (race.t - race.it) * alpha;
+  }
+}
+function restorePositions() {
+  if (!blended) return;
+  for (const b of blended) {
+    if (b.length === 2) b[0].t = b[1];
+    else [b[0].x, b[0].y, b[0].heading] = [b[1], b[2], b[3]];
+  }
+  blended = null;
+}
+
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); // never backwards
@@ -1516,6 +1559,7 @@ function frame(now) {
     acc += dt;
     let steps = 0;
     while (acc >= SIM_DT && steps < 12) {
+      rememberPositions(race);
       stepRace(race, autopilot ? aiInput(race.player, race, SIM_DT) : playerInput(SIM_DT), SIM_DT);
       handleEvents(race);
       if (race.mode === "trial" && race.player) {
@@ -1533,8 +1577,11 @@ function frame(now) {
       acc -= SIM_DT;
       steps++;
     }
+    // (a long stall: drop the backlog rather than fast-forward through it)
+    if (steps === 12) acc = 0;
+    s.alpha = Math.min(1, acc / SIM_DT);
+    s.camDt = dt;
     updateFx(s.fx, race, dt);
-    followCam(s.cam, race.player, dt);
     const c = race.player;
     if (race.mode === "trial" && s.ghost && c.laps >= 0) s.delta = ghostDelta(s, race.t - c.lapStart, c.total - c.laps * race.track.L);
     else s.delta = null;
@@ -1558,28 +1605,44 @@ function frame(now) {
 
   const view = session || demo;
   if (session?.qualiBoard && session.race.phase === "racing" && !session.paused) updateQualiBoard(session);
-  if (view) renderScene(view, now);
-  syncQualiSubmit();
-  if (session && screen !== "home") {
+  // Draw (and aim the camera) with every car part-way between its last two physics steps
+  if (session && session.alpha != null) blendPositions(session.race, session.alpha);
+  try {
+    if (session && session.camDt != null) {
+      followCam(session.cam, session.race.player, session.camDt);
+      session.camDt = null;
+    }
+    if (view) renderScene(view, now);
+    syncQualiSubmit();
+    if (session && screen !== "home") {
+      const c = session.race.player;
+      const inZone = c && session.race.track.drs.some((z) => (z.from <= z.to ? c.idx >= z.from && c.idx <= z.to : c.idx >= z.from || c.idx <= z.to));
+      drawHud(ctx, {
+        race: session.race,
+        minimap: session.entry.minimap,
+        banners: session.banners,
+        now: now / 1000,
+        ghost: session.ghostPos,
+        bestTrail: session.ghost,
+        qualiBoard: session.qualiBoard ? qualiBoardRows(session) : null,
+        quali: session.config.stage === "quali" ? QUALI_LAPS : 0,
+        delta: session.delta,
+        drsState: c.drsOpen ? "open" : c.drsEligible && inZone ? "ready" : c.drsEligible ? "armed" : "off",
+        W,
+        H,
+        hudScale,
+        bottomInset: hudBottom,
+        topRightInset: hudTopRight
+      });
+    }
+  } finally {
+    restorePositions();
+  }
+  // Spare time this frame: paint a map tile the camera will need soon, so none has to be painted
+  // mid-frame when it scrolls into view (that's what used to cause a hitch at speed)
+  if (session && screen === "race" && !session.paused && performance.now() - now < 8) {
     const c = session.race.player;
-    const inZone = c && session.race.track.drs.some((z) => (z.from <= z.to ? c.idx >= z.from && c.idx <= z.to : c.idx >= z.from || c.idx <= z.to));
-    drawHud(ctx, {
-      race: session.race,
-      minimap: session.entry.minimap,
-      banners: session.banners,
-      now: now / 1000,
-      ghost: session.ghostPos,
-      bestTrail: session.ghost,
-      qualiBoard: session.qualiBoard ? qualiBoardRows(session) : null,
-      quali: session.config.stage === "quali" ? QUALI_LAPS : 0,
-      delta: session.delta,
-      drsState: c.drsOpen ? "open" : c.drsEligible && inZone ? "ready" : c.drsEligible ? "armed" : "off",
-      W,
-      H,
-      hudScale,
-      bottomInset: hudBottom,
-      topRightInset: hudTopRight
-    });
+    if (c) session.entry.world.prefetch(session.cam, W, H, c.vx, c.vy, 1.2);
   }
   requestAnimationFrame(frame);
 }

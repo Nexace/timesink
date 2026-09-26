@@ -30,6 +30,35 @@ function text(ctx, str, x, y, { font = DISPLAY, size = 10, color = "#fff", align
   ctx.fillText(str, x, y);
 }
 
+// The timing towers are dozens of lines of pixel-font text, the most expensive thing on the HUD. Each
+// is drawn into its own image and reused, redrawn ~10 times a second (gaps tick over smoothly enough)
+// and straight away whenever the rows themselves change (order, who's shown, penalties...).
+const panelCache = new Map();
+function cachedPanel(ctx, id, key, x, y, w, h, draw) {
+  if (typeof document === "undefined") return draw(ctx); // (outside a browser: draw directly)
+  const m = ctx.getTransform();
+  const sx = Math.hypot(m.a, m.b) || 1;
+  const pw = Math.max(1, Math.ceil(w * sx));
+  const ph = Math.max(1, Math.ceil(h * sx));
+  const now = performance.now();
+  let c = panelCache.get(id);
+  if (!c) panelCache.set(id, (c = { canvas: document.createElement("canvas"), key: null, at: -1e9 }));
+  if (c.key !== key || now - c.at > 100 || c.canvas.width !== pw || c.canvas.height !== ph) {
+    c.canvas.width = pw;
+    c.canvas.height = ph;
+    const g = c.canvas.getContext("2d");
+    g.setTransform(sx, 0, 0, sx, -x * sx, -y * sx);
+    draw(g);
+    c.key = key;
+    c.at = now;
+  }
+  // (placed on whole device pixels so the text stays as crisp as if it were drawn directly)
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(c.canvas, Math.round(m.e + x * sx), Math.round(m.f + y * sx));
+  ctx.restore();
+}
+
 // Which rows a tower shows: all of them, or (on a small screen) the top three plus the ones around
 // the player. Returns [[position index, row], ...] in order.
 function towerRows(rows, maxRows, isMe) {
@@ -50,30 +79,33 @@ function timingTower(ctx, race, x, y, maxRows = 0) {
   const rowH = big ? 21 : 26;
   const w = 238;
   const shown = towerRows(rows, maxRows, (c) => c.isPlayer);
-  panel(ctx, x, y, w, 30 + shown.length * rowH);
-  text(ctx, race.mode === "duel" ? "DUEL" : "RACE ORDER", x + 12, y + 20, { size: 9, color: "#8fb4ff" });
-  text(ctx, "GAP", x + w - 12, y + 20, { size: 8, color: "#6c7a96", align: "right" });
-  shown.forEach(([k, c], slot) => {
-    const ry = y + 30 + slot * rowH;
-    if (c.isPlayer) {
-      ctx.fillStyle = "rgba(0, 136, 255, 0.28)";
-      ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
-    }
-    const ty = ry + (big ? 15 : 18);
-    text(ctx, String(k + 1).padStart(2, " "), x + 10, ty, { size: big ? 9 : 10, color: k === 0 ? "#ffd400" : "#fff" });
-    ctx.fillStyle = c.color;
-    ctx.fillRect(x + 44, ry + 4, 4, rowH - 9);
-    text(ctx, c.code, x + 56, ty, { size: big ? 9 : 10, color: c.isPlayer ? "#6fd3ff" : "#e8ecf4" });
-    let gap = "";
-    if (c.finished) gap = k === 0 ? "FLAG" : `+${c.gapLeader.toFixed(3)}`;
-    else if (k === 0) gap = "LEADER";
-    else gap = `+${c.gapAhead.toFixed(3)}`;
-    if (c.penalty) gap = `${gap} ▲${c.penalty}s`;
-    text(ctx, gap, x + w - 12, ry + (big ? 16 : 19), { font: BODY, size: big ? 17 : 20, color: k === 0 ? "#ffd400" : "#c9d2e3", align: "right" });
-    if (race.bestLapBy === c.id) {
-      ctx.fillStyle = SECTOR_COLORS.purple;
-      ctx.fillRect(x + 140, ry + (big ? 6 : 8), 7, 7);
-    }
+  const key = `${race.mode}|${rowH}|${race.bestLapBy}|${shown.map(([k, c]) => `${k}:${c.id}:${c.finished ? 1 : 0}:${c.penalty}`).join(",")}`;
+  cachedPanel(ctx, "race", key, x, y, w, 30 + shown.length * rowH, (ctx) => {
+    panel(ctx, x, y, w, 30 + shown.length * rowH);
+    text(ctx, race.mode === "duel" ? "DUEL" : "RACE ORDER", x + 12, y + 20, { size: 9, color: "#8fb4ff" });
+    text(ctx, "GAP", x + w - 12, y + 20, { size: 8, color: "#6c7a96", align: "right" });
+    shown.forEach(([k, c], slot) => {
+      const ry = y + 30 + slot * rowH;
+      if (c.isPlayer) {
+        ctx.fillStyle = "rgba(0, 136, 255, 0.28)";
+        ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
+      }
+      const ty = ry + (big ? 15 : 18);
+      text(ctx, String(k + 1).padStart(2, " "), x + 10, ty, { size: big ? 9 : 10, color: k === 0 ? "#ffd400" : "#fff" });
+      ctx.fillStyle = c.color;
+      ctx.fillRect(x + 44, ry + 4, 4, rowH - 9);
+      text(ctx, c.code, x + 56, ty, { size: big ? 9 : 10, color: c.isPlayer ? "#6fd3ff" : "#e8ecf4" });
+      let gap = "";
+      if (c.finished) gap = k === 0 ? "FLAG" : `+${c.gapLeader.toFixed(3)}`;
+      else if (k === 0) gap = "LEADER";
+      else gap = `+${c.gapAhead.toFixed(3)}`;
+      if (c.penalty) gap = `${gap} ▲${c.penalty}s`;
+      text(ctx, gap, x + w - 12, ry + (big ? 16 : 19), { font: BODY, size: big ? 17 : 20, color: k === 0 ? "#ffd400" : "#c9d2e3", align: "right" });
+      if (race.bestLapBy === c.id) {
+        ctx.fillStyle = SECTOR_COLORS.purple;
+        ctx.fillRect(x + 140, ry + (big ? 6 : 8), 7, 7);
+      }
+    });
   });
 }
 
@@ -84,39 +116,42 @@ function qualiTower(ctx, rows, x, y, title, maxRows = 0) {
   const rowH = 20;
   const w = 300;
   const shown = towerRows(rows, maxRows, (r) => r.isPlayer);
-  panel(ctx, x, y, w, 30 + shown.length * rowH);
-  text(ctx, title, x + 12, y + 20, { size: 9, color: "#8fb4ff" });
-  text(ctx, "LIVE", x + w - 12, y + 20, { size: 8, color: "#ff4d5e", align: "right" });
-  const pole = rows[0] && Number.isFinite(rows[0].best) ? rows[0].best : null;
-  shown.forEach(([k, r], slot) => {
-    const ry = y + 30 + slot * rowH;
-    if (r.flash) {
-      ctx.fillStyle = r.flash;
-      ctx.globalAlpha = 0.22;
-      ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
-      ctx.globalAlpha = 1;
-    } else if (r.isPlayer) {
-      ctx.fillStyle = "rgba(0, 136, 255, 0.28)";
-      ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
-    }
-    const ty = ry + 14;
-    const timed = Number.isFinite(r.best);
-    text(ctx, timed ? String(k + 1).padStart(2, " ") : " -", x + 10, ty, { size: 9, color: k === 0 && timed ? "#ffd400" : "#fff" });
-    ctx.fillStyle = r.color;
-    ctx.fillRect(x + 40, ry + 4, 4, rowH - 8);
-    text(ctx, r.code, x + 52, ty, { size: 9, color: r.isPlayer ? "#6fd3ff" : "#e8ecf4" });
-    text(ctx, r.status, x + 112, ty, { size: 7, color: r.status === "GARAGE" ? "#55606f" : r.status === "DONE" ? "#8a95a8" : "#22e36b" });
-    let t;
-    let col = "#c9d2e3";
-    if (r.flash) {
-      t = r.flashValid ? fmtLap(r.flashTime * 1000) : "DELETED";
-      col = r.flash;
-    } else if (!timed) t = "NO TIME";
-    else if (k === 0 || !pole) {
-      t = fmtLap(r.best * 1000);
-      col = "#ffd400";
-    } else t = `+${(r.best - pole).toFixed(3)}`;
-    text(ctx, t, x + w - 12, ry + 15, { font: BODY, size: 17, color: col, align: "right" });
+  const key = `${title}|${shown.map(([k, r]) => `${k}:${r.code}:${r.status}:${r.best}:${r.flash}:${r.flashTime}`).join(",")}`;
+  cachedPanel(ctx, "quali", key, x, y, w, 30 + shown.length * rowH, (ctx) => {
+    panel(ctx, x, y, w, 30 + shown.length * rowH);
+    text(ctx, title, x + 12, y + 20, { size: 9, color: "#8fb4ff" });
+    text(ctx, "LIVE", x + w - 12, y + 20, { size: 8, color: "#ff4d5e", align: "right" });
+    const pole = rows[0] && Number.isFinite(rows[0].best) ? rows[0].best : null;
+    shown.forEach(([k, r], slot) => {
+      const ry = y + 30 + slot * rowH;
+      if (r.flash) {
+        ctx.fillStyle = r.flash;
+        ctx.globalAlpha = 0.22;
+        ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
+        ctx.globalAlpha = 1;
+      } else if (r.isPlayer) {
+        ctx.fillStyle = "rgba(0, 136, 255, 0.28)";
+        ctx.fillRect(x + 2, ry, w - 4, rowH - 2);
+      }
+      const ty = ry + 14;
+      const timed = Number.isFinite(r.best);
+      text(ctx, timed ? String(k + 1).padStart(2, " ") : " -", x + 10, ty, { size: 9, color: k === 0 && timed ? "#ffd400" : "#fff" });
+      ctx.fillStyle = r.color;
+      ctx.fillRect(x + 40, ry + 4, 4, rowH - 8);
+      text(ctx, r.code, x + 52, ty, { size: 9, color: r.isPlayer ? "#6fd3ff" : "#e8ecf4" });
+      text(ctx, r.status, x + 112, ty, { size: 7, color: r.status === "GARAGE" ? "#55606f" : r.status === "DONE" ? "#8a95a8" : "#22e36b" });
+      let t;
+      let col = "#c9d2e3";
+      if (r.flash) {
+        t = r.flashValid ? fmtLap(r.flashTime * 1000) : "DELETED";
+        col = r.flash;
+      } else if (!timed) t = "NO TIME";
+      else if (k === 0 || !pole) {
+        t = fmtLap(r.best * 1000);
+        col = "#ffd400";
+      } else t = `+${(r.best - pole).toFixed(3)}`;
+      text(ctx, t, x + w - 12, ry + 15, { font: BODY, size: 17, color: col, align: "right" });
+    });
   });
 }
 

@@ -162,6 +162,108 @@ describe("Ghost Lap race simulation", () => {
     assert.equal(p.lapValid, false);
   });
 
+  it("ERS can't harvest while it's deploying (throttle and brake together)", () => {
+    const race = createRace({ track, mode: "trial", seed: 5 });
+    const p = race.player;
+    p.battery = 0.5;
+    for (let k = 0; k < 120; k++) stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
+    const before = p.battery;
+    for (let k = 0; k < 60; k++) stepRace(race, { throttle: 1, brake: 1, steer: 0, ers: true }, 1 / 120);
+    assert.ok(p.battery <= before + 1e-9, `battery went ${before} -> ${p.battery}`);
+  });
+
+  it("an offence running over the finish line deletes the lap it helped, not the next one", () => {
+    const race = createRace({ track, mode: "gp", laps: 5, seed: 4 });
+    const p = race.player;
+    race.cars = [p];
+    race.order = [p];
+    run(race, race.lightsOutAt + 0.2, false);
+    // Flying toward the line, well past the kerb at racing speed, on lap 2
+    p.laps = 1;
+    p.lapStart = race.t - 40;
+    p.lapValid = true;
+    p.sector = 2;
+    const put = (i, d) => {
+      p.x = track.path[i][0] + track.nor[i][0] * d;
+      p.y = track.path[i][1] + track.nor[i][1] * d;
+      p.heading = Math.atan2(track.tan[i][1], track.tan[i][0]);
+      p.vx = Math.cos(p.heading) * 700;
+      p.vy = Math.sin(p.heading) * 700;
+    };
+    // (only the position is set each step; the game tracks the index, so it sees the line crossing)
+    p.idx = track.n - 31;
+    const off = halfAt(track, track.n - 30) + LIMITS.margin + 12;
+    for (let k = 0; k < 60; k++) {
+      put((track.n - 30 + k) % track.n, off);
+      stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
+    }
+    assert.equal(p.laps, 2, "crossed the line");
+    assert.equal(p.lapTimes.at(-1).valid, false, "the lap that ended off the track is deleted");
+    // Back on the road with its speed: a strike, but the new lap is untouched
+    put(40, 0);
+    stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
+    assert.equal(p.strikes, 1);
+    assert.equal(p.lapValid, true, "the new lap stays valid");
+  });
+
+  it("reversing back over the line and driving over it again doesn't count as a lap", () => {
+    const race = createRace({ track, mode: "gp", laps: 5, seed: 4 });
+    const p = race.player;
+    race.cars = [p];
+    race.order = [p];
+    run(race, race.lightsOutAt + 0.3, false);
+    const put = (i) => {
+      p.x = track.path[i][0];
+      p.y = track.path[i][1];
+      p.heading = Math.atan2(track.tan[i][1], track.tan[i][0]);
+    };
+    const drive = (from, to, dir) => {
+      for (let i = from; i !== to; ) {
+        i = (i + dir + track.n) % track.n;
+        put(i);
+        stepRace(race, { throttle: 0, brake: 0, steer: 0 }, 1 / 120);
+      }
+    };
+    p.idx = track.n - 10;
+    put(track.n - 10);
+    drive(track.n - 10, 10, 1); // over the line: the lap starts
+    assert.equal(p.laps, 0);
+    for (let k = 0; k < 3; k++) {
+      drive(10, track.n - 10, -1); // back over it
+      drive(track.n - 10, 10, 1); // and forward again
+    }
+    assert.equal(p.laps, 0, "no laps farmed");
+    assert.equal(p.lapTimes.length, 0);
+    // A real lap still counts
+    drive(10, track.n - 10, 1);
+    drive(track.n - 10, 10, 1);
+    assert.equal(p.laps, 1);
+  });
+
+  it("contact with the player is reported with the player's car", () => {
+    const race = createRace({ track, mode: "duel", laps: 3, seed: 2 });
+    run(race, race.lightsOutAt + 1);
+    const [a, b] = race.cars;
+    const i = a.idx;
+    const h = Math.atan2(track.tan[i][1], track.tan[i][0]);
+    for (const [c, back, v] of [[a, 0, 200], [b, 3, 500]]) {
+      const k = (i - back + track.n) % track.n;
+      c.x = track.path[k][0];
+      c.y = track.path[k][1];
+      c.heading = h;
+      c.vx = Math.cos(h) * v;
+      c.vy = Math.sin(h) * v;
+    }
+    const events = [];
+    for (let k = 0; k < 30; k++) {
+      stepRace(race, { throttle: 1, brake: 0, steer: 0 }, 1 / 120);
+      events.push(...race.events);
+    }
+    const hit = events.find((e) => e.type === "contact");
+    assert.ok(hit, "contact reported");
+    assert.equal(hit.car, race.player.id);
+  });
+
   it("ERS harvests under braking, deploys for more pace, and locks while DRS is open", () => {
     const race = createRace({ track, mode: "trial", seed: 5 });
     const p = race.player;

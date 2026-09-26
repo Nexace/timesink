@@ -283,23 +283,25 @@
   pointer-events: none;
   contain: strict;
   background: url("/assets/cosmos-highway.jpg") center / cover no-repeat var(--bg);
+  /* richer colour: the picture sits under several darkening layers */
+  filter: saturate(1.35) contrast(1.06);
 }
 
 .cosmos__warm {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(900px 420px at 50% 6%, rgba(255, 85, 0, 0.12), transparent 65%),
-    radial-gradient(700px 380px at 82% 22%, rgba(255, 0, 127, 0.1), transparent 65%),
-    radial-gradient(800px 500px at 12% 68%, rgba(255, 183, 0, 0.06), transparent 65%);
+    radial-gradient(900px 420px at 50% 6%, rgba(255, 85, 0, 0.18), transparent 65%),
+    radial-gradient(700px 380px at 82% 22%, rgba(255, 0, 127, 0.16), transparent 65%),
+    radial-gradient(800px 500px at 12% 68%, rgba(255, 183, 0, 0.1), transparent 65%);
 }
 
 .cosmos__scrim {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to bottom, rgba(3, 3, 8, 0.5) 0%, rgba(3, 3, 8, 0.45) 30%, rgba(3, 3, 8, 0.65) 60%, rgba(3, 3, 8, 0.94) 100%),
-    radial-gradient(130% 90% at 50% 42%, transparent 40%, rgba(3, 3, 8, 0.65) 100%);
+    linear-gradient(to bottom, rgba(3, 3, 8, 0.3) 0%, rgba(3, 3, 8, 0.26) 30%, rgba(3, 3, 8, 0.5) 60%, rgba(3, 3, 8, 0.88) 100%),
+    radial-gradient(130% 90% at 50% 42%, transparent 45%, rgba(3, 3, 8, 0.5) 100%);
 }
 
 .cosmos__grain {
@@ -319,7 +321,7 @@
     to bottom,
     transparent 0px,
     transparent 2px,
-    rgba(0, 0, 0, 0.12) 3px
+    rgba(0, 0, 0, 0.08) 3px
   );
 }
 
@@ -337,7 +339,7 @@ html.crt-full .crt-overlay {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at center, transparent 58%, rgba(0, 0, 0, 0.5));
+  background: radial-gradient(ellipse at center, transparent 62%, rgba(0, 0, 0, 0.35));
 }
 
 html:not(.crt-lite):not(.crt-full):not(.crt-on) .crt-overlay,

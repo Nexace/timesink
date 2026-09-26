@@ -2,9 +2,10 @@
 //
 // A game registers its touch controls once:
 //   enableTouchLayout({ id: "ghost-lap", frame, items: [...buttons] })
-// On a touch screen a "MOVE CONTROLS" button appears in the stage bar. It switches the controls into
-// an edit mode where each button / joystick can be dragged anywhere inside `frame`, resized with the
-// size buttons, or reset to the game's own layout. The layout is saved per game (positions are
+// On a touch screen a "MOVE & RESIZE" button appears in the stage bar. It switches the controls into
+// an edit mode where each button / joystick can be dragged anywhere inside `frame` and resized: tap a
+// control to select it and the size buttons resize just that one (with nothing selected they resize
+// them all), or reset everything to the game's own layout. The layout is saved per game (positions are
 // fractions of the frame, so it survives rotation and resizing).
 //
 // Items keep their own event handlers. While editing, a capture listener on the frame swallows the
@@ -19,10 +20,14 @@ const STORE = (id) => `timesink:touch-layout:${id}${layoutMode()}`;
 let currentMode = null;
 const MIN_SCALE = 0.7;
 const MAX_SCALE = 1.6;
+// One control's own size, on top of the overall scale
+const MIN_SIZE = 0.6;
+const MAX_SIZE = 2;
 const layouts = [];
 let editing = false;
 let toolbar = null;
 let toggleBtn = null;
+let selected = null; // { entry, it } being resized on its own
 
 const load = (id) => {
   try {
@@ -86,6 +91,7 @@ function apply(entry) {
   for (const it of entry.items) {
     const p = s?.pos[it.key];
     const st = it.el.style;
+    const k = (s?.scale || 1) * (s?.size?.[it.key] || 1);
     if (p) {
       st.position = "absolute";
       st.left = `${p[0] * 100}%`;
@@ -93,10 +99,10 @@ function apply(entry) {
       st.right = "auto";
       st.bottom = "auto";
       st.margin = "0";
-      st.transform = `translate(-50%, -50%) scale(${s.scale || 1})`;
+      st.transform = `translate(-50%, -50%) scale(${k})`;
     } else {
-      for (const k of ["position", "left", "top", "right", "bottom", "margin", "transform"]) st[k] = "";
-      if (s?.scale && s.scale !== 1) st.transform = `scale(${s.scale})`;
+      for (const prop of ["position", "left", "top", "right", "bottom", "margin", "transform"]) st[prop] = "";
+      if (k !== 1) st.transform = `scale(${k})`;
     }
   }
 }
@@ -112,7 +118,7 @@ function freeze(entry) {
     if (!r.width) continue;
     pos[it.key] = [(r.left + r.width / 2 - f.left) / f.width, (r.top + r.height / 2 - f.top) / f.height];
   }
-  entry.state = { pos, scale };
+  entry.state = { pos, scale, size: entry.state?.size || {} };
 }
 
 function guard(entry) {
@@ -138,12 +144,15 @@ function guard(entry) {
       const f = entry.frame.getBoundingClientRect();
       const r = el.getBoundingClientRect();
       const grab = [e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)];
+      let moved = 0;
       el.classList.add("is-dragging");
       el.setPointerCapture?.(e.pointerId);
       const move = (ev) => {
         if (ev.pointerId !== e.pointerId) return;
         ev.preventDefault();
         ev.stopPropagation();
+        moved = Math.max(moved, Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY));
+        if (moved < 6) return;
         // Keep the whole control inside the frame
         const hw = r.width / 2 / f.width;
         const hh = r.height / 2 / f.height;
@@ -158,6 +167,8 @@ function guard(entry) {
         el.removeEventListener("pointermove", move, true);
         el.removeEventListener("pointerup", end, true);
         el.removeEventListener("pointercancel", end, true);
+        // A tap (not a drag) selects the control, so the size buttons resize just that one
+        if (moved < 6 && ev.type === "pointerup") select(selected?.it === it ? null : { entry, it });
         save(entry.id, entry.state);
       };
       el.addEventListener("pointermove", move, true);
@@ -168,6 +179,25 @@ function guard(entry) {
   );
 }
 
+function select(sel) {
+  selected?.it.el.classList.remove("is-selected");
+  selected = sel;
+  selected?.it.el.classList.add("is-selected");
+  updateSizeLabel();
+}
+
+function updateSizeLabel() {
+  const out = toolbar?.querySelector("[data-tl-size]");
+  if (!out) return;
+  if (selected) {
+    const s = selected.entry.state;
+    out.textContent = `THIS ONE ${Math.round((s?.scale || 1) * (s?.size?.[selected.it.key] || 1) * 100)}%`;
+  } else {
+    const s = layouts[0]?.state;
+    out.textContent = `ALL ${Math.round((s?.scale || 1) * 100)}%`;
+  }
+}
+
 function setEditing(on) {
   editing = on;
   document.documentElement.classList.toggle("touch-layout-editing", on);
@@ -175,10 +205,13 @@ function setEditing(on) {
   window.dispatchEvent(new Event("blur"));
   if (toggleBtn) {
     toggleBtn.setAttribute("aria-pressed", String(on));
-    toggleBtn.textContent = on ? "✓ DONE" : "✥ MOVE CONTROLS";
+    toggleBtn.textContent = on ? "✓ DONE" : "✥ MOVE & RESIZE";
   }
   if (on) showToolbar();
-  else toolbar?.remove();
+  else {
+    select(null);
+    toolbar?.remove();
+  }
 }
 
 function showToolbar() {
@@ -188,9 +221,10 @@ function showToolbar() {
   toolbar.setAttribute("role", "toolbar");
   toolbar.setAttribute("aria-label", "Move controls");
   toolbar.innerHTML = `
-    <span class="touch-layout-bar__hint">Drag the controls where you want them</span>
-    <button type="button" data-tl="smaller" aria-label="Smaller controls">A−</button>
-    <button type="button" data-tl="bigger" aria-label="Bigger controls">A+</button>
+    <span class="touch-layout-bar__hint">Drag a control to move it • tap one, then - / + to resize just that one</span>
+    <button type="button" data-tl="smaller" aria-label="Smaller">-</button>
+    <output class="touch-layout-bar__size" data-tl-size aria-live="polite"></output>
+    <button type="button" data-tl="bigger" aria-label="Bigger">+</button>
     <button type="button" data-tl="reset">RESET</button>
     <button type="button" data-tl="done" class="is-primary">DONE</button>`;
   toolbar.addEventListener("click", (e) => {
@@ -198,19 +232,33 @@ function showToolbar() {
     if (!b) return;
     const act = b.dataset.tl;
     if (act === "done") return setEditing(false);
+    const step = act === "bigger" ? 0.1 : -0.1;
+    if (act !== "reset" && selected) {
+      // Just the selected control
+      const entry = selected.entry;
+      if (!entry.state) freeze(entry);
+      const size = entry.state.size || (entry.state.size = {});
+      size[selected.it.key] = clamp(Math.round(((size[selected.it.key] || 1) + step) * 10) / 10, MIN_SIZE, MAX_SIZE);
+      save(entry.id, entry.state);
+      apply(entry);
+      return updateSizeLabel();
+    }
+    if (act === "reset") select(null);
     for (const entry of layouts) {
       if (act === "reset") {
         entry.state = null;
         save(entry.id, null);
       } else {
         if (!entry.state) freeze(entry);
-        entry.state.scale = clamp((entry.state.scale || 1) + (act === "bigger" ? 0.1 : -0.1), MIN_SCALE, MAX_SCALE);
+        entry.state.scale = clamp(Math.round(((entry.state.scale || 1) + step) * 10) / 10, MIN_SCALE, MAX_SCALE);
         save(entry.id, entry.state);
       }
       apply(entry);
     }
+    updateSizeLabel();
   });
   (document.fullscreenElement || document.body).append(toolbar);
+  updateSizeLabel();
 }
 
 function addToggle() {
@@ -220,7 +268,7 @@ function addToggle() {
   toggleBtn.className = "hbtn hbtn--touch-layout";
   toggleBtn.dataset.touchLayoutBtn = "";
   toggleBtn.setAttribute("aria-pressed", "false");
-  toggleBtn.textContent = "✥ MOVE CONTROLS";
+  toggleBtn.textContent = "✥ MOVE & RESIZE";
   toggleBtn.addEventListener("click", () => setEditing(!editing));
   const place = () => {
     const meta = document.querySelector(".stage-bar__meta");

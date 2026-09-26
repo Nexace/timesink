@@ -404,7 +404,7 @@ window.addEventListener("keyup", (e) => {
 });
 window.addEventListener("blur", () => Object.keys(keys).forEach((k) => (keys[k] = false)));
 
-// Touch pad (the player can move and resize the buttons: MOVE CONTROLS in the stage bar)
+// Touch pad (the player can move and resize the buttons: MOVE & RESIZE in the stage bar)
 enableTouchLayout({ id: "ghost-lap", frame: $("touch-pad"), items: [...document.querySelectorAll("#touch-pad [data-key]")].map((b) => ((b.dataset.touchId = b.dataset.key), b)) });
 // Touch buttons press the same inputs as the keys. BRK is the S key: it brakes, and held at a
 // standstill it drives backwards.

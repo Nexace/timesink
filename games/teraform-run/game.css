@@ -370,7 +370,7 @@ main.wrap.stage-page {
   }
 }
 
-/* ── Touch buttons: two big round buttons at the bottom corners (movable via MOVE CONTROLS) ── */
+/* ── Touch buttons: two big round buttons at the bottom corners (movable via MOVE & RESIZE) ── */
 .tr-touch {
   position: absolute;
   inset: 0;

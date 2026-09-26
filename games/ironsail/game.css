@@ -29,7 +29,7 @@ main.wrap.stage-page {
   outline: none;
 }
 
-/* Touch buttons (steer by holding a finger on the sea; the buttons are movable via MOVE CONTROLS) */
+/* Touch buttons (steer by holding a finger on the sea; the buttons are movable via MOVE & RESIZE) */
 .is-touch {
   display: none;
 }

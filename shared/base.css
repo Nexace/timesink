@@ -304,6 +304,12 @@ h4 {
     display: none;
   }
 }
+/* Tablets and small laptops (an iPad is 1180 px wide in landscape): the games count goes too */
+@media (max-width: 1279px) and (min-width: 861px) {
+  .shell__telemetry .tele:has([data-tele-games]) {
+    display: none;
+  }
+}
 
 .hbtn {
   display: inline-flex;
@@ -1717,6 +1723,11 @@ html.touch-layout-editing [data-touch-move] {
   visibility: visible !important;
   pointer-events: auto !important;
 }
+html.touch-layout-editing [data-touch-move].is-selected {
+  outline: 3px solid #00f0ff;
+  outline-offset: 4px;
+  box-shadow: 0 0 18px rgba(0, 240, 255, 0.6);
+}
 html.touch-layout-editing [data-touch-move].is-dragging {
   outline-style: solid;
   cursor: grabbing;
@@ -1761,6 +1772,12 @@ html.touch-layout-editing .arcade-touch-controls {
   background: #121a2c;
   border: 1px solid #3a4a6a;
   cursor: pointer;
+}
+.touch-layout-bar__size {
+  min-width: 96px;
+  text-align: center;
+  font-size: 8px;
+  color: #00f0ff;
 }
 .touch-layout-bar button.is-primary {
   color: #04101c;
@@ -1936,7 +1953,7 @@ main.wrap.wrap:fullscreen::backdrop {
     gap: 8px;
     min-height: var(--header-h);
     padding: 6px 10px;
-    background: rgba(7, 10, 17, 0.94);
+    background: rgb(7, 10, 17);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -2004,6 +2021,11 @@ main.wrap.wrap:fullscreen::backdrop {
   *::after {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
+  }
+  /* Without the blur the header needs a solid background, or the page shows through it as it
+     scrolls underneath (iPad: the header stays stuck to the top) */
+  .shell {
+    background: rgb(7, 10, 17);
   }
   .stage-bar {
     background: rgba(7, 10, 17, 0.9);

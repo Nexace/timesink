@@ -36,7 +36,7 @@ body[data-page="game"] main.wrap.stage-page {
   outline: none;
 }
 
-/* Touch buttons over the arena (movable: MOVE CONTROLS in the stage bar) */
+/* Touch buttons over the arena (movable: MOVE & RESIZE in the stage bar) */
 .hb-touch {
   display: none;
 }

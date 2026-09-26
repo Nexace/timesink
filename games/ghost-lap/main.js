@@ -7,7 +7,7 @@ import { CIRCUITS } from "./circuits.js";
 import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP, MIN_CARS, MAX_CARS, DEFAULT_CARS, halfAt } from "./race.js";
 import { createWorld, drawCar, createMinimap, worldTransform } from "./render.js";
 import { drawHud, fmtLap, fmtSec } from "./hud.js";
-import { enableTouchLayout } from "/shared/touchlayout.js";
+import { enableTouchLayout, isTouchScreen } from "/shared/touchlayout.js";
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -233,7 +233,7 @@ function updateControlsHint() {
     [`${keyLabel("left")} ${keyLabel("right")}`, "STEER"],
     [keyLabel("drs"), "DRS"],
     [keyLabel("ers"), "ERS"],
-    [keyLabel("drift"), "HANDBRAKE"],
+    [keyLabel("drift"), "HANDBRAKE • REVS ON THE GRID"],
     ["ESC", "PAUSE"],
     [keyLabel("restart"), "RESTART"]
   ]
@@ -424,6 +424,12 @@ document.querySelectorAll("#touch-pad [data-key]").forEach((btn) => {
 // Throttle builds up at a rate set by the acceleration sensitivity, and a traction limiter caps it at
 // low speed (lifting as the car gathers pace), so launches and slow-corner exits don't light up the rears.
 let throttleLevel = 0;
+// On the grid, holding the handbrake key (Space) or the brake (S / the BRK touch button: the clutch, as
+// the car can't move yet) builds revs; they carry into the launch, and a key still held at lights out
+// doesn't pull the handbrake or brake until it's let go
+let gridRev = 0;
+let spaceFromGrid = false;
+let brakeFromGrid = false;
 // No rolling starts: throttle held on the grid is ignored, and if it's still held when the lights go
 // out it stays dead until released and pressed again.
 let gridLock = false;
@@ -435,17 +441,28 @@ function playerInput(dt = 1 / 120) {
   const steer = ((keys.right ? 1 : 0) - (keys.left ? 1 : 0)) * Math.min(1, sens);
   if (session?.race.phase === "lights") {
     throttleLevel = 0;
+    const revving = keys.drift || keys.down;
+    gridRev = revving ? Math.min(1, gridRev + 1.8 * dt) : Math.max(0, gridRev - 3 * dt);
+    spaceFromGrid = keys.drift;
+    brakeFromGrid = keys.down;
     if (keys.up) {
       gridLock = true;
       if (!gridWarned) {
         gridWarned = true;
         sfx.deny();
-        banner("HOLD IT!", "WAIT FOR LIGHTS OUT", "#ff9a3c", 1.6, 16);
+        banner("HOLD IT!", `WAIT FOR LIGHTS OUT • HOLD ${isTouchScreen() ? "BRK" : keyLabel("drift")} TO BUILD REVS`, "#ff9a3c", 1.6, 16);
       }
     }
     // The car can't move yet; the throttle only revs the engine on the grid
-    return { throttle: keys.up ? 1 : 0, ers: false, brake: 0, steer: 0, handbrake: false, drs: false, brakeMult: 1, steerRate: 7 };
+    return { throttle: Math.max(keys.up ? 1 : 0, gridRev), ers: false, brake: 0, steer: 0, handbrake: false, drs: false, brakeMult: 1, steerRate: 7 };
   }
+  // Lights out: the revs built on the grid carry straight into the launch
+  if (gridRev > 0) {
+    throttleLevel = Math.max(throttleLevel, gridRev);
+    gridRev = 0;
+  }
+  if (spaceFromGrid && !keys.drift) spaceFromGrid = false;
+  if (brakeFromGrid && !keys.down) brakeFromGrid = false;
   if (gridLock) {
     if (keys.up) {
       if (!lockShown) {
@@ -462,9 +479,9 @@ function playerInput(dt = 1 / 120) {
   return {
     throttle: throttleLevel * traction,
     ers: keys.ers,
-    brake: keys.down ? 1 : 0,
+    brake: keys.down && !brakeFromGrid ? 1 : 0,
     steer,
-    handbrake: keys.drift,
+    handbrake: keys.drift && !spaceFromGrid,
     drs: keys.drs,
     brakeMult: settings.brakeForce / 100,
     steerRate: 7 * Math.max(1, sens)
@@ -617,6 +634,9 @@ function drawFx(fx, view) {
 // ==========================================
 function startRace(config) {
   throttleLevel = 0;
+  gridRev = 0;
+  spaceFromGrid = false;
+  brakeFromGrid = false;
   gridLock = false;
   gridWarned = false;
   lockShown = false;

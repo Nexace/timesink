@@ -109,6 +109,30 @@ export const DRIVERS = [
   { name: "M. CASTELLI", code: "CAS", color: "#c1121f", accent: "#fdf0d5" },
   { name: "T. WREN", code: "WRE", color: "#80ed99", accent: "#22577a" }
 ];
+// Engine: a Formula 1 V8 (2006-2013): idles ~4,200 rpm, revs to 18,000; 8 gears over the speed range
+export const V8 = { idle: 4200, upshift: 11800, limiter: 18000 };
+const GEAR_SPAN = CAR.top / 7.6; // same gearing the HUD shows
+const TOP_GEAR = 8;
+
+/** The gear a car is in at forward speed `fwd` (0 = neutral on the grid, -1 = reverse). */
+export function engineGear(fwd) {
+  if (fwd < -5) return -1;
+  if (fwd < 8) return 0;
+  return Math.min(TOP_GEAR, 1 + Math.floor(fwd / GEAR_SPAN));
+}
+
+/** Engine speed (rpm) at forward speed `fwd`: each gear sweeps up to the limiter, then drops on the upshift. */
+export function engineRpm(fwd, throttle = 0) {
+  const gear = engineGear(fwd);
+  if (gear <= 0) return V8.idle + Math.max(0, Math.min(1, throttle)) * (V8.limiter - V8.idle) * (gear < 0 ? 0.4 : 1);
+  const from = (gear - 1) * GEAR_SPAN;
+  // Top gear is long: near the limiter at the car's top speed, on it with DRS or a tow
+  const span = gear === TOP_GEAR ? CAR.top * 1.012 - from : GEAR_SPAN;
+  const frac = Math.max(0, Math.min(1, (fwd - from) / span));
+  const low = gear === 1 ? V8.idle : V8.upshift;
+  return low + frac * (V8.limiter - low);
+}
+
 // Grand Prix field size: from a 3-car sprint to a 30-car scramble (20 is a real F1 grid)
 export const MIN_CARS = 3;
 export const MAX_CARS = 30;

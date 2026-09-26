@@ -46,6 +46,12 @@ function getAudioContext() {
   return audioCtx;
 }
 
+/** The shared AudioContext (null until the player has interacted with the page), for games that
+ * build their own sound graphs on the same context the cabinet controls suspend and resume. */
+export function getSharedAudioContext() {
+  return getAudioContext();
+}
+
 // Audio must never be able to crash a game loop: every helper validates its inputs and swallows
 // WebAudio errors. playTone also accepts the (freq, type, duration, gain) order used by some callers.
 function finite(v, fallback) {

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, project, aiInput, DIRTY_AIR, BRAKES, brakeEfficiency, DRS_GAP, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap, MIN_CARS, MAX_CARS, halfAt, STRAIGHT_WIDTH } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, project, aiInput, DIRTY_AIR, BRAKES, brakeEfficiency, DRS_GAP, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap, MIN_CARS, MAX_CARS, halfAt, STRAIGHT_WIDTH, V8, engineGear, engineRpm } from "./race.js";
 
 const track = buildTrack({ key: "monza", name: "Monza", pts: CIRCUITS.monza.pts, lengthM: CIRCUITS.monza.lengthM, theme: "park" });
 
@@ -238,6 +238,30 @@ describe("Ghost Lap race simulation", () => {
     drive(10, track.n - 10, 1);
     drive(track.n - 10, 10, 1);
     assert.equal(p.laps, 1);
+  });
+
+  it("V8 engine: 8 gears, each pulling up to the limiter, revs dropping on every upshift", () => {
+    assert.equal(engineGear(0), 0);
+    assert.equal(engineGear(-40), -1);
+    assert.equal(engineRpm(0, 1), V8.limiter, "revving on the grid hits the limiter");
+    assert.equal(engineRpm(0, 0), V8.idle);
+    let prev = null;
+    let upshifts = 0;
+    for (let v = 10; v <= CAR.top * 1.25; v += 2) {
+      const g = engineGear(v);
+      const rpm = engineRpm(v, 1);
+      assert.ok(rpm >= V8.idle && rpm <= V8.limiter, `rpm ${rpm} at ${v}`);
+      if (prev && g === prev.g) assert.ok(rpm >= prev.rpm, "revs rise within a gear");
+      if (prev && g > prev.g) {
+        upshifts++;
+        assert.ok(rpm < prev.rpm - 3000, `upshift ${prev.g}->${g} drops the revs`);
+      }
+      prev = { g, rpm };
+    }
+    assert.equal(upshifts, 7);
+    assert.equal(prev.g, 8);
+    const atTop = engineRpm(CAR.top, 1);
+    assert.ok(atTop > 16500 && atTop < V8.limiter, `near the limiter at top speed: ${atTop}`);
   });
 
   it("contact with the player is reported with the player's car", () => {

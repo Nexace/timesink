@@ -1,7 +1,7 @@
 import { initShell, escapeHtml, toast } from "/shared/shell.js";
 import { sfx } from "/shared/sound.js";
 import { saveScore } from "/shared/scores.js";
-import { setEngineHum } from "/shared/audio.js";
+import { updateEngines, stopEngines } from "./engine.js";
 import { vignette, glow } from "/shared/gfx.js";
 import { CIRCUITS } from "./circuits.js";
 import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP, MIN_CARS, MAX_CARS, DEFAULT_CARS, halfAt } from "./race.js";
@@ -858,7 +858,7 @@ function ghostDelta(s, lapT, dist) {
 function pauseRace() {
   if (!session || session.paused) return;
   session.paused = true;
-  setEngineHum(false);
+  stopEngines();
   sfx.click();
   overlay.hidden = false;
   overlay.innerHTML = `
@@ -910,7 +910,7 @@ function syncQualiSubmit() {
 function finishSession(retired = false) {
   const s = session;
   const race = s.race;
-  setEngineHum(false);
+  stopEngines();
   if (s.config.stage === "quali") return showQualifying();
   if (race.mode === "trial") return goHome();
   const rows = classify(race);
@@ -1106,7 +1106,7 @@ function statsLine() {
 }
 
 function goHome() {
-  setEngineHum(false);
+  stopEngines();
   session = null;
   screen = "home";
   if (!demo) demo = makeDemo();
@@ -1585,7 +1585,7 @@ function frame(now) {
     const c = race.player;
     if (race.mode === "trial" && s.ghost && c.laps >= 0) s.delta = ghostDelta(s, race.t - c.lapStart, c.total - c.laps * race.track.L);
     else s.delta = null;
-    setEngineHum(true, { throttle: Math.max(0, c.fwd) / CAR.top * 1.4 + c.throttle * 0.3, baseFreq: 58 });
+    updateEngines(race, c, s.cam, dt);
     if (s.endAt && now > s.endAt) {
       s.endAt = 0;
       finishSession(false);

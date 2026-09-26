@@ -1,5 +1,5 @@
 // Ghost Lap broadcast-style HUD, drawn in screen space on the race canvas.
-import { KMH, CAR, ERS, LIMITS, BRAKES } from "./race.js";
+import { KMH, CAR, ERS, LIMITS, BRAKES, engineGear } from "./race.js";
 
 const DISPLAY = "'Press Start 2P', monospace";
 const BODY = "'VT323', 'Share Tech Mono', monospace";
@@ -199,7 +199,8 @@ function speedPanel(ctx, car, x, y, drsState, now = 0) {
   const kmh = Math.max(0, Math.round(car.fwd * KMH));
   text(ctx, String(kmh).padStart(3, "0"), x + 16, y + 58, { size: 34, color: "#ffffff" });
   text(ctx, "KM/H", x + 150, y + 58, { size: 10, color: "#8fb4ff" });
-  const gear = car.fwd < -5 ? "R" : car.fwd < 8 ? "N" : String(Math.min(8, 1 + Math.floor((car.fwd / CAR.top) * 7.6)));
+  const g = engineGear(car.fwd); // the same gear the engine sound is in
+  const gear = g < 0 ? "R" : g === 0 ? "N" : String(g);
   text(ctx, gear, x + 258, y + 58, { size: 30, color: "#ffd400", align: "center" });
   text(ctx, "GEAR", x + 258, y + 76, { size: 7, color: "#6c7a96", align: "center" });
   // Rev lights: green → red → blue at the limiter

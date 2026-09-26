@@ -3,7 +3,10 @@
 import { fitCircuit, cornerRadii, resampleClosed } from "./circuits.js";
 import { RACING_LINES } from "./lines.js";
 
-export const PX_PER_M = 3.3; // world pixels per real metre of circuit length
+// Circuits are drawn 1.35x bigger than the original 3.3 px/m against the same car and road size,
+// so a 20-car field has room to spread out and corners are closer to real proportions
+export const WORLD_SCALE = 1.35;
+export const PX_PER_M = 3.3 * WORLD_SCALE; // world pixels per real metre of circuit length
 export const TRACK_WIDTH = 148;
 // The world runs a little slower than real life on these wider roads; the speedo still reads F1
 // numbers (700 px/s flat out ≈ 330 km/h).
@@ -91,8 +94,22 @@ export const DRIVERS = [
   { name: "V. PETROV", code: "PET", color: "#8d99ae", accent: "#e63946" },
   { name: "Y. NAKAMURA", code: "NAK", color: "#e5383b", accent: "#f5f3f4" },
   { name: "G. FERRARO", code: "FER", color: "#b5179e", accent: "#4cc9f0" },
-  { name: "O. HALVORSEN", code: "HAL", color: "#06d6a0", accent: "#073b4c" }
+  { name: "O. HALVORSEN", code: "HAL", color: "#06d6a0", accent: "#073b4c" },
+  { name: "B. ACHTERBERG", code: "ACH", color: "#f77f00", accent: "#003049" },
+  { name: "F. QUINTERO", code: "QUI", color: "#fcbf49", accent: "#6a040f" },
+  { name: "W. DRUMMOND", code: "DRU", color: "#4361ee", accent: "#f8f9fa" },
+  { name: "Z. HADDAD", code: "HAD", color: "#2d6a4f", accent: "#ffd166" },
+  { name: "U. SVENSSON", code: "SVE", color: "#48cae4", accent: "#03045e" },
+  { name: "Q. MBEKI", code: "MBE", color: "#9d0208", accent: "#ffba08" },
+  { name: "X. LAURENT", code: "LAU", color: "#adb5bd", accent: "#7209b7" },
+  { name: "J. KAPOOR", code: "KAP", color: "#ff9f1c", accent: "#2ec4b6" },
+  { name: "M. CASTELLI", code: "CAS", color: "#c1121f", accent: "#fdf0d5" },
+  { name: "T. WREN", code: "WRE", color: "#80ed99", accent: "#22577a" }
 ];
+// Grand Prix field size: from a 3-car sprint to a 30-car scramble (20 is a real F1 grid)
+export const MIN_CARS = 3;
+export const MAX_CARS = 30;
+export const DEFAULT_CARS = 20;
 // ERS: the battery (0–1) charges under braking and deploys for extra shove. Use it whenever there's
 // charge (not with DRS open); every braking zone puts a chunk back, up to a cap on what one lap can
 // recover, so the strategy is where to spend what the brakes give you.
@@ -458,14 +475,96 @@ function closestOnBodies(A, B, HL) {
   ];
 }
 
+/**
+ * Where two parts of a circuit run side by side, a wall splits the ground between them (as on real
+ * tracks), so nobody can drive across onto the other section. The wall runs exactly halfway between
+ * the two centrelines. Returns { walls, divider }: walls[side][i] is the distance from the
+ * centreline to the wall on that side ([-normal, +normal]; `base`, the normal barrier, where no
+ * section is near) and divider[i] the wall's point beside point i (null where there is none).
+ * Crossings (a bridge) are left open.
+ */
+function sectionWalls(path, nor, n, base, w, crossover) {
+  const cell = 64;
+  const grid = new Map();
+  path.forEach((p, i) => {
+    const k = Math.floor(p[0] / cell) * 65536 + Math.floor(p[1] / cell);
+    const list = grid.get(k);
+    if (list) list.push(i);
+    else grid.set(k, [i]);
+  });
+  // Nearest point of ANOTHER section: one that is much further away going round the track than
+  // straight across (so the other side of a hairpin counts only well away from its apex)
+  const reach = 2 * base + 40;
+  const r = Math.ceil(reach / cell);
+  const near = new Int32Array(n).fill(-1);
+  const gap = new Float32Array(n).fill(Infinity);
+  for (let i = 0; i < n; i++) {
+    const [px, py] = path[i];
+    const cx = Math.floor(px / cell);
+    const cy = Math.floor(py / cell);
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (const j of grid.get((cx + dx) * 65536 + cy + dy) || []) {
+          const d = Math.hypot(path[j][0] - px, path[j][1] - py);
+          if (d >= gap[i] || d > reach) continue;
+          const arc = Math.min(Math.abs(j - i), n - Math.abs(j - i)) * STEP;
+          if (arc < 3 * d + base * 2) continue;
+          gap[i] = d;
+          near[i] = j;
+        }
+      }
+    }
+    if (crossover && gap[i] < w * 1.5) near[i] = -1;
+  }
+  const walls = [new Float32Array(n).fill(base), new Float32Array(n).fill(base)];
+  const divider = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    const j = near[i];
+    if (j < 0) continue;
+    const [px, py] = path[i];
+    const qx = path[j][0] - px;
+    const qy = path[j][1] - py;
+    const along = (qx * nor[i][0] + qy * nor[i][1]) / gap[i]; // how square-on the other section is
+    if (Math.abs(along) < 0.5) continue;
+    const side = along > 0 ? 1 : 0;
+    // Distance along the normal to the halfway line
+    const t = gap[i] / 2 / Math.abs(along);
+    if (t >= base) continue;
+    walls[side][i] = Math.max(w / 2 + 8, t - 8);
+    divider[i] = [px + qx / 2, py + qy / 2];
+  }
+  // Smooth the halfway line so it runs cleanly
+  const smooth = divider.map((d, i) => {
+    if (!d) return null;
+    let sx = 0;
+    let sy = 0;
+    let c = 0;
+    for (let k = -4; k <= 4; k++) {
+      const e = divider[(i + k + n) % n];
+      if (e && Math.hypot(e[0] - d[0], e[1] - d[1]) < 60) {
+        sx += e[0];
+        sy += e[1];
+        c++;
+      }
+    }
+    return [sx / c, sy / c];
+  });
+  return { walls, divider: smooth };
+}
+
 /** Build a raceable world track from a circuit definition { key, name, pts, lengthM, theme, night }. */
 export function buildTrack(def) {
   const probe = fitCircuit(def.pts, 1760, 800, 0, STEP);
-  const k = clamp((def.lengthM * PX_PER_M) / pathLength(probe), 3.2, 9);
+  const k = clamp((def.lengthM * PX_PER_M) / pathLength(probe), 3.2 * WORLD_SCALE, 9 * WORLD_SCALE);
   const margin = 520;
   const W = Math.round(1760 * k + margin * 2);
   const H = Math.round(800 * k + margin * 2);
-  const path = separateSections(fitCircuit(def.pts, W, H, margin, STEP), TRACK_WIDTH + 64, STEP, !!def.crossover);
+  let path = separateSections(fitCircuit(def.pts, W, H, margin, STEP), TRACK_WIDTH + 64, STEP, !!def.crossover);
+  // startM: move the start/finish line this far up the road, so the whole grid sits on the straight
+  if (def.startM) {
+    const shift = Math.round((def.startM / def.lengthM) * path.length);
+    path = path.slice(shift).concat(path.slice(0, shift));
+  }
   const n = path.length;
   const w = TRACK_WIDTH;
 
@@ -559,7 +658,7 @@ export function buildTrack(def) {
   }
   if (cur) runs.push(cur);
   const wanted = def.drs ?? 2;
-  const long = runs.filter((r) => r.len * STEP > 1000);
+  const long = runs.filter((r) => r.len * STEP > 1000 * WORLD_SCALE);
   // Distance (in points) from the end of a run forward to the start line: 0 if the run crosses it
   const toLine = (r) => {
     const end = r.from + r.len;
@@ -577,12 +676,12 @@ export function buildTrack(def) {
     .map((r) => {
       const from = (r.from + 12) % n;
       const to = (r.from + r.len - 6) % n;
-      return { from, to, detect: (from - Math.round(1400 / STEP) + n) % n };
+      return { from, to, detect: (from - Math.round((1400 * WORLD_SCALE) / STEP) + n) % n };
     });
 
   // Grid: staggered two-by-two behind the line
   const grid = [];
-  for (let s = 0; s < 20; s++) {
+  for (let s = 0; s < MAX_CARS; s++) {
     const i = (n - 5 - s * 7 + n * 2) % n;
     const side = s % 2 === 0 ? -1 : 1;
     const off = side * w * 0.22;
@@ -617,8 +716,10 @@ export function buildTrack(def) {
     drs,
     grid,
     width: w,
-    // Distance from the centreline where the car meets a wall / tyre barrier
+    // Distance from the centreline where the car meets a wall / tyre barrier, and per point and
+    // side ([-normal, +normal]) where a wall between close sections comes in nearer than that
     barrier: street ? w / 2 + 36 : w / 2 + 200,
+    ...sectionWalls(path, nor, n, street ? w / 2 + 36 : w / 2 + 200, w, !!def.crossover),
     sectors: [Math.floor(n / 3), Math.floor((2 * n) / 3)],
     loopEvery: 20
   };
@@ -959,8 +1060,9 @@ export function stepCar(car, input, track, dt, mods = {}) {
   car.d = pr.d;
   car.s = pr.s;
   let hit = false;
-  if (Math.abs(pr.d) > track.barrier) {
-    const over = Math.abs(pr.d) - track.barrier;
+  const wall = track.walls ? track.walls[pr.d > 0 ? 1 : 0][pr.i] : track.barrier;
+  if (Math.abs(pr.d) > wall) {
+    const over = Math.abs(pr.d) - wall;
     const nrm = track.nor[pr.i];
     const sgn = Math.sign(pr.d);
     car.x -= nrm[0] * sgn * over;
@@ -972,7 +1074,7 @@ export function stepCar(car, input, track, dt, mods = {}) {
     }
     car.vx *= 0.8;
     car.vy *= 0.8;
-    car.d = sgn * track.barrier;
+    car.d = sgn * wall;
     hit = true;
     car.wallHit = 0.3;
   }
@@ -1042,7 +1144,10 @@ export function aiInput(car, race, dt) {
   if (throttle > 0) {
     // Lift only when the tyres are actually saturated (sliding), not just because the car is turning
     throttle *= clamp(1 - car.sliding * 2.5, 0.3, 1);
-    if (edge > -24 && Math.sign(car.d) === Math.sign(car.d - wantD)) throttle *= clamp(1 - (edge + 24) / 30, 0.15, 1);
+    // (only while actually heading further out: a car off the road and pointing back on gets the power)
+    const nr = track.nor[car.idx];
+    const outward = (car.vx * nr[0] + car.vy * nr[1]) * Math.sign(car.d) > 0;
+    if (edge > -24 && outward && Math.sign(car.d) === Math.sign(car.d - wantD)) throttle *= clamp(1 - (edge + 24) / 30, 0.15, 1);
   }
   // Launch: full beans off the line, once the driver has reacted to the lights
   if (fwd < 60 && race.phase === "racing") throttle = race.t < (car.react || 0) ? 0 : 1;
@@ -1089,10 +1194,11 @@ function seededRand(seed) {
  * The AI drivers for a race, quickest first: [{ id, livery, skill }]. A Grand Prix field is spread
  * around the chosen difficulty (front-runners a touch quicker); a duel bot drives at exactly that level.
  */
-export function makeField({ mode, difficulty = "medium", seed = 1 }) {
+export function makeField({ mode, difficulty = "medium", seed = 1, cars = DEFAULT_CARS }) {
   const rand = seededRand(seed ^ 0x9e3779b9);
   const base = DIFFICULTY[difficulty] || DIFFICULTY.medium;
-  const count = mode === "gp" ? 19 : mode === "duel" ? 1 : mode === "demo" ? 10 : 0;
+  const gpCars = clamp(Math.round(cars) || DEFAULT_CARS, MIN_CARS, MAX_CARS);
+  const count = mode === "gp" ? gpCars - 1 : mode === "duel" ? 1 : mode === "demo" ? 10 : 0;
   const drivers = DRIVERS.slice();
   for (let k = drivers.length - 1; k > 0; k--) {
     const j = Math.floor(rand() * (k + 1));
@@ -1159,14 +1265,15 @@ export function qualifyingLap(track, skill, rand = Math.random) {
   return bestQualiLap(qualifyingRun(track, skill, rand));
 }
 
-export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1, grid = null, brakes = false }) {
+export function createRace({ track, mode, laps = 5, difficulty = "medium", seed = 1, grid = null, brakes = false, fieldSize = DEFAULT_CARS }) {
   const rand = seededRand(seed);
   const cars = [];
   // Grid order, front to back: "player" or a field entry. By default the player starts in the middle
   // of a GP grid, second in a duel, and alone in a time trial.
   if (!grid) {
-    const field = makeField({ mode, difficulty, seed });
-    const playerSlot = mode === "gp" ? 6 : mode === "duel" ? 1 : 0;
+    const field = makeField({ mode, difficulty, seed, cars: fieldSize });
+    // In a Grand Prix the player starts about a third of the way down the field (7th of 20)
+    const playerSlot = mode === "gp" ? Math.round((6 / 19) * field.length) : mode === "duel" ? 1 : 0;
     grid = mode === "demo" ? field : [...field.slice(0, playerSlot), "player", ...field.slice(playerSlot)];
   }
   grid.forEach((entry, k) => {
@@ -1194,6 +1301,11 @@ export function createRace({ track, mode, laps = 5, difficulty = "medium", seed 
     c.gapAhead = 0;
     c.gapLeader = 0;
   });
+  // Start lights: each of the five comes on after its own random gap, then they go out after an
+  // unpredictable hold (0.2 to 3 s), so a start can never be timed from memory
+  const lightTimes = [];
+  for (let k = 0, at = 0; k < 5; k++) lightTimes.push((at += 0.65 + rand() * 0.6));
+  const lightsOutAt = lightTimes[4] + 0.2 + rand() * 2.8;
   return {
     track,
     mode,
@@ -1205,7 +1317,8 @@ export function createRace({ track, mode, laps = 5, difficulty = "medium", seed 
     clock: 0,
     phase: mode === "trial" ? "racing" : "lights",
     lights: 0,
-    lightsOutAt: 4.6 + rand() * 1.1,
+    lightTimes,
+    lightsOutAt,
     reaction: null,
     brakes: !!brakes,
     drsLine: [],
@@ -1337,7 +1450,8 @@ export function stepRace(race, playerInput, dt) {
   race.clock += dt;
 
   if (race.phase === "lights") {
-    const lit = Math.min(5, Math.floor(race.clock / 0.85));
+    let lit = 0;
+    while (lit < 5 && race.clock >= race.lightTimes[lit]) lit++;
     if (lit !== race.lights) {
       race.lights = lit;
       emit(race, { type: "light", count: lit });

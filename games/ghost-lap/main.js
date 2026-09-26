@@ -4,7 +4,7 @@ import { saveScore } from "/shared/scores.js";
 import { setEngineHum } from "/shared/audio.js";
 import { vignette, glow } from "/shared/gfx.js";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP, MIN_CARS, MAX_CARS, DEFAULT_CARS } from "./race.js";
 import { createWorld, drawCar, createMinimap, worldTransform } from "./render.js";
 import { drawHud, fmtLap, fmtSec } from "./hud.js";
 import { enableTouchLayout } from "/shared/touchlayout.js";
@@ -104,7 +104,7 @@ function getTrack(key) {
   }
   const meta = CAL[key] || CAL.monza;
   const c = CIRCUITS[meta.key];
-  const track = buildTrack({ key: meta.key, name: `${meta.name} — ${meta.country}`, pts: c.pts, lengthM: c.lengthM, drs: c.drs, drsMain: c.drsMain, crossover: c.crossover, theme: meta.theme, night: meta.night });
+  const track = buildTrack({ key: meta.key, name: `${meta.name} — ${meta.country}`, pts: c.pts, lengthM: c.lengthM, drs: c.drs, drsMain: c.drsMain, crossover: c.crossover, startM: c.startM, theme: meta.theme, night: meta.night });
   const entry = { meta, track, world: createWorld(track), minimap: createMinimap(track, 250) };
   trackCache.set(key, entry);
   // Worlds hold their own tile caches; keep only a couple around
@@ -130,7 +130,9 @@ function save(key, value) {
 }
 const PREFS_KEY = "timesink:ghost-lap:prefs";
 const RECORDS_KEY = "timesink:ghost-lap:records";
-let prefs = load(PREFS_KEY, { track: "monza", gpLaps: 5, duelLaps: 3, difficulty: "medium", gpQuali: true, gpBrakes: true });
+let prefs = load(PREFS_KEY, { track: "monza", gpLaps: 5, duelLaps: 3, difficulty: "medium", gpQuali: true, gpBrakes: true, gpCars: DEFAULT_CARS });
+const clampCars = (n) => Math.max(MIN_CARS, Math.min(MAX_CARS, Math.round(Number(n)) || DEFAULT_CARS));
+prefs.gpCars = clampCars(prefs.gpCars);
 if (!CAL[prefs.track]) prefs.track = "monza";
 if (!DIFFICULTY[prefs.difficulty]) prefs.difficulty = "medium";
 // Real race distance: the fewest laps over 305 km (Monaco is the exception at 78 laps)
@@ -638,6 +640,7 @@ function startRace(config) {
   });
   const cam = newCam(race.player);
   cam.zoom = 1.05;
+  entry.world.setGridCount(race.cars.length);
   entry.world.warm(cam, W, H);
   const ghost = config.mode === "trial" || quali ? loadGhost(config.track) : null;
   session = {
@@ -677,7 +680,7 @@ function startRace(config) {
 // A Grand Prix weekend: one-lap qualifying sets the grid, or (if skipped) you get a random slot
 function startGrandPrix(base) {
   const seed = (Date.now() & 0xffffff) + 7;
-  const field = makeField({ mode: "gp", difficulty: base.difficulty, seed });
+  const field = makeField({ mode: "gp", difficulty: base.difficulty, seed, cars: base.cars || DEFAULT_CARS });
   if (prefs.gpQuali) return startRace({ ...base, stage: "quali", field });
   const slot = Math.floor(Math.random() * (field.length + 1));
   startRace({ ...base, stage: "race", grid: [...field.slice(0, slot), "player", ...field.slice(slot)] });
@@ -1113,7 +1116,7 @@ function goHome() {
       <h2 class="gl-title__logo">GHOST<br />LAP</h2>
       <p class="gl-title__tag">Lights out and away we go.</p>
       <div class="gl-menu__list">
-        <button type="button" class="btn btn--primary" data-go="gp">GRAND PRIX <small>20-car race</small></button>
+        <button type="button" class="btn btn--primary" data-go="gp">GRAND PRIX <small>3 to 30 cars</small></button>
         <button type="button" class="btn" data-go="duel">DUEL <small>1v1 vs a bot</small></button>
         <button type="button" class="btn" data-go="trial">TIME TRIAL <small>race your ghost</small></button>
         <button type="button" class="btn" data-go="controls">CONTROLS <small>keys &amp; tuning</small></button>
@@ -1171,7 +1174,7 @@ function showSetup(mode) {
   const lapOpts = [1, 3, 5, 10, 20];
   const title = { gp: "GRAND PRIX", duel: "DUEL", trial: "TIME TRIAL" }[mode];
   const blurb = {
-    gp: "A 20-car Grand Prix against 19 rivals: pick one level for the whole field, or MIXED for everything from Noob to Impossible. Up to Medium the bots drive your exact car; from Hard up their cars are faster. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify over three laps from the line (your best clean lap sets your grid slot), or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
+    gp: "A Grand Prix against up to 29 rivals (20 cars is a real F1 grid; pick anything from 3 to 30): pick one level for the whole field, or MIXED for everything from Noob to Impossible. Up to Medium the bots drive your exact car; from Hard up their cars are faster. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify over three laps from the line (your best clean lap sets your grid slot), or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
     duel: "Head-to-head against one bot. Every level is a real racer; up to Medium it drives your exact car, and from Hard up its car is faster too (Hard +3%, Very Hard +6%, Impossible +10%).",
     trial: "Flying laps on an empty circuit. Your best clean lap becomes a ghost; running wide deletes the lap."
   }[mode];
@@ -1205,12 +1208,15 @@ function showSetup(mode) {
             : `<div class="gl-opt gl-opt--laps"><span>LAPS</span>${lapOpts.map((l) => `<button type="button" class="gl-chip" data-laps="${l}">${l}</button>`).join("")}<button type="button" class="gl-chip" data-laps="full">FULL</button>
                  <span class="gl-stepper"><button type="button" class="gl-chip" data-lapstep="-1" aria-label="One lap fewer">−</button><output class="gl-laps-val" aria-live="polite">${laps}</output><button type="button" class="gl-chip" data-lapstep="1" aria-label="One lap more">+</button></span></div>
                <div class="gl-opt"><span>${mode === "duel" ? "BOT" : "AI LEVEL"}</span>${(mode === "gp" ? [...DIFFICULTY_ORDER, "mixed"] : DIFFICULTY_ORDER).map((d) => `<button type="button" class="gl-chip ${d === prefs.difficulty ? "is-on" : ""}" data-diff="${d}" aria-pressed="${d === prefs.difficulty}">${DIFFICULTY[d].label}</button>`).join("")}</div>
-               ${mode === "gp" ? `<div class="gl-opt"><span>GRID</span><button type="button" class="gl-chip ${prefs.gpQuali ? "is-on" : ""}" data-quali="1" aria-pressed="${prefs.gpQuali}">QUALIFYING</button><button type="button" class="gl-chip ${!prefs.gpQuali ? "is-on" : ""}" data-quali="0" aria-pressed="${!prefs.gpQuali}">SKIP • RANDOM GRID</button></div>
+               ${mode === "gp" ? `<div class="gl-opt gl-opt--cars"><span>CARS</span>${[3, 10, 20, 30].map((n) => `<button type="button" class="gl-chip" data-cars="${n}">${n}</button>`).join("")}
+                 <span class="gl-stepper"><button type="button" class="gl-chip" data-carstep="-1" aria-label="One car fewer">−</button><output class="gl-cars-val" aria-live="polite"></output><button type="button" class="gl-chip" data-carstep="1" aria-label="One car more">+</button></span></div>
+               <div class="gl-opt"><span>GRID</span><button type="button" class="gl-chip ${prefs.gpQuali ? "is-on" : ""}" data-quali="1" aria-pressed="${prefs.gpQuali}">QUALIFYING</button><button type="button" class="gl-chip ${!prefs.gpQuali ? "is-on" : ""}" data-quali="0" aria-pressed="${!prefs.gpQuali}">SKIP • RANDOM GRID</button></div>
                <div class="gl-opt"><span>BRAKES</span><button type="button" class="gl-chip ${prefs.gpBrakes !== false ? "is-on" : ""}" data-brakes="1" aria-pressed="${prefs.gpBrakes !== false}">HEAT &amp; WEAR</button><button type="button" class="gl-chip ${prefs.gpBrakes === false ? "is-on" : ""}" data-brakes="0" aria-pressed="${prefs.gpBrakes === false}">OFF</button></div>` : ""}`
         }
       </div>
     </div>`;
   syncLaps();
+  syncCars();
   overlay.querySelector(".gl-track.is-on")?.scrollIntoView({ block: "nearest" });
   overlay.querySelector("[data-act=start]")?.focus();
 }
@@ -1241,9 +1247,31 @@ function syncLaps() {
   if (plus) plus.disabled = laps >= full;
 }
 
+// Grand Prix field size: presets and a -/+ stepper, 3 to 30 cars
+function syncCars() {
+  const n = prefs.gpCars;
+  overlay.querySelectorAll("[data-cars]").forEach((el) => {
+    const on = Number(el.dataset.cars) === n;
+    el.classList.toggle("is-on", on);
+    el.setAttribute("aria-pressed", String(on));
+  });
+  const out = overlay.querySelector(".gl-cars-val");
+  if (out) out.textContent = `${n} CARS`;
+  const [minus, plus] = overlay.querySelectorAll("[data-carstep]");
+  if (minus) minus.disabled = n <= MIN_CARS;
+  if (plus) plus.disabled = n >= MAX_CARS;
+}
+
 overlay.addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
+  if (b.dataset.cars || b.dataset.carstep) {
+    sfx.click();
+    prefs.gpCars = clampCars(b.dataset.cars ? b.dataset.cars : prefs.gpCars + Number(b.dataset.carstep));
+    save(PREFS_KEY, prefs);
+    syncCars();
+    return;
+  }
   if (b.dataset.go) {
     sfx.click();
     if (b.dataset.go === "controls") openControlsModal();
@@ -1309,7 +1337,7 @@ overlay.addEventListener("click", (e) => {
   if (act === "home") goHome();
   else if (act === "start") {
     const laps = setupMode === "gp" ? prefs.gpLaps : prefs.duelLaps;
-    const base = { mode: setupMode, track: prefs.track, laps: setupMode === "trial" ? Infinity : laps, difficulty: prefs.difficulty };
+    const base = { mode: setupMode, track: prefs.track, laps: setupMode === "trial" ? Infinity : laps, difficulty: prefs.difficulty, cars: prefs.gpCars };
     if (setupMode === "gp") startGrandPrix(base);
     else startRace(base);
   } else if (act === "resume") resumeRace();
@@ -1320,8 +1348,8 @@ overlay.addEventListener("click", (e) => {
   else if (act === "race") startRace({ ...session.config, stage: "race", grid: session.qualiGrid });
   else if (act === "again") {
     // A new Grand Prix weekend means a new qualifying session (or a new random grid)
-    const { mode, track, laps, difficulty } = session.config;
-    if (mode === "gp") startGrandPrix({ mode, track, laps, difficulty });
+    const { mode, track, laps, difficulty, cars } = session.config;
+    if (mode === "gp") startGrandPrix({ mode, track, laps, difficulty, cars });
     else startRace(session.config);
   }
   else if (act === "setup") showSetup(session.config.mode);

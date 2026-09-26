@@ -283,7 +283,8 @@ main.wrap.game-screen {
 .gl-stepper .gl-chip {
   min-width: 26px;
 }
-.gl-laps-val {
+.gl-laps-val,
+.gl-cars-val {
   min-width: 64px;
   text-align: center;
   font-family: var(--font-display);

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, project, aiInput, DIRTY_AIR, BRAKES, brakeEfficiency, DRS_GAP, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, project, aiInput, DIRTY_AIR, BRAKES, brakeEfficiency, DRS_GAP, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap, MIN_CARS, MAX_CARS } from "./race.js";
 
 const track = buildTrack({ key: "monza", name: "Monza", pts: CIRCUITS.monza.pts, lengthM: CIRCUITS.monza.lengthM, theme: "park" });
 
@@ -15,10 +15,10 @@ function run(race, seconds, drivePlayer = true) {
 }
 
 describe("Ghost Lap race simulation", () => {
-  it("builds a real-scale circuit with DRS zones and a 20-car grid", () => {
+  it("builds a real-scale circuit with DRS zones and a grid for up to 30 cars", () => {
     assert.ok(track.L > 15000, "Monza should be a long lap at world scale");
     assert.ok(track.drs.length >= 1);
-    assert.equal(track.grid.length, 20);
+    assert.equal(track.grid.length, MAX_CARS);
     for (const s of track.grid) assert.ok(Math.abs(project(track, s.x, s.y).d) < TRACK_WIDTH / 2);
   });
 
@@ -28,8 +28,35 @@ describe("Ghost Lap race simulation", () => {
     run(race, 3);
     assert.equal(race.phase, "lights");
     race.cars.forEach((c, k) => assert.deepEqual([c.x, c.y], start[k]));
-    run(race, 4);
+    run(race, race.lightsOutAt - race.clock - 0.05);
+    assert.equal(race.phase, "lights");
+    run(race, 0.1);
     assert.equal(race.phase, "racing");
+  });
+
+  it("randomises the start: light gaps and the hold before lights out differ every race", () => {
+    const starts = [1, 2, 3, 4, 5, 6].map((seed) => createRace({ track, mode: "gp", laps: 2, seed }));
+    for (const r of starts) {
+      r.lightTimes.forEach((t, k) => {
+        const gap = t - (k ? r.lightTimes[k - 1] : 0);
+        assert.ok(gap >= 0.65 && gap <= 1.25, `light gap ${gap}`);
+      });
+      const hold = r.lightsOutAt - r.lightTimes[4];
+      assert.ok(hold >= 0.2 && hold <= 3, `hold ${hold}`);
+    }
+    assert.equal(new Set(starts.map((r) => r.lightsOutAt.toFixed(3))).size, starts.length);
+    assert.equal(new Set(starts.map((r) => r.lightTimes[0].toFixed(3))).size, starts.length);
+  });
+
+  it("runs 3-car and 30-car Grands Prix to the flag with every car classified", () => {
+    for (const fieldSize of [MIN_CARS, MAX_CARS]) {
+      const race = createRace({ track, mode: "gp", laps: 1, difficulty: "medium", seed: 11, fieldSize });
+      assert.equal(race.cars.length, fieldSize);
+      assert.equal(race.cars.filter((c) => c.isPlayer).length, 1);
+      run(race, 120);
+      assert.ok(race.flag, `${fieldSize} cars: chequered flag shown`);
+      assert.equal(classify(race).length, fieldSize);
+    }
   });
 
   it("runs a full Grand Prix to the flag and classifies all twenty cars", () => {
@@ -43,9 +70,40 @@ describe("Ghost Lap race simulation", () => {
     assert.ok(race.bestLap > 10 && race.bestLap < 60, `fastest lap ${race.bestLap}`);
   });
 
+  it("a bot that crashes into the barrier finds its way back onto the road", () => {
+    for (let s = 0; s < 8; s++) {
+      const race = createRace({ track, mode: "trial", seed: 1 });
+      const car = race.cars[0];
+      car.isPlayer = false;
+      race.player = null;
+      car.skill = DIFFICULTY.hard;
+      run(race, 2);
+      // Put it against the barrier, pointing into it at an angle, at eight spots round the lap
+      const i = Math.floor((track.n * (s + 0.5)) / 8);
+      const side = s % 2 ? 1 : -1;
+      const d = side * (track.walls[side > 0 ? 1 : 0][i] - 10);
+      car.x = track.path[i][0] + track.nor[i][0] * d;
+      car.y = track.path[i][1] + track.nor[i][1] * d;
+      car.heading = Math.atan2(track.tan[i][1], track.tan[i][0]) + side * [0.6, 1.2, 1.6, 2.4][s % 4];
+      car.vx = Math.cos(car.heading) * 200;
+      car.vy = Math.sin(car.heading) * 200;
+      car.idx = i;
+      let back = false;
+      for (let k = 0; k < 120 * 10 && !back; k++) {
+        stepRace(race, null, 1 / 120);
+        const tn = track.tan[car.idx];
+        const err = Math.abs(Math.atan2(Math.sin(Math.atan2(tn[1], tn[0]) - car.heading), Math.cos(Math.atan2(tn[1], tn[0]) - car.heading)));
+        back = Math.abs(car.d) < TRACK_WIDTH / 2 && err < 0.4 && car.fwd > 250;
+      }
+      assert.ok(back, `stuck off the road at point ${i}: d ${car.d.toFixed(0)}, speed ${car.fwd.toFixed(0)}`);
+    }
+  });
+
   it("orders AI difficulty from slowest to quickest", () => {
+    // A twisty track: on Monza's straights the two gentlest levels are within a tenth of each other
+    const twisty = buildTrack({ key: "hungary", ...CIRCUITS.hungary });
     const times = DIFFICULTY_ORDER.map((difficulty) => {
-      const race = createRace({ track, mode: "duel", laps: 1, difficulty, seed: 2 });
+      const race = createRace({ track: twisty, mode: "duel", laps: 1, difficulty, seed: 2 });
       run(race, 120, false);
       const bot = race.cars.find((c) => !c.isPlayer);
       return bot.finishTime;
@@ -55,7 +113,7 @@ describe("Ghost Lap race simulation", () => {
 
   it("is lenient but fair on track limits: kerb hops, no-advantage trips and being pushed are free", () => {
     const race = createRace({ track, mode: "gp", laps: 3, seed: 4 });
-    run(race, 8);
+    run(race, race.lightsOutAt + 3);
     const p = race.player;
     // Just the player on track, so no rival can bump it mid-test (contact is exempt, tested below)
     race.cars = race.cars.filter((c) => c.isPlayer);
@@ -229,6 +287,12 @@ describe("Ghost Lap race simulation", () => {
     assert.equal(DIFFICULTY_ORDER[0], "noob");
     assert.ok(DIFFICULTY.noob.corner < DIFFICULTY.veryEasy.corner);
     assert.equal(makeField({ mode: "gp", difficulty: "hard", seed: 3 }).length, 19);
+    // Field size is the player's choice, 3 to 30 cars; every rival has their own timing code
+    assert.equal(makeField({ mode: "gp", difficulty: "hard", seed: 3, cars: MIN_CARS }).length, MIN_CARS - 1);
+    const big = makeField({ mode: "gp", difficulty: "hard", seed: 3, cars: MAX_CARS });
+    assert.equal(big.length, MAX_CARS - 1);
+    assert.equal(new Set(big.map((f) => f.livery.code)).size, big.length);
+    assert.equal(makeField({ mode: "gp", difficulty: "hard", seed: 3, cars: 99 }).length, MAX_CARS - 1);
     const mixed = makeField({ mode: "gp", difficulty: "mixed", seed: 3 });
     const paces = new Set(mixed.map((f) => `${f.skill.corner}/${f.skill.brake}/${f.skill.boost}`));
     assert.equal(paces.size, DIFFICULTY_ORDER.length);
@@ -288,7 +352,7 @@ describe("Ghost Lap race simulation", () => {
 
   it("dirty air: a car close behind in a corner has less grip; clean air has full grip", () => {
     const race = createRace({ track, mode: "duel", laps: 3, seed: 2 });
-    run(race, 6);
+    run(race, race.lightsOutAt + 1);
     const [lead, chase] = race.cars;
     const i = lead.idx;
     const put = (c, back) => {
@@ -310,7 +374,7 @@ describe("Ghost Lap race simulation", () => {
 
   it("cars are solid: a rear-end hit pushes them apart and slows the chaser", () => {
     const race = createRace({ track, mode: "duel", laps: 3, seed: 2 });
-    run(race, 6);
+    run(race, race.lightsOutAt + 1);
     const [a, b] = race.cars;
     const i = a.idx;
     const h = Math.atan2(track.tan[i][1], track.tan[i][0]);

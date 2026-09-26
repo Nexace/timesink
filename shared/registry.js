@@ -120,7 +120,7 @@ export const games = [
   {
     slug: "ghost-lap",
     title: "Ghost Lap",
-    tagline: "Top-down Formula racing on all 24 real calendar circuits plus 5 classics (India, Malaysia, Hockenheim, Nürburgring, Sochi): 20-car Grands Prix with qualifying, bot duels and ghost time trials.",
+    tagline: "Top-down Formula racing on all 24 real calendar circuits plus 5 classics (India, Malaysia, Hockenheim, Nürburgring, Sochi): Grands Prix of 3 to 30 cars with qualifying, bot duels and ghost time trials.",
     kind: "racing",
     tags: ["racing", "f1", "time-trial"],
     accent: "blue",
@@ -129,7 +129,7 @@ export const games = [
     status: "live",
     added: "2026-09-20",
     howToPlay: {
-      goal: "Qualify, then win 20-car Grands Prix, beat a bot from Noob to Impossible, or chase your own ghost on real-length F1 circuits.",
+      goal: "Qualify, then win Grands Prix (3 to 30 cars), beat a bot from Noob to Impossible, or chase your own ghost on real-length F1 circuits.",
       steps: [
         "Pick a mode, a circuit, the lap count and the AI level (Noob to Impossible, or Mixed). A Grand Prix starts with qualifying: three laps each from the line, and your best clean lap sets your grid slot (a live timing tower shows every driver's laps as they come in; SUBMIT LAP ends your session early), or skip it for a random grid.",
         "Don't touch the throttle until the five red lights go out: holding it early locks the throttle until you let go.",

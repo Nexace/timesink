@@ -67,6 +67,25 @@ function offsetPts(track, i0, len, d) {
   return out;
 }
 
+/**
+ * Split an offset line into the pieces that really are that far from the track. Where it isn't
+ * (the inside of a corner tighter than the offset, or where another part of the circuit runs
+ * close by) the line would cut across the tarmac, so it's dropped there.
+ */
+function clipToField(pts, field, minD) {
+  const parts = [];
+  let cur = [];
+  for (const p of pts) {
+    if (field.at(p[0], p[1]) >= minD - 30) cur.push(p);
+    else if (cur.length) {
+      parts.push(cur);
+      cur = [];
+    }
+  }
+  if (cur.length) parts.push(cur);
+  return parts.filter((part) => part.length > 1);
+}
+
 function polyline(g, pts) {
   g.beginPath();
   g.moveTo(pts[0][0], pts[0][1]);
@@ -220,8 +239,9 @@ function generateScenery(track, field) {
     const mid = (run.i0 + Math.floor(run.len / 2)) % n;
     const outside = track.curv[mid] > 0 ? -1 : 1;
     if (!street) {
-      const tyres = offsetPts(track, run.i0, run.len, outside * (fenceD - 8));
-      push("tyres", bboxOf(tyres, 20), { pts: tyres });
+      for (const tyres of clipToField(offsetPts(track, run.i0, run.len, outside * (fenceD - 8)), field, fenceD - 8)) {
+        push("tyres", bboxOf(tyres, 20), { pts: tyres });
+      }
     }
     const pp = offsetPts(track, mid, 0, -outside * (street ? w / 2 + 50 : w / 2 + 150))[0];
     if (inWorld(pp[0], pp[1]) && field.at(pp[0], pp[1]) > (street ? w / 2 + 40 : w / 2 + 140)) {
@@ -771,12 +791,56 @@ function strokeRuns(g, track, runs) {
   }
 }
 
-function strokeOffsetRuns(g, track, runs, d) {
+function strokeOffsetRuns(g, track, runs, d, field) {
   for (const r of runs) {
-    const pts = offsetPts(track, r.i0, r.len, d);
-    polyline(g, pts);
-    g.stroke();
+    const line = offsetPts(track, r.i0, r.len, d);
+    for (const pts of field ? clipToField(line, field, Math.abs(d)) : [line]) {
+      polyline(g, pts);
+      g.stroke();
+    }
   }
+}
+
+/** The pieces of the dividing walls (between close sections) beside the points of these runs. */
+function wallPieces(track, runs) {
+  const pieces = [];
+  if (!track.divider) return pieces;
+  for (const r of runs) {
+    let cur = [];
+    for (let k = 0; k <= r.len; k++) {
+      const d = track.divider[(r.i0 + k) % track.n];
+      const last = cur[cur.length - 1];
+      if (d && (!last || Math.hypot(d[0] - last[0], d[1] - last[1]) < 40)) cur.push(d);
+      else {
+        if (cur.length > 3) pieces.push(cur);
+        cur = d ? [d] : [];
+      }
+    }
+    if (cur.length > 3) pieces.push(cur);
+  }
+  return pieces;
+}
+
+/** Concrete walls with a red-and-white top where two parts of the circuit run side by side. */
+function strokeWalls(g, track, runs) {
+  const pieces = wallPieces(track, runs);
+  if (!pieces.length) return;
+  g.lineCap = "round";
+  for (const [style, width, dash] of [
+    ["rgba(0,0,0,0.4)", 13, null],
+    ["#9aa1ab", 9, null],
+    ["#e9ecf0", 5, null],
+    ["#d42a2a", 5, [14, 14]]
+  ]) {
+    g.strokeStyle = style;
+    g.lineWidth = width;
+    g.setLineDash(dash || []);
+    for (const pc of pieces) {
+      polyline(g, pc);
+      g.stroke();
+    }
+  }
+  g.setLineDash([]);
 }
 
 // ─────────────────────────── Renderer ───────────────────────────
@@ -837,6 +901,8 @@ export function createWorld(track) {
   };
 
   const tiles = new Map();
+  // Grid boxes are painted only for the cars actually racing (the field size is the player's choice)
+  let gridCount = Math.min(20, track.grid.length);
   function paintTile(tx, ty) {
     const { c, ctx: g } = makeCanvas(TILE, TILE);
     g.translate(-tx * TILE, -ty * TILE);
@@ -915,8 +981,8 @@ export function createWorld(track) {
         // Catch fence
         g.strokeStyle = "rgba(210, 215, 225, 0.6)";
         g.lineWidth = 1.5;
-        strokeOffsetRuns(g, track, runs, scene.fenceD);
-        strokeOffsetRuns(g, track, runs, -scene.fenceD);
+        strokeOffsetRuns(g, track, runs, scene.fenceD, field);
+        strokeOffsetRuns(g, track, runs, -scene.fenceD, field);
       }
 
       // Kerbs through the corners
@@ -975,7 +1041,7 @@ export function createWorld(track) {
         g.restore();
       }
       track.grid.forEach((slot, k) => {
-        if (!inRuns(slot.i)) return;
+        if (k >= gridCount || !inRuns(slot.i)) return;
         g.save();
         g.translate(slot.x, slot.y);
         g.rotate(slot.heading);
@@ -996,6 +1062,7 @@ export function createWorld(track) {
         if (inRuns(z.detect)) across(z.detect, "rgba(255,255,255,0.7)", [6, 6], 3);
         if (inRuns(z.from)) across(z.from, "#39ff14", [8, 4], 3);
       }
+      strokeWalls(g, track, runs);
     }
 
     // Structures above the ground
@@ -1066,6 +1133,17 @@ export function createWorld(track) {
       }
       ctx.restore();
       return { left, top, right, bottom };
+    },
+    /** Show `n` grid boxes: repaints the tiles under the grid when the field size changes. */
+    setGridCount(n) {
+      const next = Math.max(0, Math.min(track.grid.length, n));
+      if (next === gridCount) return;
+      gridCount = next;
+      for (const slot of track.grid) {
+        const cx = Math.floor(slot.x / TILE);
+        const cy = Math.floor(slot.y / TILE);
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) tiles.delete((cy + dy) * cols + cx + dx);
+      }
     },
     /** Paint every tile the camera can see right now (used before a race starts). */
     warm(cam, W, H) {

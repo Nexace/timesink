@@ -35,9 +35,11 @@ function lap(key, lineEntry, level) {
   car.skill = DIFFICULTY[level];
   let walls = 0;
   let cuts = 0;
+  let lastHit = 0;
   for (let k = 0; k < 120 * 240 && car.lapTimes.length < 2; k++) {
     stepRace(race, null, 1 / 120);
-    if (car.wallHit === 0.3) walls++;
+    if (car.wallHit > lastHit) walls++; // a hit sets it to 0.3; it only ever decays otherwise
+    lastHit = car.wallHit;
     for (const e of race.events) if (e.type === "cut") cuts++;
   }
   const l = car.lapTimes[1];

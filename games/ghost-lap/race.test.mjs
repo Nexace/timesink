@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, project, aiInput, DIRTY_AIR, BRAKES, brakeEfficiency, DRS_GAP, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap, MIN_CARS, MAX_CARS } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, project, aiInput, DIRTY_AIR, BRAKES, brakeEfficiency, DRS_GAP, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap, MIN_CARS, MAX_CARS, halfAt, STRAIGHT_WIDTH } from "./race.js";
 
 const track = buildTrack({ key: "monza", name: "Monza", pts: CIRCUITS.monza.pts, lengthM: CIRCUITS.monza.lengthM, theme: "park" });
 
@@ -19,7 +19,12 @@ describe("Ghost Lap race simulation", () => {
     assert.ok(track.L > 15000, "Monza should be a long lap at world scale");
     assert.ok(track.drs.length >= 1);
     assert.equal(track.grid.length, MAX_CARS);
-    for (const s of track.grid) assert.ok(Math.abs(project(track, s.x, s.y).d) < TRACK_WIDTH / 2);
+    for (const s of track.grid) assert.ok(Math.abs(project(track, s.x, s.y).d) < halfAt(track, s.i));
+    // The road is full width through the corners and narrower on the long straights
+    const tight = track.radii.findIndex((r) => r < 300);
+    assert.equal(halfAt(track, tight), TRACK_WIDTH / 2);
+    assert.ok(track.half.some((h) => Math.abs(h - STRAIGHT_WIDTH / 2) < 1e-9), "some straight is at the narrow width");
+    for (let i = 0; i < track.n; i++) assert.ok(Math.abs(track.half[i] - track.half[(i + 1) % track.n]) < 1.5, "the width changes gradually");
   });
 
   it("holds the field on the grid until the five lights go out", () => {
@@ -93,7 +98,7 @@ describe("Ghost Lap race simulation", () => {
         stepRace(race, null, 1 / 120);
         const tn = track.tan[car.idx];
         const err = Math.abs(Math.atan2(Math.sin(Math.atan2(tn[1], tn[0]) - car.heading), Math.cos(Math.atan2(tn[1], tn[0]) - car.heading)));
-        back = Math.abs(car.d) < TRACK_WIDTH / 2 && err < 0.4 && car.fwd > 250;
+        back = Math.abs(car.d) < halfAt(track, car.idx) && err < 0.4 && car.fwd > 250;
       }
       assert.ok(back, `stuck off the road at point ${i}: d ${car.d.toFixed(0)}, speed ${car.fwd.toFixed(0)}`);
     }
@@ -457,9 +462,9 @@ describe("Ghost Lap race simulation", () => {
       const def = { key, ...CIRCUITS[key] };
       const elastic = buildTrack({ ...def, elasticLine: true });
       const fast = buildTrack(def);
-      assert.equal(RACING_LINES[key].shape, trackShapeKey(elastic.path), `${key}: re-run scripts/optimize-lines.mjs`);
+      assert.equal(RACING_LINES[key].shape, trackShapeKey(elastic.path, elastic.half), `${key}: re-run scripts/optimize-lines.mjs`);
       assert.ok(lineLapTime(fast, fast.line) < lineLapTime(elastic, elastic.line), `${key} line not quicker`);
-      assert.ok(fast.line.every((o) => Math.abs(o) <= fast.width / 2 - 16 + 1e-9), `${key} line leaves the road`);
+      assert.ok(fast.line.every((o, i) => Math.abs(o) <= fast.half[i] - 16 + 1e-9), `${key} line leaves the road`);
     }
   });
 

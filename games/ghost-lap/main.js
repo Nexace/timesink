@@ -4,7 +4,7 @@ import { saveScore } from "/shared/scores.js";
 import { setEngineHum } from "/shared/audio.js";
 import { vignette, glow } from "/shared/gfx.js";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP, MIN_CARS, MAX_CARS, DEFAULT_CARS } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP, MIN_CARS, MAX_CARS, DEFAULT_CARS, halfAt } from "./race.js";
 import { createWorld, drawCar, createMinimap, worldTransform } from "./render.js";
 import { drawHud, fmtLap, fmtSec } from "./hud.js";
 import { enableTouchLayout } from "/shared/touchlayout.js";
@@ -1416,7 +1416,7 @@ function drawGantry(race, t) {
   const track = race.track;
   const p = track.path[0];
   const nr = track.nor[0];
-  const half = track.width / 2 + 34;
+  const half = halfAt(track, 0) + 34;
   const a = [p[0] + nr[0] * half, p[1] + nr[1] * half];
   const b = [p[0] - nr[0] * half, p[1] - nr[1] * half];
   ctx.save();
@@ -1507,7 +1507,7 @@ function renderScene(s, now) {
 // ==========================================
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); // never backwards
   last = now;
 
   if (session && screen === "race" && !session.paused) {

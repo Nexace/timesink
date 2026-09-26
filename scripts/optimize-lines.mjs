@@ -79,7 +79,7 @@ for (const key of Object.keys(CIRCUITS)) {
     const opt = optimizeRacingLine(base, null, opts);
     const offs = [];
     for (let i = 0; i < base.n; i += STEP) offs.push(Math.round(opt.line[i] * 10) / 10);
-    const entry = { shape: trackShapeKey(base.path), step: STEP, offs };
+    const entry = { shape: trackShapeKey(base.path, base.half), step: STEP, offs };
     const newLaps = levels.map((lv) => lap(key, entry, lv));
     const ok = newLaps.every((nl, k) => nl.clean && nl.time < oldLaps[k].time - 0.02) && raceClean(key, entry);
     const total = newLaps.reduce((a, x) => a + x.time, 0);

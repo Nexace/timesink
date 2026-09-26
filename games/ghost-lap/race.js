@@ -7,7 +7,10 @@ import { RACING_LINES } from "./lines.js";
 // so a 20-car field has room to spread out and corners are closer to real proportions
 export const WORLD_SCALE = 1.35;
 export const PX_PER_M = 3.3 * WORLD_SCALE; // world pixels per real metre of circuit length
-export const TRACK_WIDTH = 148;
+export const TRACK_WIDTH = 148; // road width through corners (room to race side by side)
+export const STRAIGHT_WIDTH = 124; // and on long straights, blending between the two
+/** Half the road width at point i (the road is narrower on long straights). */
+export const halfAt = (track, i) => (track.half ? track.half[i] : track.width / 2);
 // The world runs a little slower than real life on these wider roads; the speedo still reads F1
 // numbers (700 px/s flat out ≈ 330 km/h).
 export const KMH = 0.47; // world px/s → displayed km/h
@@ -591,6 +594,32 @@ export function buildTrack(def) {
     return Math.sign(cross) / Math.max(1, radii[i]);
   });
 
+  // Road width: full width through corners, their braking zones (~450 px before, room to set up a wide
+  // entry) and exits (~250 px after); narrower on long straights, with a smooth blend (~300 px)
+  const bend = Uint8Array.from(radii, (r) => (r < 600 ? 1 : 0));
+  const near = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    for (let k = -25; k <= 45; k++) {
+      if (bend[(i + k + n) % n]) {
+        near[i] = 1;
+        break;
+      }
+    }
+  }
+  const half = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    let ws = 0;
+    for (let k = -15; k <= 15; k++) {
+      const wt = 16 - Math.abs(k);
+      s += near[(i + k + n) % n] * wt;
+      ws += wt;
+    }
+    half[i] = STRAIGHT_WIDTH / 2 + ((w - STRAIGHT_WIDTH) / 2) * (s / ws);
+  }
+  // How far from the centreline the racing line may go at each point
+  const lineLim = Float64Array.from(half, (h) => h - 16);
+
   // Racing line: sit toward the inside of each corner, blurred so entries and exits swing wide
   const raw = curv.map((c) => clamp(c * 26000, -1, 1) * w * 0.34);
   const line = new Float64Array(n);
@@ -603,12 +632,11 @@ export function buildTrack(def) {
       s += raw[(i + j + n) % n] * wt;
       wsum += wt;
     }
-    line[i] = clamp((s / wsum) * 1.35, -w * 0.34, w * 0.34);
+    line[i] = clamp((s / wsum) * 1.35, -Math.min(w * 0.34, lineLim[i]), Math.min(w * 0.34, lineLim[i]));
   }
   // ...then relax it like an elastic band pulled tight between the edges: each point moves toward the
   // midpoint of its neighbours (coarse to fine), which converges on the least-curvature line that uses
   // the full width — outside on entry, clipping the apex, outside again on exit.
-  const lim = w / 2 - 16;
   for (const [k, iters] of [[10, 80], [4, 120], [1, 160]]) {
     for (let it = 0; it < iters; it++) {
       for (let i = 0; i < n; i++) {
@@ -618,14 +646,14 @@ export function buildTrack(def) {
         const ty = (path[a][1] + nor[a][1] * line[a] + path[b][1] + nor[b][1] * line[b]) / 2;
         const px = path[i][0] + nor[i][0] * line[i];
         const py = path[i][1] + nor[i][1] * line[i];
-        line[i] = clamp(line[i] + ((tx - px) * nor[i][0] + (ty - py) * nor[i][1]) * 0.6, -lim, lim);
+        line[i] = clamp(line[i] + ((tx - px) * nor[i][0] + (ty - py) * nor[i][1]) * 0.6, -lineLim[i], lineLim[i]);
       }
     }
   }
   // The fastest line: minimum-lap-time offsets computed offline (scripts/optimize-lines.mjs). They're
   // used only when they were made for exactly this track shape; otherwise the elastic-band line stays.
   const stored = def.key && !def.elasticLine ? RACING_LINES[def.key] : null;
-  if (stored && stored.shape === trackShapeKey(path)) decodeLine(stored, line, lim);
+  if (stored && stored.shape === trackShapeKey(path, half)) decodeLine(stored, line, lineLim);
   const linePath = path.map((p, i) => [p[0] + nor[i][0] * line[i], p[1] + nor[i][1] * line[i]]);
   const lineRadii = cornerRadii(linePath, 8);
   const lineDs = linePath.map((p, i) => {
@@ -688,7 +716,10 @@ export function buildTrack(def) {
     grid.push({ x: path[i][0] + nor[i][0] * off, y: path[i][1] + nor[i][1] * off, heading: Math.atan2(tan[i][1], tan[i][0]), i });
   }
 
-  const street = def.theme === "street";
+  const street = def.theme === "street" || !!def.street; // walls right beside the road
+  const sw = sectionWalls(path, nor, n, street ? w / 2 + 36 : w / 2 + 200, w, !!def.crossover);
+  // Street circuits: the walls line the road, so they come in with it on the narrower straights
+  if (street) for (const wall of sw.walls) for (let i = 0; i < n; i++) wall[i] = Math.min(wall[i], half[i] + 36);
   return {
     key: def.key,
     name: def.name,
@@ -716,10 +747,11 @@ export function buildTrack(def) {
     drs,
     grid,
     width: w,
+    half,
     // Distance from the centreline where the car meets a wall / tyre barrier, and per point and
     // side ([-normal, +normal]) where a wall between close sections comes in nearer than that
     barrier: street ? w / 2 + 36 : w / 2 + 200,
-    ...sectionWalls(path, nor, n, street ? w / 2 + 36 : w / 2 + 200, w, !!def.crossover),
+    ...sw,
     sectors: [Math.floor(n / 3), Math.floor((2 * n) / 3)],
     loopEvery: 20
   };
@@ -778,10 +810,12 @@ export function speedPlan(radii, ds, n, m = 1) {
 }
 
 /** A fingerprint of the track shape: stored lines are only reused for the exact geometry. */
-export function trackShapeKey(path) {
+export function trackShapeKey(path, half = null) {
   let s = 0;
   for (let i = 0; i < path.length; i += 7) s += path[i][0] * 1.3 + path[i][1] * 0.7;
-  return `${path.length}:${Math.round(s)}`;
+  let h = 0;
+  if (half) for (let i = 0; i < half.length; i += 7) h += half[i];
+  return `${path.length}:${Math.round(s)}${half ? `:${Math.round(h)}` : ""}`;
 }
 
 function decodeLine(stored, line, lim) {
@@ -793,7 +827,7 @@ function decodeLine(stored, line, lim) {
     const f = x - k;
     const a = offs[k % m];
     const b = offs[(k + 1) % m];
-    line[i] = clamp(a + (b - a) * f, -lim, lim);
+    line[i] = clamp(a + (b - a) * f, -lim[i], lim[i]);
   }
 }
 
@@ -823,8 +857,8 @@ export function optimizeRacingLine(track, log = null, opts = { margin: 24, passe
   const { n } = track;
   // A little more margin from the edge than the elastic band, and only broad, smooth changes: a line a
   // real car can follow (quick side-to-side flicks look fast on paper but no car can track them)
-  const lim = track.width / 2 - opts.margin;
-  const line = Float64Array.from(track.line);
+  const lim = Float64Array.from(track.half, (h) => h - opts.margin);
+  const line = Float64Array.from(track.line, (v, i) => clamp(v, -lim[i], lim[i]));
   let best = lineLapTime(track, line);
   const start = best;
   for (const [H, step, stride, sweeps] of opts.passes) {
@@ -837,7 +871,7 @@ export function optimizeRacingLine(track, log = null, opts = { margin: 24, passe
           for (let k = -H; k <= H; k++) {
             const i = (c + k + n) % n;
             saved.push(line[i]);
-            line[i] = clamp(line[i] + dir * step * w[k + H], -lim, lim);
+            line[i] = clamp(line[i] + dir * step * w[k + H], -lim[i], lim[i]);
           }
           const t = lineLapTime(track, line);
           if (t < best - 1e-7) {
@@ -969,7 +1003,8 @@ export function makeCar(id, livery, slot, opts = {}) {
     slip: false,
     finished: false,
     finishTime: 0,
-    lineBias: 0,
+    raceD: 0, // racecraft: where on the road the car wants to be to attack or defend (px from centre)
+    raceW: 0, // and how far it has moved from its racing line toward that spot (0-1)
     wallHit: 0,
     noiseT: Math.random() * 100
   };
@@ -988,8 +1023,9 @@ export function stepCar(car, input, track, dt, mods = {}) {
   let fwd = car.vx * dirX + car.vy * dirY;
   let lat = -car.vx * dirY + car.vy * dirX;
 
-  const onTrack = Math.abs(car.d) <= track.width / 2 + 6;
-  const onKerb = !onTrack && Math.abs(car.d) <= track.width / 2 + 16;
+  const halfW = halfAt(track, car.idx);
+  const onTrack = Math.abs(car.d) <= halfW + 6;
+  const onKerb = !onTrack && Math.abs(car.d) <= halfW + 16;
   car.surface = onTrack ? "track" : onKerb ? "kerb" : "grass";
   const top = CAR.top * topMult * (onTrack ? 1 : onKerb ? 0.9 : 0.45);
 
@@ -1101,6 +1137,24 @@ export function aiInput(car, race, dt) {
   const prof = speedProfile(track, m, sk.brake * boost * (car.brakeEff ?? 1) * (hot ? 0.8 : 1));
   const look = 1 + Math.round((fwd * 0.04) / STEP);
   let target = prof[(car.idx + look) % n];
+  // Off the racing line (attacking, defending, pushed wide), the car's own path through the coming
+  // corners is tighter than the line's: slow down for it (grip-limited speed goes with the square root
+  // of the radius). Judged from where the car is and where it's heading, whichever is tighter.
+  const offBy = Math.abs(car.d - line[car.idx]);
+  if (offBy > 12 || car.raceW > 0.05) {
+    let ratio = 1;
+    for (let k = 0; k <= look + 24; k += 2) {
+      const j = (car.idx + k) % n;
+      const rc = track.radii[j];
+      if (rc > 1500) continue;
+      const s = Math.sign(track.curv[j]);
+      const onLine = Math.max(20, rc - s * line[j]);
+      const here = Math.max(20, rc - s * car.d);
+      const heading = car.raceW > 0.05 ? Math.max(20, rc - s * car.raceD) : here;
+      ratio = Math.min(ratio, Math.sqrt(Math.min(1, Math.min(here, heading) / onLine)));
+    }
+    target *= Math.max(0.7, ratio);
+  }
 
   // Racecraft: don't drive into the car ahead on the same piece of road. A car that's stopped or
   // spun is an obstacle, not someone to queue behind: slow down and go round it.
@@ -1112,7 +1166,7 @@ export function aiInput(car, race, dt) {
     const blocked = Math.abs(o.d - car.d) < CAR.bodyRad * 2 + 4;
     if (o.speed < 60) {
       if (gap < 160 && Math.abs(o.d - car.d) < CAR.bodyRad * 2 + 18) {
-        const room = track.width / 2 - 14;
+        const room = halfAt(track, car.idx) - 14;
         const left = o.d - (CAR.bodyRad * 2 + 16);
         const right = o.d + (CAR.bodyRad * 2 + 16);
         dodge = Math.abs(left) <= room && (Math.abs(right) > room || Math.abs(left - car.d) < Math.abs(right - car.d)) ? left : right;
@@ -1127,12 +1181,13 @@ export function aiInput(car, race, dt) {
   const preview = (car.idx + 2 + Math.round(fwd * 0.06 / STEP)) % n;
   const tn = track.tan[preview];
   const headingErr = wrapAngle(Math.atan2(tn[1], tn[0]) - car.heading);
-  const wantD = clamp(dodge ?? line[preview] + car.lineBias, -(track.width / 2 - 16), track.width / 2 - 16);
+  const onLine = line[preview];
+  const wantD = clamp(dodge ?? onLine + (car.raceD - onLine) * car.raceW, -(halfAt(track, preview) - 16), halfAt(track, preview) - 16);
   const cross = car.d - wantD;
   car.noiseT += dt;
   const wobble = sk.noise ? Math.sin(car.noiseT * 1.7) * sk.noise * 0.12 : 0;
   const delta = headingErr + Math.atan((-2.2 * cross) / (fwd + 40)) + wobble;
-  const edge = Math.abs(car.d) - (track.width / 2 - 12);
+  const edge = Math.abs(car.d) - (halfAt(track, car.idx) - 12);
   const recover = edge > 0 ? -Math.sign(car.d) * Math.min(1, edge / 10) : 0;
   const steer = clamp(delta / maxSteerAt(fwd) + recover, -1, 1);
 
@@ -1145,9 +1200,14 @@ export function aiInput(car, race, dt) {
     // Lift only when the tyres are actually saturated (sliding), not just because the car is turning
     throttle *= clamp(1 - car.sliding * 2.5, 0.3, 1);
     // (only while actually heading further out: a car off the road and pointing back on gets the power)
+    // Judged on where the car's sideways drift will carry it in the next ~0.3 s, not just where it is,
+    // so a car sliding wide out of a hairpin lifts before it's on the grass
     const nr = track.nor[car.idx];
-    const outward = (car.vx * nr[0] + car.vy * nr[1]) * Math.sign(car.d) > 0;
-    if (edge > -24 && outward && Math.sign(car.d) === Math.sign(car.d - wantD)) throttle *= clamp(1 - (edge + 24) / 30, 0.15, 1);
+    const vLat = car.vx * nr[0] + car.vy * nr[1];
+    const dSoon = car.d + vLat * 0.3;
+    const outward = vLat * Math.sign(dSoon) > 0;
+    const edgeSoon = Math.max(edge, Math.abs(dSoon) - (halfAt(track, car.idx) - 12));
+    if (edgeSoon > -24 && outward && Math.sign(dSoon) === Math.sign(dSoon - wantD)) throttle *= clamp(1 - (edgeSoon + 24) / 30, 0.15, 1);
   }
   // Launch: full beans off the line, once the driver has reacted to the lights
   if (fwd < 60 && race.phase === "racing") throttle = race.t < (car.react || 0) ? 0 : 1;
@@ -1575,7 +1635,8 @@ export function stepRace(race, playerInput, dt) {
     // the kerb for a moment, and it only counts if the car came back with its speed (an advantage).
     if (car.wallHit > 0) car.lastHit = race.t;
     const pushed = race.t - (car.lastHit ?? -9) < LIMITS.grace;
-    const off = Math.abs(car.d) > track.width / 2 + LIMITS.margin;
+    const halfW = halfAt(track, car.idx);
+    const off = Math.abs(car.d) > halfW + LIMITS.margin;
     if (off) {
       if (!car.offTrack) {
         car.offTrack = true;
@@ -1585,7 +1646,7 @@ export function stepRace(race, playerInput, dt) {
       }
       car.offTime += dt;
       if (pushed) car.offPushed = true;
-    } else if (car.offTrack && Math.abs(car.d) < track.width / 2 + 16) {
+    } else if (car.offTrack && Math.abs(car.d) < halfW + 16) {
       car.offTrack = false;
       const gained = car.speed >= car.offSpeed * LIMITS.keep;
       // (across the inside of a corner is the corner-cut rule's business, below)
@@ -1606,9 +1667,10 @@ export function stepRace(race, playerInput, dt) {
     // Corner cutting: ground covered off the road on the INSIDE of a corner (straight across a
     // chicane). It only counts as a shortcut if the car made more progress along the track than it
     // actually drove, at racing speed, and nobody pushed it there. A slow spin across the grass is fine.
-    const offRoad = Math.abs(car.d) > track.width / 2 + 16;
+    const offRoad = Math.abs(car.d) > halfW + 16;
     const moved = (car.idx - prevIdx + track.n) % track.n;
-    if (offRoad && moved < track.n / 2 && Math.sign(car.d) === Math.sign(track.curv[car.idx])) {
+    // (a real corner only: two wheels on the grass inside a flat-out kink gains next to nothing)
+    if (offRoad && moved < track.n / 2 && track.radii[car.idx] < 500 && Math.sign(car.d) === Math.sign(track.curv[car.idx])) {
       car.cutGain = (car.cutGain || 0) + moved * STEP;
       car.cutDriven = (car.cutDriven || 0) + car.speed * dt;
       if (pushed) car.cutPushed = true;
@@ -1657,14 +1719,25 @@ export function stepRace(race, playerInput, dt) {
   // AI racecraft. Attack: when closing on the car ahead, go for the inside of the next corner (or the
   // side it leaves open). Defend: with a quicker car right behind before a corner, cover the inside.
   const { n: tn, curv, line: tline, width: tw } = track;
+  // The inside of the FIRST real corner coming up (in a quick left-right, that's the first one)
+  let cornerIn = 99;
   const insideOfNextCorner = (idx) => {
-    let c = 0;
-    for (let k = 8; k < 70; k += 3) c += curv[(idx + k) % tn];
-    return Math.abs(c) > 0.004 ? Math.sign(c) : 0;
+    for (let k = 8; k < 70; k += 2) {
+      const j = (idx + k) % tn;
+      if (track.radii[j] < 600) {
+        cornerIn = k;
+        return Math.sign(curv[j]);
+      }
+    }
+    cornerIn = 99;
+    return 0;
   };
   for (const car of cars) {
-    if (car.isPlayer || car.finished) continue;
-    let want = 0;
+    if (car.isPlayer) continue;
+    if (car.finished) {
+      car.raceW = Math.max(0, car.raceW - dt / 0.6); // back to the racing line for the cool-down lap
+      continue;
+    }
     let ahead = null;
     let aheadGap = Infinity;
     let behind = null;
@@ -1680,17 +1753,29 @@ export function stepRace(race, playerInput, dt) {
         behind = o;
       }
     }
-    const here = tline[car.idx];
+    // A spot on the road (not an offset from the line, which would carry into the next corners)
+    let spot = null;
     if (ahead && aheadGap < 170 && (car.fwd > ahead.fwd - 15 || aheadGap < 70)) {
-      let side = insideOfNextCorner(car.idx) || Math.sign(car.d - ahead.d) || 1;
+      const inside = insideOfNextCorner(car.idx);
+      // Already alongside: stay on that side. Otherwise go for the inside of the next corner.
+      let side = Math.abs(car.d - ahead.d) > 12 ? Math.sign(car.d - ahead.d) : inside || Math.sign(car.d - ahead.d) || 1;
       // The door's shut on that side: take the other one
       if (Math.sign(ahead.d) === side && Math.abs(ahead.d) > tw * 0.18) side = -side;
-      want = side * tw * 0.28 - here;
+      // (round the outside of a corner only a little way off the line, less the nearer the corner is:
+      // a wide line in is a slow one)
+      spot = side * tw * (inside && side === -inside ? 0.06 + 0.16 * clamp((cornerIn - 8) / 50, 0, 1) : 0.28);
     } else if (behind && behindGap < 70 && behind.fwd > car.fwd - 10) {
       const inside = insideOfNextCorner(car.idx);
-      if (inside) want = inside * tw * 0.2 - here;
+      if (inside) spot = inside * tw * 0.2;
     }
-    car.lineBias += clamp(want - car.lineBias, -80 * dt, 80 * dt);
+    // Never set up on the outside of the corner the car is in: hold the line until the exit
+    if (spot != null && track.radii[car.idx] < 600 && Math.sign(spot) === -Math.sign(curv[car.idx])) spot = null;
+    if (spot != null) {
+      if (car.raceW < 0.05) car.raceD = tline[car.idx]; // start from where the line is
+      car.raceD += clamp(spot - car.raceD, -80 * dt, 80 * dt);
+    }
+    // Move across over ~0.6 s, and back to the racing line the same way
+    car.raceW = clamp(car.raceW + (spot != null ? dt : -dt) / 0.6, 0, 1);
   }
 
   race.order = cars.slice().sort((a, b) => {

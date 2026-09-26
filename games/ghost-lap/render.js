@@ -488,7 +488,7 @@ function paintStand(g, track, it, night) {
 
 function paintPits(g, track, it) {
   const s = it.side;
-  const w = track.width;
+  const w = 2 * track.half[(it.i0 + Math.floor(it.len / 2)) % track.n]; // the road width along the pit straight
   const lane = offsetPts(track, it.i0, it.len, s * (w / 2 + 64));
   // Entry / exit connectors to the circuit
   const entryT = offsetPts(track, it.i0 - 12, 0, s * (w / 2 - 4))[0];
@@ -778,7 +778,33 @@ function paintPylon(g, it) {
 }
 
 // ─────────────────────────── Track surface painter ───────────────────────────
-function strokeRuns(g, track, runs) {
+/**
+ * Stroke the centreline over these runs. With `extra`, the stroke follows the road's own width
+ * (narrower on the straights): 2 x half-width + extra, drawn in pieces of equal width.
+ */
+function strokeRuns(g, track, runs, extra = null) {
+  if (extra != null && track.half) {
+    for (const r of runs) {
+      let k0 = 0;
+      while (k0 < r.len) {
+        const wAt = (k) => Math.round(track.half[(r.i0 + k) % track.n] * 2 + extra);
+        const lw = wAt(k0);
+        let k1 = k0 + 1;
+        while (k1 < r.len && wAt(k1) === lw) k1++;
+        g.lineWidth = lw;
+        g.beginPath();
+        const p0 = track.path[(r.i0 + k0) % track.n];
+        g.moveTo(p0[0], p0[1]);
+        for (let k = k0 + 1; k <= k1; k++) {
+          const p = track.path[(r.i0 + k) % track.n];
+          g.lineTo(p[0], p[1]);
+        }
+        g.stroke();
+        k0 = k1;
+      }
+    }
+    return;
+  }
   for (const r of runs) {
     g.beginPath();
     const p0 = track.path[r.i0 % track.n];
@@ -932,27 +958,23 @@ export function createWorld(track) {
       if (street) {
         // Kerbside pavement, walls with Tecpro blocks at the corners
         g.strokeStyle = "#474b52";
-        g.lineWidth = w + 90;
-        strokeRuns(g, track, runs);
+        strokeRuns(g, track, runs, 90);
         g.strokeStyle = "rgba(0,0,0,0.5)";
-        g.lineWidth = w + 80;
-        strokeRuns(g, track, runs);
+        strokeRuns(g, track, runs, 80);
         g.strokeStyle = "#c3c7ce";
-        g.lineWidth = w + 74;
-        strokeRuns(g, track, runs);
+        strokeRuns(g, track, runs, 74);
         g.lineCap = "butt";
         g.setLineDash([10, 10]);
         g.strokeStyle = "#d42a2a";
-        strokeRuns(g, track, cr);
+        strokeRuns(g, track, cr, 74);
         g.strokeStyle = "#1e4fd6";
         g.lineDashOffset = 10;
-        strokeRuns(g, track, cr);
+        strokeRuns(g, track, cr, 74);
         g.setLineDash([]);
         g.lineDashOffset = 0;
         g.lineCap = "round";
         g.strokeStyle = patternOf(g, TEX.runoff);
-        g.lineWidth = w + 62;
-        strokeRuns(g, track, runs);
+        strokeRuns(g, track, runs, 62);
       } else {
         // Gravel traps on corner exits, asphalt run-off everywhere, green verge
         g.strokeStyle = "rgba(0,0,0,0.35)";
@@ -962,22 +984,18 @@ export function createWorld(track) {
         g.lineWidth = w + 244;
         strokeRuns(g, track, cr);
         g.strokeStyle = "#285c2e";
-        g.lineWidth = w + 110;
-        strokeRuns(g, track, runs);
+        strokeRuns(g, track, runs, 110);
         g.strokeStyle = patternOf(g, TEX.runoff);
-        g.lineWidth = w + 96;
-        strokeRuns(g, track, runs);
+        strokeRuns(g, track, runs, 96);
         // Painted run-off stripes through the corners
         g.lineCap = "butt";
         g.setLineDash([16, 16]);
         g.strokeStyle = "rgba(210, 40, 50, 0.55)";
-        g.lineWidth = w + 84;
-        strokeRuns(g, track, cr);
+        strokeRuns(g, track, cr, 84);
         g.setLineDash([]);
         g.lineCap = "round";
         g.strokeStyle = patternOf(g, TEX.runoff);
-        g.lineWidth = w + 60;
-        strokeRuns(g, track, cr);
+        strokeRuns(g, track, cr, 60);
         // Catch fence
         g.strokeStyle = "rgba(210, 215, 225, 0.6)";
         g.lineWidth = 1.5;
@@ -988,20 +1006,17 @@ export function createWorld(track) {
       // Kerbs through the corners
       g.lineCap = "butt";
       g.strokeStyle = "#c8102e";
-      g.lineWidth = w + 22;
-      strokeRuns(g, track, cr);
+      strokeRuns(g, track, cr, 22);
       g.setLineDash([10, 10]);
       g.strokeStyle = "#f2f2f2";
-      strokeRuns(g, track, cr);
+      strokeRuns(g, track, cr, 22);
       g.setLineDash([]);
       g.lineCap = "round";
       // White lines, then the tarmac
       g.strokeStyle = "#f0f0f0";
-      g.lineWidth = w + 4;
-      strokeRuns(g, track, runs);
+      strokeRuns(g, track, runs, 4);
       g.strokeStyle = patternOf(g, TEX.asphalt);
-      g.lineWidth = w - 3;
-      strokeRuns(g, track, runs);
+      strokeRuns(g, track, runs, -3);
       // Rubbered-in racing line, darker in braking zones
       g.strokeStyle = "rgba(0,0,0,0.16)";
       g.lineWidth = w * 0.42;
@@ -1020,8 +1035,8 @@ export function createWorld(track) {
         g.lineWidth = width2;
         g.setLineDash(dash);
         g.beginPath();
-        g.moveTo(p[0] + nr[0] * (w / 2 - 2), p[1] + nr[1] * (w / 2 - 2));
-        g.lineTo(p[0] - nr[0] * (w / 2 - 2), p[1] - nr[1] * (w / 2 - 2));
+        g.moveTo(p[0] + nr[0] * (track.half[i] - 2), p[1] + nr[1] * (track.half[i] - 2));
+        g.lineTo(p[0] - nr[0] * (track.half[i] - 2), p[1] - nr[1] * (track.half[i] - 2));
         g.stroke();
         g.setLineDash([]);
       };
@@ -1033,9 +1048,9 @@ export function createWorld(track) {
         g.translate(p[0], p[1]);
         g.rotate(Math.atan2(tn[1], tn[0]));
         for (let r2 = 0; r2 < 2; r2++) {
-          for (let q = 0; q < Math.floor(w / 6); q++) {
+          for (let q = 0; q < Math.floor((track.half[0] * 2) / 6); q++) {
             g.fillStyle = (q + r2) % 2 ? "#111" : "#f5f5f5";
-            g.fillRect(-6 + r2 * 6, -w / 2 + q * 6, 6, 6);
+            g.fillRect(-6 + r2 * 6, -track.half[0] + q * 6, 6, 6);
           }
         }
         g.restore();

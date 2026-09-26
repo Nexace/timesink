@@ -1,7 +1,7 @@
 import { initShell, escapeHtml, toast } from "/shared/shell.js";
 import { sfx } from "/shared/sound.js";
 import { saveScore } from "/shared/scores.js";
-import { updateEngines, stopEngines } from "./engine.js";
+import { updateEngines, stopEngines, playDrsOpen } from "./engine.js";
 import { vignette, glow } from "/shared/gfx.js";
 import { CIRCUITS } from "./circuits.js";
 import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP, MIN_CARS, MAX_CARS, DEFAULT_CARS, halfAt } from "./race.js";
@@ -781,7 +781,7 @@ function handleEvents(race) {
     } else if (e.type === "drsReady") {
       banner("DRS ENABLED", `PRESS ${keyLabel("drs")} TO OPEN THE FLAP`, "#22e36b", 1.6, 12);
     } else if (e.type === "drs") {
-      sfx.coin();
+      playDrsOpen();
     } else if (e.type === "wall") {
       sfx.hit();
       s.cam.shake = Math.min(12, e.speed / 40);

@@ -235,6 +235,7 @@ function loadLoop(ctx) {
 }
 
 let engine = null;
+let duckUntil = 0; // engines ducked (e.g. under the DRS sound) until this audio time
 function build(ctx, loop) {
   const master = ctx.createGain();
   const limit = ctx.createDynamicsCompressor();
@@ -268,13 +269,14 @@ export function updateEngines(race, me, listener, dt) {
   const loop = loadLoop(ctx);
   if (!loop) return; // still loading
   if (!engine) engine = build(ctx, loop);
-  engine.master.gain.setTargetAtTime(0.9 * getVolume(), ctx.currentTime, 0.05);
+  const ducked = ctx.currentTime < duckUntil ? 0.45 : 1;
+  engine.master.gain.setTargetAtTime(0.9 * getVolume() * ducked, ctx.currentTime, ducked < 1 ? 0.02 : 0.08);
 
   const rev = (c) => {
     const thr = c.throttle ?? 0;
     return { rpm: engineRpm(c.fwd, thr), throttle: thr, gear: engineGear(c.fwd) };
   };
-  engine.me.set({ ...rev(me), level: 0.125 + 0.09 * (me.throttle ?? 0) }, dt);
+  engine.me.set({ ...rev(me), level: 0.095 + 0.07 * (me.throttle ?? 0) }, dt);
 
   let best = null;
   let bestD = 1500;
@@ -299,5 +301,46 @@ export function updateEngines(race, me, listener, dt) {
   const a = listener.angle || 0;
   const screenX = dx * Math.cos(a) + dy * Math.sin(a);
   const near = Math.max(0, 1 - d / 1500) ** 2;
-  engine.rival.set({ ...rev(best), level: 0.14 * near, panTo: Math.max(-0.8, Math.min(0.8, screenX / 500)), pitch }, dt);
+  engine.rival.set({ ...rev(best), level: 0.11 * near, panTo: Math.max(-0.8, Math.min(0.8, screenX / 500)), pitch }, dt);
+}
+
+/**
+ * The DRS flap opening: a rush of air rising in pitch and a quick two-tone chime, with the engines
+ * ducked for a moment so it cuts through the V8.
+ */
+export function playDrsOpen() {
+  if (!isSoundEnabled()) return;
+  const ctx = getSharedAudioContext();
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  const out = ctx.createGain();
+  out.gain.value = 0.9 * getVolume();
+  out.connect(ctx.destination);
+  const air = noiseSource(ctx);
+  const band = ctx.createBiquadFilter();
+  band.type = "bandpass";
+  band.Q.value = 1.2;
+  band.frequency.setValueAtTime(700, t);
+  band.frequency.exponentialRampToValueAtTime(3200, t + 0.35);
+  const airGain = ctx.createGain();
+  airGain.gain.setValueAtTime(0.0001, t);
+  airGain.gain.exponentialRampToValueAtTime(0.35, t + 0.08);
+  airGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+  air.connect(band).connect(airGain).connect(out);
+  air.start(t);
+  air.stop(t + 0.5);
+  for (const [f, at] of [[1318.5, 0], [1760, 0.09]]) {
+    const tone = ctx.createOscillator();
+    tone.type = "square";
+    tone.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t + at);
+    g.gain.exponentialRampToValueAtTime(0.12, t + at + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.22);
+    tone.connect(g).connect(out);
+    tone.start(t + at);
+    tone.stop(t + at + 0.25);
+  }
+  duckUntil = t + 0.35;
+  setTimeout(() => out.disconnect(), 800);
 }

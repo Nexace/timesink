@@ -350,7 +350,9 @@ export const BRAKES = {
   cool: 0.1, // share of the gap to ambient shed per second (x airflow)
   window: [350, 950],
   fade: 1000, // above this the brakes start to fade
-  wear: 0.014, // life used per second of full braking from top speed (x more when overheating)
+  // life used per second of full braking from top speed (x more when overheating): with normal driving
+  // a full-distance race leaves about half (Monaco, the hardest, ~50%); abuse them and they wear out
+  wear: 0.005,
   worn: 0.3, // below this much life left the brakes lose bite
   regenShare: 0.2 // share of the braking the MGU-K does while it's harvesting
 };
@@ -999,6 +1001,7 @@ export function makeCar(id, livery, slot, opts = {}) {
     throttle: 0,
     brake: 0,
     sliding: 0,
+    balance: 0, // + understeer (front sliding), - oversteer (rear sliding), 0..1 either way
     surface: "track",
     idx: slot.i,
     s: 0,
@@ -1083,14 +1086,36 @@ export function stepCar(car, input, track, dt, mods = {}) {
     const yawMax = (G * STEER_ASSIST) / Math.abs(fwd);
     if (Math.abs(yaw) > yawMax) yaw = Math.sign(yaw) * yawMax;
   }
+  // Balance: the grip is split between the axles and weight transfer moves it. Braking lightens the
+  // rear (trail-brake too hard and it steps out); the throttle loads the rear, but at low speed
+  // the rear tyres spin up (power oversteer); dirty air robs the front wing (understeer); kerbs and
+  // grass make the rear nervous. The front sliding runs the car wide (understeer); the rear sliding
+  // rotates the car into the corner more than it's travelling, until the rear grips again (oversteer:
+  // lift, straighten the wheel or counter-steer to catch it).
+  const brakeLoad = fwd > 60 ? (input.brake ?? 0) : 0;
+  const thr = Math.max(0, input.throttle ?? 0);
+  const wheelspin = thr * Math.max(0, 1 - Math.abs(fwd) / (CAR.top * 0.45));
+  const frontG = G * (1 - 0.05 * thr) * (1 - 0.15 * (mods.dirty || 0));
+  const rearG = G * (1 - 0.18 * brakeLoad + 0.05 * thr) * (1 - 0.7 * wheelspin) * (onTrack ? 1 : 0.85);
   const need = Math.abs(yaw * fwd);
-  car.sliding = need > G ? Math.min(1, (need - G) / G) : Math.max(0, car.sliding - dt * 3);
-  if (need > G && Math.abs(fwd) > 1) {
-    yaw = (Math.sign(yaw) * G) / Math.abs(fwd);
+  let under = 0;
+  if (need > frontG && Math.abs(fwd) > 1) {
+    under = Math.min(1, (need - frontG) / frontG);
+    yaw = (Math.sign(yaw) * frontG) / Math.abs(fwd);
     // Past the limit the tyres scrub: the car runs wide AND bleeds speed
-    const excess = Math.min(1, (need - G) / need);
+    const excess = Math.min(1, (need - frontG) / need);
     fwd -= Math.sign(fwd) * Math.min(Math.abs(fwd), excess * 650 * dt);
   }
+  const rearNeed = Math.abs(yaw * fwd);
+  const over = !input.handbrake && rearNeed > rearG && Math.abs(fwd) > 40 ? Math.min(1, (rearNeed - rearG) / rearG) : 0;
+  // The slide builds and settles over a moment (it doesn't snap)
+  car.oversteer = Math.max(over, (car.oversteer || 0) - dt * 2.5);
+  // (applied to the heading after the velocity, below: the car points further into the corner than
+  // it's going, which is what a slide is)
+  const slideYaw = car.oversteer > 0 ? Math.sign(yaw || car.steer || 1) * car.oversteer * 2.6 : 0;
+  car.balance = under > 0 ? under : -car.oversteer;
+  const slide = Math.max(under, car.oversteer);
+  car.sliding = slide > 0 ? Math.min(1, slide) : Math.max(0, car.sliding - dt * 3);
   // Kerbs rattle the car and cost speed
   if (onKerb && Math.abs(fwd) > 150) fwd *= Math.exp(-0.35 * dt);
   if (input.handbrake && Math.abs(fwd) > 120) {
@@ -1099,8 +1124,8 @@ export function stepCar(car, input, track, dt, mods = {}) {
   }
   car.heading = wrapAngle(car.heading + yaw * dt);
 
-  // Lateral slip decays with grip (low grip = drift)
-  const latDamp = input.handbrake ? 1.6 : onTrack ? 10 : 4.5;
+  // Lateral slip decays with grip (low grip = drift); a sliding rear holds the slide
+  const latDamp = (input.handbrake ? 1.6 : onTrack ? 10 : 4.5) * (1 - 0.8 * (car.oversteer || 0));
   lat *= Math.exp(-latDamp * dt);
   if (input.handbrake) car.sliding = Math.max(car.sliding, Math.min(1, Math.abs(lat) / 200));
 
@@ -1110,6 +1135,7 @@ export function stepCar(car, input, track, dt, mods = {}) {
   car.vy = ny * fwd + nx * lat;
   car.x += car.vx * dt;
   car.y += car.vy * dt;
+  if (slideYaw) car.heading = wrapAngle(car.heading + slideYaw * dt);
   car.fwd = fwd;
   car.throttle = input.throttle;
   car.brake = input.brake;
@@ -1232,6 +1258,13 @@ export function aiInput(car, race, dt) {
     const outward = vLat * Math.sign(dSoon) > 0;
     const edgeSoon = Math.max(edge, Math.abs(dSoon) - (halfAt(track, car.idx) - 12));
     if (edgeSoon > -24 && outward && Math.sign(dSoon) === Math.sign(dSoon - wantD)) throttle *= clamp(1 - (edgeSoon + 24) / 30, 0.15, 1);
+  }
+  // Power oversteer: at low speed with the wheel turned, feed the throttle in gently (managing the
+  // wheelspin, as a driver does) and back off the moment the rear starts to step out
+  if (throttle > 0) {
+    const lowSpeed = Math.max(0, 1 - fwd / (CAR.top * 0.45));
+    throttle = Math.min(throttle, 1 - 0.6 * lowSpeed * Math.min(1, Math.abs(car.steer)));
+    throttle *= clamp(1 - (car.oversteer || 0) * 2.2, 0.25, 1);
   }
   // Launch: full beans off the line, once the driver has reacted to the lights
   if (fwd < 60 && race.phase === "racing") throttle = race.t < (car.react || 0) ? 0 : 1;
@@ -1649,6 +1682,7 @@ export function stepRace(race, playerInput, dt) {
       power: ersPow * boost,
       top: ersTop * (car.drsOpen ? 1.12 : 1) * (car.slip ? 1.05 : 1) * boost,
       grip: (1 - DIRTY_AIR.grip * car.dirty) * boost,
+      dirty: car.dirty,
       brake: (car.isPlayer ? Math.min(1, input.brakeMult ?? 1) : boost) * (car.brakeEff ?? 1)
     };
     const prevIdx = car.idx;

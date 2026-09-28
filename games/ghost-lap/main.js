@@ -4,7 +4,7 @@ import { saveScore } from "/shared/scores.js";
 import { updateEngines, stopEngines, playDrsOpen } from "./engine.js";
 import { vignette, glow } from "/shared/gfx.js";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP, MIN_CARS, MAX_CARS, DEFAULT_CARS, halfAt } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, aiInput, makeField, qualifyingRun, bestQualiLap, QUALI_LAPS, PLAYER_LIVERY, DIFFICULTY, DIFFICULTY_ORDER, CAR, LIMITS, DRS_GAP, MIN_CARS, MAX_CARS, DEFAULT_CARS, halfAt, trackShapeKey } from "./race.js";
 import { createWorld, drawCar, createMinimap, worldTransform } from "./render.js";
 import { drawHud, fmtLap, fmtSec } from "./hud.js";
 import { enableTouchLayout, isTouchScreen } from "/shared/touchlayout.js";
@@ -141,20 +141,33 @@ const clampLaps = (n) => clamp(Math.round(Number(n) || 3), 1, fullLaps(prefs.tra
 prefs.gpLaps = clampLaps(prefs.gpLaps);
 prefs.duelLaps = clampLaps(prefs.duelLaps);
 let records = load(RECORDS_KEY, { races: 0, gpWins: {}, podiums: 0, duels: {}, bestLaps: {} });
+// Lap records only count on the track layouts they were set on: bump this whenever the circuits change
+// shape (scale, width, start lines), and older records are cleared once
+const TRACK_LAYOUT = 3;
+if (records.layout !== TRACK_LAYOUT) {
+  records.bestLaps = {};
+  records.layout = TRACK_LAYOUT;
+  save(RECORDS_KEY, records);
+}
 
-const ghostKey = (track) => `timesink:ghost-lap:v5:${track}`;
-function loadGhost(track) {
+// Your fastest clean lap on each circuit, replayed as the ghost. It carries a fingerprint of the exact
+// layout it was driven on: after the circuits change, an old ghost would drive through the scenery (and
+// its time, set on a different track, could never be beaten), so it's dropped.
+const ghostKey = (track) => `timesink:ghost-lap:v6:${track}`;
+const layoutOf = (track) => trackShapeKey(track.path, track.half);
+function loadGhost(key, track) {
   try {
-    const raw = localStorage.getItem(ghostKey(track));
+    const raw = localStorage.getItem(ghostKey(key));
     if (!raw) return null;
     const g = JSON.parse(raw);
-    return Array.isArray(g.trail) && g.trail.length > 10 && Number.isFinite(g.time) ? g : null;
+    const ok = Array.isArray(g.trail) && g.trail.length > 10 && Number.isFinite(g.time) && g.layout === layoutOf(track);
+    return ok ? g : null;
   } catch {
     return null;
   }
 }
-function saveGhost(track, time, trail) {
-  save(ghostKey(track), { time, trail: trail.map((p) => p.map((v) => Math.round(v * 100) / 100)) });
+function saveGhost(key, track, time, trail) {
+  save(ghostKey(key), { time, layout: layoutOf(track), trail: trail.map((p) => p.map((v) => Math.round(v * 100) / 100)) });
 }
 
 // ==========================================
@@ -428,6 +441,7 @@ let throttleLevel = 0;
 // the car can't move yet) builds revs; they carry into the launch, and a key still held at lights out
 // doesn't pull the handbrake or brake until it's let go
 let gridRev = 0;
+let launchRev = 0; // the revs held at lights out, used the moment the throttle goes down
 let spaceFromGrid = false;
 let brakeFromGrid = false;
 // No rolling starts: throttle held on the grid is ignored, and if it's still held when the lights go
@@ -456,10 +470,15 @@ function playerInput(dt = 1 / 120) {
     // The car can't move yet; the throttle only revs the engine on the grid
     return { throttle: Math.max(keys.up ? 1 : 0, gridRev), ers: false, brake: 0, steer: 0, handbrake: false, drs: false, brakeMult: 1, steerRate: 7 };
   }
-  // Lights out: the revs built on the grid carry straight into the launch
+  // Lights out: the car doesn't move until the throttle goes down; then the revs built on the grid
+  // carry straight into the launch
   if (gridRev > 0) {
-    throttleLevel = Math.max(throttleLevel, gridRev);
+    launchRev = gridRev;
     gridRev = 0;
+  }
+  if (launchRev > 0 && keys.up && !gridLock) {
+    throttleLevel = Math.max(throttleLevel, launchRev);
+    launchRev = 0;
   }
   if (spaceFromGrid && !keys.drift) spaceFromGrid = false;
   if (brakeFromGrid && !keys.down) brakeFromGrid = false;
@@ -635,6 +654,7 @@ function drawFx(fx, view) {
 function startRace(config) {
   throttleLevel = 0;
   gridRev = 0;
+  launchRev = 0;
   spaceFromGrid = false;
   brakeFromGrid = false;
   gridLock = false;
@@ -662,7 +682,7 @@ function startRace(config) {
   cam.zoom = 1.05;
   entry.world.setGridCount(race.cars.length);
   entry.world.warm(cam, W, H);
-  const ghost = config.mode === "trial" || quali ? loadGhost(config.track) : null;
+  const ghost = config.mode === "trial" || quali ? loadGhost(config.track, entry.track) : null;
   session = {
     config,
     entry,
@@ -830,7 +850,7 @@ function onTrialLap(e, car) {
   if (!s.ghost || e.time < s.ghost.time) {
     s.ghost = { time: e.time, trail };
     s.ghostDist = monotone(trail.map((p) => p[4]));
-    saveGhost(s.config.track, e.time, trail);
+    saveGhost(s.config.track, s.entry.track, e.time, trail);
     const prev = records.bestLaps[s.config.track];
     if (!prev || e.time < prev) {
       records.bestLaps[s.config.track] = e.time;

@@ -460,6 +460,11 @@ export function drawHud(ctx, s) {
       text(ctx, "BEST", W - 234, Hb - 58, { size: 8, color: "#6c7a96" });
       text(ctx, fmtLap(car.bestLap * 1000), W - 30, Hb - 56, { font: BODY, size: 24, color: "#b44dff", align: "right" });
       if (race.reaction != null && race.t < 6) text(ctx, `REACTION ${race.reaction.toFixed(3)}s`, W - 234, Hb - 26, { size: 8, color: "#ffd23f" });
+      else {
+        // Your all-time best here (any mode)
+        text(ctx, "PB", W - 234, Hb - 26, { size: 8, color: "#6c7a96" });
+        text(ctx, fmtLap((s.pb ?? Infinity) * 1000), W - 30, Hb - 24, { font: BODY, size: 20, color: "#ffd400", align: "right" });
+      }
     }
   }
 

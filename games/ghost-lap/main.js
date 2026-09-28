@@ -682,7 +682,10 @@ function startRace(config) {
   cam.zoom = 1.05;
   entry.world.setGridCount(race.cars.length);
   entry.world.warm(cam, W, H);
-  const ghost = config.mode === "trial" || quali ? loadGhost(config.track, entry.track) : null;
+  // Your fastest lap here: every valid lap in any mode is measured against it (a faster one becomes the
+  // new ghost and personal best); it's only driven on screen in a time trial or qualifying
+  const ghost = loadGhost(config.track, entry.track);
+  const showGhost = config.mode === "trial" || quali;
   session = {
     config,
     entry,
@@ -693,6 +696,7 @@ function startRace(config) {
     paused: false,
     endAt: 0,
     ghost,
+    showGhost,
     ghostDist: ghost ? monotone(ghost.trail.map((p) => p[4])) : null,
     rec: [],
     recT: 0,
@@ -770,7 +774,7 @@ function handleEvents(race) {
         2.8
       );
       announce(`Qualifying lap ${n}: ${fmtSec(e.time)}${e.valid ? "" : ", deleted"}.`);
-      onTrialLap(e, race.player);
+      onPlayerLap(e, race.player);
       const me = s.qualiBoard?.rows.find((r) => r.entry === "player");
       if (me) boardLap(s.qualiBoard, me, { time: e.time, valid: e.valid });
       if (n >= QUALI_LAPS) s.endAt = performance.now() + 1800;
@@ -780,14 +784,17 @@ function handleEvents(race) {
       else if (e.fastest && race.mode !== "trial") {
         sfx.powerup();
         banner("FASTEST LAP", fmtSec(e.time), "#b44dff", 2.6);
+      } else if (e.valid && (!s.ghost || e.time < s.ghost.time)) {
+        sfx.good();
+        banner("NEW PERSONAL BEST", `${fmtSec(e.time)}${s.ghost ? ` • ${fmtSec(s.ghost.time - e.time).replace(/^0:0?/, "-")}` : ""}`, "#22e36b", 2.6);
       } else if (e.personalBest) {
         sfx.good();
-        banner(race.mode === "trial" ? "PERSONAL BEST" : `LAP ${e.lap}`, fmtSec(e.time), "#22e36b", 2.6);
+        banner(race.mode === "trial" ? "SESSION BEST" : `LAP ${e.lap}`, fmtSec(e.time), "#22e36b", 2.6);
       } else {
         banner(`LAP ${e.lap}`, fmtSec(e.time), "#ffffff", 2);
       }
       announce(`Lap ${e.lap}: ${fmtSec(e.time)}${e.valid ? "" : ", deleted"}.`);
-      if (race.mode === "trial") onTrialLap(e, c);
+      onPlayerLap(e, c);
       if (race.mode !== "trial" && !c.finished && c.laps === race.laps - 1) banner("FINAL LAP", "", "#ffd400", 2);
     } else if (e.type === "limits") {
       sfx.warn();
@@ -841,22 +848,24 @@ function handleEvents(race) {
   }
 }
 
-function onTrialLap(e, car) {
+// Every lap the player completes, in any mode: a valid lap faster than your best here becomes your
+// personal best and your ghost
+function onPlayerLap(e, car) {
   const s = session;
   const trail = s.rec;
   s.rec = [];
   s.recT = 0;
-  if (!e.valid || trail.length < 20) return;
-  if (!s.ghost || e.time < s.ghost.time) {
+  if (!e.valid) return;
+  const prev = records.bestLaps[s.config.track];
+  if (!prev || e.time < prev) {
+    records.bestLaps[s.config.track] = e.time;
+    save(RECORDS_KEY, records);
+    saveScore("ghost-lap", Math.round(e.time * 1000), `${fmtSec(e.time)} at ${CAL[s.config.track].name}`, { lowerIsBetter: true });
+  }
+  if (trail.length >= 20 && (!s.ghost || e.time < s.ghost.time)) {
     s.ghost = { time: e.time, trail };
     s.ghostDist = monotone(trail.map((p) => p[4]));
     saveGhost(s.config.track, s.entry.track, e.time, trail);
-    const prev = records.bestLaps[s.config.track];
-    if (!prev || e.time < prev) {
-      records.bestLaps[s.config.track] = e.time;
-      save(RECORDS_KEY, records);
-    }
-    saveScore("ghost-lap", Math.round(e.time * 1000), `${fmtSec(e.time)} at ${CAL[s.config.track].name}`, { lowerIsBetter: true });
   }
 }
 
@@ -1499,7 +1508,7 @@ function renderScene(s, now) {
   if (s === session && settings.racingLine) drawRacingLine(race, view);
   drawFx(s.fx, view);
   const t = now / 1000;
-  if (s === session && s.ghost && race.player && race.player.laps >= 0) {
+  if (s === session && s.showGhost && s.ghost && race.player && race.player.laps >= 0) {
     const g = ghostAt(s.ghost, race.t - race.player.lapStart);
     if (g) {
       drawCar(ctx, { x: g.x, y: g.y, heading: g.heading, color: "#ff5ea8", accent: "#ffffff", brake: 0, steer: 0 }, t, { alpha: 0.42, ghost: true });
@@ -1602,7 +1611,7 @@ function frame(now) {
       rememberPositions(race);
       stepRace(race, autopilot ? aiInput(race.player, race, SIM_DT) : playerInput(SIM_DT), SIM_DT);
       handleEvents(race);
-      if (race.mode === "trial" && race.player) {
+      if (race.player && !race.player.finished) {
         const c = race.player;
         if (s.lastLaps < 0 && c.laps === 0) s.rec = [];
         s.lastLaps = c.laps;
@@ -1664,6 +1673,7 @@ function frame(now) {
         now: now / 1000,
         ghost: session.ghostPos,
         bestTrail: session.ghost,
+        pb: Math.min(records.bestLaps[session.config.track] ?? Infinity, session.ghost?.time ?? Infinity),
         qualiBoard: session.qualiBoard ? qualiBoardRows(session) : null,
         quali: session.config.stage === "quali" ? QUALI_LAPS : 0,
         delta: session.delta,

@@ -61,18 +61,21 @@ function steerSpeedFor(r) {
 
 // Levels set the DRIVER: how close to the grip limit they take corners (corner), how late and hard
 // they brake (brake: share of the car's full braking they plan on), how much throttle they dare use
-// (commit), how tidy their line is (noise) and how quickly they react to the lights (react, s).
+// (commit), how tidy their line is (noise), how quickly they react to the lights (react, s) and how
+// often they make a mistake (err: late on the brakes, greedy on the throttle, off their line, a cut).
+// lead (steps) is where their own line starts (see LINE_START); it's a calibration that keeps each
+// level's overall race pace where it was before drivers had their own lines, mistakes and moods.
 // Every level is a serious racer. A bot already drives close to what the car can do, so from Hard up
 // the bots also get a faster CAR (boost: engine, top speed, grip and brakes x boost), because a good
 // human can beat a same-car bot. Up to Medium they drive exactly your car.
 export const DIFFICULTY = {
-  noob: { label: "NOOB", corner: 0.88, brake: 0.8, commit: 0.96, noise: 0.06, react: 0.3, boost: 1 },
-  veryEasy: { label: "VERY EASY", corner: 0.92, brake: 0.85, commit: 0.98, noise: 0.04, react: 0.26, boost: 1 },
-  easy: { label: "EASY", corner: 0.96, brake: 0.9, commit: 1, noise: 0.02, react: 0.23, boost: 1 },
-  medium: { label: "MEDIUM", corner: 1, brake: 0.95, commit: 1, noise: 0.01, react: 0.2, boost: 1 },
-  hard: { label: "HARD", corner: 1, brake: 1, commit: 1, noise: 0, react: 0.18, boost: 1.03 },
-  veryHard: { label: "VERY HARD", corner: 1, brake: 1, commit: 1, noise: 0, react: 0.17, boost: 1.06 },
-  impossible: { label: "IMPOSSIBLE", corner: 1, brake: 1, commit: 1, noise: 0, react: 0.16, boost: 1.1 }
+  noob: { label: "NOOB", corner: 0.88, brake: 0.8, commit: 0.96, noise: 0.06, react: 0.3, boost: 1, err: 1, lead: 5 },
+  veryEasy: { label: "VERY EASY", corner: 0.92, brake: 0.85, commit: 0.98, noise: 0.04, react: 0.26, boost: 1, err: 0.75, lead: 3.6 },
+  easy: { label: "EASY", corner: 0.96, brake: 0.9, commit: 1, noise: 0.02, react: 0.23, boost: 1, err: 0.55, lead: 2.9 },
+  medium: { label: "MEDIUM", corner: 1, brake: 0.95, commit: 1, noise: 0.01, react: 0.2, boost: 1, err: 0.4, lead: 2.7 },
+  hard: { label: "HARD", corner: 1, brake: 1, commit: 1, noise: 0, react: 0.18, boost: 1.03, err: 0.25, lead: 2.4 },
+  veryHard: { label: "VERY HARD", corner: 1, brake: 1, commit: 1, noise: 0, react: 0.17, boost: 1.06, err: 0.14, lead: 2.1 },
+  impossible: { label: "IMPOSSIBLE", corner: 1, brake: 1, commit: 1, noise: 0, react: 0.16, boost: 1.1, err: 0.06, lead: 2 }
 };
 DIFFICULTY.mixed = { ...DIFFICULTY.medium, label: "MIXED" };
 export const DIFFICULTY_ORDER = ["noob", "veryEasy", "easy", "medium", "hard", "veryHard", "impossible"];
@@ -109,6 +112,75 @@ export const DRIVERS = [
   { name: "M. CASTELLI", code: "CAS", color: "#c1121f", accent: "#fdf0d5" },
   { name: "T. WREN", code: "WRE", color: "#80ed99", accent: "#22577a" }
 ];
+
+// Driving styles. Every race each AI driver is dealt one at random (a duel too), and a style is only
+// where they start: each trait is then varied for that driver and that race, so two drivers dealt the
+// same style still don't race alike. During the race a driver's mood drifts (a volatile one swings
+// more), losing a place makes them angrier (how much is their grudge), a late charger comes alive in
+// the closing laps, and every attack and defence is a plan picked at random (weighted by who they
+// are) and dropped for another when it isn't working. Traits (0-1 unless noted):
+//  agg        how far back and how readily they attack; later braking on the inside
+//  patience   wait for DRS, a mistake or a much better run instead of trying it anywhere
+//  defend     how early and hard they cover, and how often they defend at all
+//  tow        how long they sit in the slipstream before pulling out
+//  straights  prefer attacking on the straights (slipstream, dummies) over lunges into corners
+//  feint      dummies: show one side, take the other; react to being covered
+//  risk       round the outside, and how far they hang it out there
+//  explore    how often they try a new line through a corner (kept if it's faster)
+//  apex       their line: + turn in later (steps), - earlier;  tight: nearer the inside at the apex (px)
+//  volatility how much their mood swings;  grudge: how much losing a place fires them up
+//  charge     how much they come alive in the closing laps (and hold back early)
+//  ersSave, ersBurn  how often a lap is spent saving the battery, or burning it
+//  mistake    extra chance per corner of a mistake (scaled, with the base rate, by the level's err)
+//  brake, corner, noise, noiseAdd: small pace and consistency trims on the driver's level
+const STYLE_BASES = {
+  aggressor: { agg: 0.95, patience: 0.1, defend: 0.75, tow: 0.35, straights: 0.25, feint: 0.45, risk: 0.8, explore: 0.3, apex: 0, tight: 2, volatility: 0.5, grudge: 0.8, charge: 0, ersSave: 0.15, ersBurn: 0.6, mistake: 0.012, brake: 0.015, corner: 0, noise: 1.3, noiseAdd: 0.006 },
+  tactician: { agg: 0.5, patience: 0.95, defend: 0.6, tow: 0.95, straights: 0.7, feint: 0.35, risk: 0.3, explore: 0.3, apex: 0.5, tight: 0, volatility: 0.2, grudge: 0.2, charge: 0.2, ersSave: 0.6, ersBurn: 0.15, mistake: 0.003, brake: 0, corner: 0, noise: 0.8, noiseAdd: 0 },
+  metronome: { agg: 0.3, patience: 0.6, defend: 0.4, tow: 0.6, straights: 0.5, feint: 0.05, risk: 0.15, explore: 0.15, apex: -0.5, tight: 0, volatility: 0.1, grudge: 0.1, charge: 0, ersSave: 0.3, ersBurn: 0.2, mistake: 0.001, brake: -0.01, corner: 0.005, noise: 0.3, noiseAdd: 0 },
+  exitKing: { agg: 0.6, patience: 0.5, defend: 0.5, tow: 0.85, straights: 0.65, feint: 0.2, risk: 0.35, explore: 0.4, apex: 1, tight: -2, volatility: 0.3, grudge: 0.4, charge: 0.1, ersSave: 0.35, ersBurn: 0.3, mistake: 0.006, brake: 0, corner: 0, noise: 1, noiseAdd: 0 },
+  wildcard: { agg: 0.85, patience: 0.15, defend: 0.5, tow: 0.3, straights: 0.45, feint: 0.9, risk: 0.9, explore: 1, apex: 0, tight: 0, volatility: 0.9, grudge: 0.7, charge: 0, ersSave: 0.2, ersBurn: 0.5, mistake: 0.02, brake: 0.01, corner: 0.005, noise: 1.8, noiseAdd: 0.012 },
+  blocker: { agg: 0.4, patience: 0.7, defend: 1, tow: 0.6, straights: 0.5, feint: 0.2, risk: 0.3, explore: 0.2, apex: -0.5, tight: 1, volatility: 0.2, grudge: 0.5, charge: 0, ersSave: 0.55, ersBurn: 0.15, mistake: 0.004, brake: 0, corner: 0, noise: 0.9, noiseAdd: 0 },
+  opportunist: { agg: 0.7, patience: 0.4, defend: 0.6, tow: 0.8, straights: 0.45, feint: 0.5, risk: 0.5, explore: 0.5, apex: 0.5, tight: 0, volatility: 0.5, grudge: 0.4, charge: 0.1, ersSave: 0.45, ersBurn: 0.25, mistake: 0.006, brake: 0.005, corner: 0, noise: 1, noiseAdd: 0 },
+  lateBraker: { agg: 0.8, patience: 0.3, defend: 0.7, tow: 0.5, straights: 0.15, feint: 0.4, risk: 0.6, explore: 0.3, apex: -1, tight: 3, volatility: 0.4, grudge: 0.6, charge: 0, ersSave: 0.25, ersBurn: 0.35, mistake: 0.012, brake: 0.025, corner: -0.005, noise: 1.1, noiseAdd: 0.004 },
+  slipstreamer: { agg: 0.65, patience: 0.75, defend: 0.5, tow: 1, straights: 0.95, feint: 0.6, risk: 0.25, explore: 0.3, apex: 0.5, tight: -1, volatility: 0.3, grudge: 0.3, charge: 0.1, ersSave: 0.6, ersBurn: 0.2, mistake: 0.005, brake: 0, corner: 0, noise: 1, noiseAdd: 0 },
+  lateCharger: { agg: 0.45, patience: 0.6, defend: 0.55, tow: 0.7, straights: 0.5, feint: 0.4, risk: 0.5, explore: 0.5, apex: 0, tight: 1, volatility: 0.35, grudge: 0.5, charge: 1, ersSave: 0.7, ersBurn: 0.1, mistake: 0.006, brake: 0, corner: 0, noise: 1, noiseAdd: 0 }
+};
+export const STYLES = Object.keys(STYLE_BASES);
+// (the player's car on autopilot, and anything without a persona)
+const PERSONA_NEUTRAL = { style: "", agg: 0.6, patience: 0.4, defend: 0.6, tow: 0.6, straights: 0.45, feint: 0.3, risk: 0.4, explore: 0.3, apex: 0, tight: 0, volatility: 0, grudge: 0, charge: 0, ersSave: 0.3, ersBurn: 0.3, mistake: 0, brake: 0, corner: 0, noise: 1, noiseAdd: 0 };
+const UNIT_TRAITS = ["agg", "patience", "defend", "tow", "straights", "feint", "risk", "explore", "volatility", "grudge", "charge", "ersSave", "ersBurn"];
+
+/** One driver's persona for one race: their style, with every trait varied. */
+export function makePersona(style, rand = Math.random) {
+  const b = STYLE_BASES[style] || PERSONA_NEUTRAL;
+  const p = { ...b, style };
+  for (const k of UNIT_TRAITS) p[k] = clamp(b[k] + (rand() - 0.5) * 0.5, 0, 1);
+  p.apex = b.apex + (rand() - 0.5) * 1.2;
+  p.tight = b.tight + (rand() - 0.5) * 4;
+  p.mistake = b.mistake * (0.5 + rand());
+  p.brake = b.brake + (rand() - 0.5) * 0.01;
+  p.noise = b.noise * (0.75 + rand() * 0.5);
+  return p;
+}
+export const personaOf = (car) => car.skill?.persona || PERSONA_NEUTRAL;
+
+/** Pick a key from { key: weight }. */
+function pickWeighted(weights, rand) {
+  let sum = 0;
+  for (const k in weights) sum += Math.max(0, weights[k]);
+  let r = rand() * sum;
+  for (const k in weights) {
+    r -= Math.max(0, weights[k]);
+    if (r <= 0) return k;
+  }
+  return Object.keys(weights)[0];
+}
+
+// Car balance setting (the player's), -1 to +1. Understeer (-) takes grip off the front and plants
+// the rear (it won't step out on the brakes or the throttle, but the car pushes wide); oversteer (+)
+// takes grip off the rear (the car rotates into corners and can be steered on the throttle, but it
+// slides, and a slide scrubs speed). Neither is free speed: each end trades a little pace for its feel.
+export const BALANCE = { front: 0.03, rearPlanted: 0.08, rearLoose: 0.16, slideScrub: 1300 };
 // Engine: a Formula 1 V8 (2006-2013): idles ~4,200 rpm, revs to 18,000; 8 gears over the speed range
 export const V8 = { idle: 4200, upshift: 11800, limiter: 18000 };
 const GEAR_SPAN = CAR.top / 7.6; // same gearing the HUD shows
@@ -1095,8 +1167,9 @@ export function stepCar(car, input, track, dt, mods = {}) {
   const brakeLoad = fwd > 60 ? (input.brake ?? 0) : 0;
   const thr = Math.max(0, input.throttle ?? 0);
   const wheelspin = thr * Math.max(0, 1 - Math.abs(fwd) / (CAR.top * 0.45));
-  const frontG = G * (1 - 0.05 * thr) * (1 - 0.15 * (mods.dirty || 0));
-  const rearG = G * (1 - 0.18 * brakeLoad + 0.05 * thr) * (1 - 0.7 * wheelspin) * (onTrack ? 1 : 0.85);
+  const setup = clamp(input.balance ?? 0, -1, 1);
+  const frontG = G * (1 + Math.min(0, setup) * BALANCE.front) * (1 - 0.05 * thr) * (1 - 0.15 * (mods.dirty || 0));
+  const rearG = G * (1 - setup * (setup > 0 ? BALANCE.rearLoose : BALANCE.rearPlanted)) * (1 - 0.18 * brakeLoad + 0.05 * thr) * (1 - 0.7 * wheelspin) * (onTrack ? 1 : 0.85);
   const need = Math.abs(yaw * fwd);
   let under = 0;
   if (need > frontG && Math.abs(fwd) > 1) {
@@ -1108,6 +1181,8 @@ export function stepCar(car, input, track, dt, mods = {}) {
   }
   const rearNeed = Math.abs(yaw * fwd);
   const over = !input.handbrake && rearNeed > rearG && Math.abs(fwd) > 40 ? Math.min(1, (rearNeed - rearG) / rearG) : 0;
+  // A sliding rear scrubs speed too (the tyres are going sideways): the rotation isn't free
+  if (over > 0) fwd -= Math.sign(fwd) * Math.min(Math.abs(fwd), over * BALANCE.slideScrub * dt);
   // The slide builds and settles over a moment (it doesn't snap)
   car.oversteer = Math.max(over, (car.oversteer || 0) - dt * 2.5);
   // (applied to the heading after the velocity, below: the car points further into the corner than
@@ -1170,27 +1245,201 @@ export function stepCar(car, input, track, dt, mods = {}) {
 }
 
 // ─────────────────────────── AI ───────────────────────────
+// ── Lines of their own ──
+// Each corner (a run of road tighter than 600 px radius, split where it changes direction) gets a
+// window from its braking zone to its exit where a driver takes their own line: the racing line
+// shifted later or earlier along the road (a later or earlier apex) and pulled toward the inside or
+// the outside at the apex. Drivers try small changes as the race goes on and keep what's faster.
+const MISTAKE_BASE = 0.03; // chance per corner at err 1, before the persona's own
+const LINE_SHIFT = 9; // steps
+const LINE_TIGHT = 16; // px
+// Where a driver starts: turning in a little ahead of the drawn line (by their level's lead) and a
+// touch tighter (a driver reacts, so aiming slightly early makes up for it). There's more to find
+// (about -6 and +8 is ~1% quicker), which the drivers work out corner by corner as they go.
+const LINE_START = { shift: -2.5, tight: 3 };
+const CORNER_IN = 28; // window starts this many steps before the corner (braking)...
+const CORNER_OUT = 18; // ...and ends this many after it (the exit, where a good line pays off)
+function cornersOf(track) {
+  if (track.corners) return track.corners;
+  const { n, radii, curv } = track;
+  let s0 = 0;
+  for (let i = 0; i < n; i++) {
+    if (radii[i] >= 600) {
+      s0 = i;
+      break;
+    }
+  }
+  const found = [];
+  let cur = null;
+  for (let k = 0; k <= n; k++) {
+    const i = (s0 + k) % n;
+    const inCorner = k < n && radii[i] < 600;
+    const sg = Math.sign(curv[i]) || 1;
+    if (inCorner && cur && sg === cur.sign) {
+      cur.len = k - cur.k0 + 1;
+      if (radii[i] < cur.r) {
+        cur.r = radii[i];
+        cur.apexK = k;
+      }
+      continue;
+    }
+    if (cur && cur.len >= 3) found.push(cur);
+    cur = inCorner ? { k0: k, len: 1, sign: sg, r: radii[i], apexK: k } : null;
+  }
+  const at = new Int16Array(n).fill(-1);
+  const wAt = new Float32Array(n);
+  const apexAt = new Float32Array(n);
+  const startAt = new Int16Array(n).fill(-1);
+  const corners = found.map((f, c) => {
+    const from = (s0 + f.k0) % n;
+    const apex = f.apexK - f.k0;
+    const reach = f.len / 2 + 6;
+    for (let k = -CORNER_IN; k <= f.len + CORNER_OUT; k++) {
+      const j = (from + k + n) % n;
+      const w = Math.min(1, (k + CORNER_IN) / 12, (f.len + CORNER_OUT - k) / 12);
+      if (w > wAt[j]) {
+        at[j] = c;
+        wAt[j] = w;
+        apexAt[j] = Math.exp(-(((k - apex) / reach) ** 2));
+      }
+    }
+    for (let k = 0; k < 4; k++) startAt[(from - CORNER_IN + k + n) % n] = c;
+    return { from, len: f.len, sign: f.sign, span: (f.len + CORNER_IN + CORNER_OUT) * STEP };
+  });
+  track.cornerAt = at;
+  track.cornerW = wAt;
+  track.cornerA = apexAt;
+  track.cornerStart = startAt;
+  track.corners = corners;
+  return corners;
+}
+
+/** Where on the road (px from the centre) this driver's own line runs at point j. */
+export function carLine(car, track, j) {
+  const L = car.lines;
+  const c = L && track.cornerAt ? track.cornerAt[j] : -1;
+  if (c < 0 || L.key !== track.key) return track.line[j];
+  const p = L.try[c] || L.c[c];
+  const n = track.n;
+  const f = (((j - p.shift * track.cornerW[j]) % n) + n) % n;
+  const i0 = Math.floor(f);
+  const t = f - i0;
+  const base = track.line[i0] * (1 - t) + track.line[(i0 + 1) % n] * t;
+  return base + p.tight * track.corners[c].sign * track.cornerA[j];
+}
+
+function initLines(track, st, rand, from = null, lead = -LINE_START.shift) {
+  const corners = cornersOf(track);
+  const start = { shift: -lead, tight: (LINE_START.tight * lead) / -LINE_START.shift };
+  const c = corners.map((_, k) =>
+    from
+      ? { shift: from.c[k].shift, tight: from.c[k].tight, best: [Infinity, Infinity] }
+      : { shift: clamp(start.shift + st.apex + (rand() - 0.5) * 1.5, -LINE_SHIFT, LINE_SHIFT), tight: clamp(start.tight + st.tight + (rand() - 0.5) * 4, -LINE_TIGHT, LINE_TIGHT), best: [Infinity, Infinity] }
+  );
+  return { key: track.key, c, try: [], runs: [], lastC: -1, adopted: 0 };
+}
+
+/**
+ * Time each run through a corner window. A clean run (no traffic, fight, DRS, moment or trip off the
+ * road) sets that corner's reference time; now and then the driver tries a variation of their line
+ * there instead, and keeps it if it beat the reference. Runs are compared only with the same ERS state.
+ */
+function learnLines(car, race, st, L) {
+  const track = race.track;
+  const rand = race.rand || Math.random;
+  if (race.phase !== "racing" || car.finished) {
+    L.runs.length = 0;
+    L.try.length = 0;
+    return;
+  }
+  const messy = car.raceW > 0.05 || car.dirty > 0.05 || car.drsOpen || car.offTrack || car.cutGain > 0 || Math.abs(car.d) > halfAt(track, car.idx) + 6 || car.wallHit > 0 || car.recoverT > 0 || car.sliding > 0.6 || !!car.mistake;
+  for (let r = L.runs.length - 1; r >= 0; r--) {
+    const run = L.runs[r];
+    if (messy) run.clean = false;
+    if (car.total - run.total0 < run.span) continue;
+    const t = race.t - run.t0;
+    const p = L.c[run.c];
+    const q = L.try[run.c];
+    if (run.clean && q) {
+      if (t < p.best[run.cls] - Math.max(0.004, t * 0.002)) {
+        p.shift = q.shift;
+        p.tight = q.tight;
+        p.best[run.cls] = t;
+        L.adopted++;
+      }
+    } else if (run.clean) p.best[run.cls] = p.best[run.cls] === Infinity ? t : p.best[run.cls] * 0.7 + t * 0.3;
+    L.try[run.c] = null;
+    if (car.mistake && car.mistake.c === run.c) car.mistake = null;
+    L.runs.splice(r, 1);
+  }
+  const c = track.cornerStart[car.idx];
+  if (c < 0 || c === L.lastC) return;
+  L.lastC = c;
+  const p = L.c[c];
+  const cls = car.battery > 0.5 ? 1 : 0;
+  if (p.best[cls] < Infinity && rand() < st.explore * 0.7) {
+    const q = { shift: p.shift, tight: p.tight };
+    const dir = rand() < 0.5 ? -1 : 1;
+    if (rand() < 0.5) q.shift = clamp(p.shift + dir * (1 + rand()), -LINE_SHIFT, LINE_SHIFT);
+    else q.tight = clamp(p.tight + dir * (3 + rand() * 5), -LINE_TIGHT, LINE_TIGHT);
+    L.try[c] = q;
+  }
+  L.runs.push({ c, t0: race.t, total0: car.total, span: track.corners[c].span, cls, clean: true });
+  // Mistakes: nobody's perfect. How often is the driver's level (err) and who they are, and an angry
+  // driver makes more. At most one per corner: too late on the brakes (runs wide, maybe off and a
+  // track-limits strike), too greedy on the throttle out of it (a slide, maybe a spin into the wall),
+  // drifting off their line, or taking too much of the inside (across a chicane: a cut).
+  if (!car.mistake && rand() < (MISTAKE_BASE + st.mistake) * (car.skill.err ?? 0) * (1 + 2 * (car.fury || 0))) {
+    car.mistake = { c, t0: race.t, kind: pickWeighted({ late: 0.4, greedy: 0.25, wander: 0.25, cut: 0.1 }, rand), sev: 0.4 + rand() * 0.6, side: (rand() < 0.75 ? -1 : 1) * track.corners[c].sign };
+  }
+}
+
+/** How far through the race a car is (0-1; a time trial is always half way). */
+function raceProgress(race, car) {
+  return Number.isFinite(race.laps) ? clamp((Math.max(0, car.laps) + car.s / race.track.L) / race.laps, 0, 1) : 0.5;
+}
+
 export function aiInput(car, race, dt) {
   const track = race.track;
   const { n, path, nor, line } = track;
   const sk = car.skill;
+  const st = personaOf(car);
   const fwd = Math.max(0, car.fwd);
+  cornersOf(track);
+  if (!car.lines || car.lines.key !== track.key) {
+    // (a line worked out in qualifying carries into the race)
+    car.lines = initLines(track, st, race.rand || Math.random, sk.lines && sk.lines.key === track.key ? sk.lines : null, sk.lead);
+  }
+  learnLines(car, race, st, car.lines);
 
   // Follow a speed plan: how close to the grip limit this driver corners and how late they brake.
   // In dirty air the car has less grip, and the driver knows it.
   // (a bot with a faster car knows it: it plans on its own grip and brakes)
   const boost = sk.boost ?? 1;
-  const m = sk.corner * boost * (1 - DIRTY_AIR.grip * (car.dirty || 0));
+  const m = (sk.corner + st.corner) * boost * (1 - DIRTY_AIR.grip * (car.dirty || 0));
   // Brake management: plan on the braking the car actually has (cold, fading or worn brakes stop
   // shorter), and when they run hot, brake earlier and lighter (lift and coast) to let them cool
   const hot = car.brakeTemp > BRAKES.window[1] - 40;
-  const prof = speedProfile(track, m, sk.brake * boost * (car.brakeEff ?? 1) * (hot ? 0.8 : 1));
+  // (with the inside line on someone, the committed ones brake later to make it stick)
+  // (and the less skilled misjudge it)
+  const dive = car.attackInside ? 1 + 0.04 * (car.aggNow ?? st.agg) + 0.05 * (sk.err ?? 0) : 1;
+  const prof = speedProfile(track, m, (sk.brake + st.brake) * boost * (car.brakeEff ?? 1) * (hot ? 0.8 : 1) * dive);
   const look = 1 + Math.round((fwd * 0.04) / STEP);
   let target = prof[(car.idx + look) % n];
+  // A mistake in this corner (see learnLines). It's over once it has bitten (into the wall, a spin,
+  // nearly stopped) or after a few seconds, whichever comes first.
+  if (car.mistake && (car.wallHit > 0 || car.recoverT > 0 || car.stuckT > 0.3 || fwd < 60 || race.t - car.mistake.t0 > 4)) car.mistake = null;
+  const mk = car.mistake && car.mistake.c === track.cornerAt[car.idx] ? car.mistake : null;
+  // Too late on the brakes: arriving too fast for it
+  // (against what the car can really do, not the driver's usual margin: a cautious driver gets it wrong too)
+  if (car.mistake && car.mistake.kind === "late" && car.mistake.c === track.cornerAt[(car.idx + look) % n]) {
+    const limit = speedProfile(track, boost * (1 - DIRTY_AIR.grip * (car.dirty || 0)), boost * 0.95)[(car.idx + look) % n];
+    target = Math.max(target, limit * (1.08 + 0.15 * car.mistake.sev));
+  }
   // Off the racing line (attacking, defending, pushed wide), the car's own path through the coming
   // corners is tighter than the line's: slow down for it (grip-limited speed goes with the square root
   // of the radius). Judged from where the car is and where it's heading, whichever is tighter.
-  const offBy = Math.abs(car.d - line[car.idx]);
+  const offBy = Math.abs(car.d - carLine(car, track, car.idx));
   if (offBy > 12 || car.raceW > 0.05) {
     let ratio = 1;
     for (let k = 0; k <= look + 24; k += 2) {
@@ -1231,20 +1480,39 @@ export function aiInput(car, race, dt) {
   const preview = (car.idx + 2 + Math.round(fwd * 0.06 / STEP)) % n;
   const tn = track.tan[preview];
   const headingErr = wrapAngle(Math.atan2(tn[1], tn[0]) - car.heading);
-  const onLine = line[preview];
-  const wantD = clamp(dodge ?? onLine + (car.raceD - onLine) * car.raceW, -(halfAt(track, preview) - 16), halfAt(track, preview) - 16);
+  const onLine = carLine(car, track, preview);
+  // Drifting off their line, or taking too much of the inside
+  let err = 0;
+  let edgeAllow = 16;
+  if (mk && mk.kind === "wander") {
+    // (mostly running wide on the way out; sometimes tucking in too early)
+    err = mk.side * (70 + 60 * mk.sev) * track.cornerW[preview];
+    edgeAllow = -20 - 40 * mk.sev;
+  } else if (mk && mk.kind === "cut") {
+    err = track.corners[mk.c].sign * (60 + 60 * mk.sev) * track.cornerA[preview];
+    edgeAllow = -30 - 40 * mk.sev;
+  }
+  const wantD = clamp(dodge ?? onLine + (car.raceD - onLine) * car.raceW + err, -(halfAt(track, preview) - edgeAllow), halfAt(track, preview) - edgeAllow);
   const cross = car.d - wantD;
   car.noiseT += dt;
-  const wobble = sk.noise ? Math.sin(car.noiseT * 1.7) * sk.noise * 0.12 : 0;
+  const noise = (sk.noise ?? 0) * st.noise + st.noiseAdd;
+  const wobble = noise ? Math.sin(car.noiseT * 1.7) * noise * 0.12 : 0;
   const delta = headingErr + Math.atan((-2.2 * cross) / (fwd + 40)) + wobble;
   const edge = Math.abs(car.d) - (halfAt(track, car.idx) - 12);
-  const recover = edge > 0 ? -Math.sign(car.d) * Math.min(1, edge / 10) : 0;
+  const recover = edge > 0 && !(mk && (mk.kind === "wander" || mk.kind === "cut")) ? -Math.sign(car.d) * Math.min(1, edge / 10) : 0;
   const steer = clamp(delta / maxSteerAt(fwd) + recover, -1, 1);
 
   let throttle = 0;
   let brake = 0;
   if (fwd > target + 6) brake = clamp((fwd - target) / 22, 0.35, hot ? 0.75 : 1);
   else throttle = clamp((target - fwd) / 30 + 0.5, 0, 1);
+  // Missed the braking point: a moment late on the pedal, then it's too late to get it all off
+  const lateMk = car.mistake && car.mistake.kind === "late" && car.mistake.c === track.cornerAt[(car.idx + look) % n] ? car.mistake : null;
+  if (lateMk && brake > 0 && (lateMk.hold ??= 0.08 + 0.17 * lateMk.sev) > 0) {
+    lateMk.hold -= dt;
+    brake = 0;
+    throttle = 0;
+  }
   // Exit traction: feed the throttle in while still turning, and lift when running out of road
   if (throttle > 0) {
     // Lift only when the tyres are actually saturated (sliding), not just because the car is turning
@@ -1261,10 +1529,20 @@ export function aiInput(car, race, dt) {
   }
   // Power oversteer: at low speed with the wheel turned, feed the throttle in gently (managing the
   // wheelspin, as a driver does) and back off the moment the rear starts to step out
-  if (throttle > 0) {
+  if (mk && mk.kind === "greedy" && brake === 0) throttle = Math.max(throttle, 0.75 + 0.25 * mk.sev);
+  else if (throttle > 0) {
     const lowSpeed = Math.max(0, 1 - fwd / (CAR.top * 0.45));
     throttle = Math.min(throttle, 1 - 0.6 * lowSpeed * Math.min(1, Math.abs(car.steer)));
     throttle *= clamp(1 - (car.oversteer || 0) * 2.2, 0.25, 1);
+  }
+  // Running wide in a tight corner (the front's gone): scrub the speed off rather than ride it out
+  // across the road (in a chicane, straight over the inside of the next corner)
+  if (track.radii[car.idx] < 200 && car.balance > 0.1 && !(mk && (mk.kind === "wander" || mk.kind === "greedy"))) {
+    const wide = (wantD - car.d) * Math.sign(track.curv[car.idx]);
+    if (wide > 40 && car.balance > 0.14) {
+      throttle = 0;
+      brake = Math.max(brake, clamp((wide - 40) / 40, 0.2, 0.8));
+    }
   }
   // Launch: full beans off the line, once the driver has reacted to the lights
   if (fwd < 60 && race.phase === "racing") throttle = race.t < (car.react || 0) ? 0 : 1;
@@ -1284,11 +1562,22 @@ export function aiInput(car, race, dt) {
     // Reversing turns the car the other way, so steer against the error
     return { throttle: 0, brake: 1, steer: clamp(-headingErr * 2, -1, 1), handbrake: false, drs: false, ers: false };
   }
-  // ERS: deploy out of slow corners and when attacking or defending; spend freely when the battery's full
+  // ERS: deploy out of slow corners and when attacking or defending; spend freely when the battery's
+  // full. How is the driver's style: some save it all for a fight, some spend it as it comes.
   const pressure = (car.gapAhead > 0 && car.gapAhead < 1.2) || car.defending;
   const exit = fwd < CAR.top * 0.7 && throttle > 0.8;
-  const spare = car.battery > 0.5;
-  const ers = throttle > 0.8 && car.battery > 0.08 && (exit || pressure || spare) && (sk.corner >= 0.84 || exit);
+  const fighting = pressure || (car.attack && car.raceW > 0.3);
+  // Each lap the driver picks how to use the battery (a late charger burns more as the end nears)
+  if (car.ersLap !== car.laps) {
+    car.ersLap = car.laps;
+    const rand = race.rand || Math.random;
+    car.ersPlan = pickWeighted({ save: st.ersSave, burn: st.ersBurn + st.charge * raceProgress(race, car) + (car.fury || 0), steady: 0.4 }, rand);
+  }
+  const want =
+    car.ersPlan === "save" ? fighting || (exit && car.battery > 0.45) || car.battery > 0.85
+    : car.ersPlan === "burn" ? exit || fighting || car.battery > 0.25
+    : exit || pressure || car.battery > 0.5;
+  const ers = throttle > 0.8 && car.battery > 0.08 && want && (sk.corner >= 0.84 || exit);
   return { throttle, brake, steer, handbrake: false, drs: true, ers };
 }
 
@@ -1321,6 +1610,14 @@ export function makeField({ mode, difficulty = "medium", seed = 1, cars = DEFAUL
     const j = Math.floor(rand() * (k + 1));
     [drivers[k], drivers[j]] = [drivers[j], drivers[k]];
   }
+  const shuffle = (a, r) => {
+    for (let k = a.length - 1; k > 0; k--) {
+      const j = Math.floor(r() * (k + 1));
+      [a[k], a[j]] = [a[j], a[k]];
+    }
+    return a;
+  };
+  const deck = [];
   // "Mixed": the grid spans every level from Noob to Impossible, quickest first
   const levels = difficulty === "mixed" ? DIFFICULTY_ORDER.slice().reverse() : null;
   const mid = (count - 1) / 2;
@@ -1338,6 +1635,12 @@ export function makeField({ mode, difficulty = "medium", seed = 1, cars = DEFAUL
         commit: clamp(base.commit + spread * 0.4, 0.55, 1)
       };
     }
+    // Deal the driver a style from a shuffled deck (every style once before any repeats), and make
+    // their persona for this race (its small pace trims apply as they drive; the level stays as set)
+    if (rank % STYLES.length === 0) deck.splice(0, deck.length, ...shuffle(STYLES.slice(), rand));
+    const st = makePersona(deck[rank % STYLES.length], rand);
+    skill.style = st.style;
+    skill.persona = st;
     return { id: `ai${rank}`, livery: rank >= DRIVERS.length ? { ...liv, code: liv.code + rank } : liv, skill };
   });
 }
@@ -1353,7 +1656,8 @@ export function qualifyingSkill(skill) {
     corner: Math.min(1.1, skill.corner + 0.03),
     brake: Math.min(1.02, skill.brake + 0.04),
     commit: Math.min(1, (skill.commit ?? 1) + 0.04),
-    noise: (skill.noise ?? 0) * 0.5
+    noise: (skill.noise ?? 0) * 0.5,
+    err: (skill.err ?? 0) * 0.7
   };
 }
 
@@ -1370,6 +1674,8 @@ export function qualifyingRun(track, skill, rand = Math.random) {
   race.player = null;
   const dt = 1 / 120;
   for (let k = 0; k < 150 * QUALI_LAPS * 120 && car.lapTimes.length < QUALI_LAPS; k++) stepRace(race, null, dt);
+  // The lines they worked out go with them into the race
+  if (car.lines) skill.lines = car.lines;
   const laps = car.lapTimes.slice(0, QUALI_LAPS).map((l) => ({ time: l.time * (1 + (rand() - 0.5) * 0.008), valid: l.valid }));
   while (laps.length < QUALI_LAPS) laps.push({ time: Infinity, valid: false });
   return laps;
@@ -1828,20 +2134,119 @@ export function stepRace(race, playerInput, dt) {
         behind = o;
       }
     }
-    // A spot on the road (not an offset from the line, which would carry into the next corners)
+    // A spot on the road (not an offset from the line, which would carry into the next corners).
+    // How and when a driver attacks and defends comes from who they are, their mood, and a plan
+    // picked at random for each fight.
+    const P = personaOf(car);
+    const rnd = race.rand || Math.random;
+    // Mood: drifts toward a new random target every few seconds (the volatile ones swing further)
+    if (race.phase === "racing") {
+      car.moodT = (car.moodT ?? 0) - dt;
+      if (car.moodT <= 0) {
+        car.moodT = 3 + rnd() * 9;
+        car.moodTo = (rnd() - 0.5) * 0.9 * P.volatility;
+      }
+      car.mood = (car.mood || 0) + clamp((car.moodTo || 0) - (car.mood || 0), -0.25 * dt, 0.25 * dt);
+      // Losing a place fires them up (their grudge); making one calms them down
+      if (car.lastPos != null && car.pos > car.lastPos) car.fury = Math.min(0.6, (car.fury || 0) + 0.35 * P.grudge);
+      else if (car.lastPos != null && car.pos < car.lastPos) car.fury = (car.fury || 0) * 0.5;
+      car.fury = Math.max(0, (car.fury || 0) - 0.03 * dt);
+      car.lastPos = car.pos;
+    }
+    const late = P.charge * (raceProgress(race, car) - 0.55);
+    const aggNow = (car.aggNow = clamp(P.agg + (car.mood || 0) + (car.fury || 0) + late * 0.9, 0, 1));
+    const patNow = clamp(P.patience - (car.fury || 0) * 0.8 - late * 0.6, 0, 1);
     let spot = null;
-    if (ahead && aheadGap < 170 && (car.fwd > ahead.fwd - 15 || aheadGap < 70)) {
+    car.attackInside = false;
+    // The car ahead has made a mistake (a slide, a moment off the road or into the wall, a slow exit)
+    const chance = ahead && (ahead.sliding > 0.35 || ahead.offTrack || ahead.wallHit > 0 || ahead.fwd < car.fwd - 40);
+    const drsOn = car.drsOpen || (car.inDrsZone && car.drsEligible);
+    const range = (120 + 80 * aggNow) * (chance ? 1.4 : 1);
+    // The patient ones only go when there's a real chance: DRS, a mistake, a much better run, or right there
+    const keen = !!ahead && aheadGap < range && (car.fwd > ahead.fwd - 15 || aheadGap < 70) && (patNow < 0.6 || drsOn || chance || car.fwd > ahead.fwd + 20 + 20 * patNow || aheadGap < 60);
+    if (keen) {
+      car.defPlan = null;
       const inside = insideOfNextCorner(car.idx);
-      // Already alongside: stay on that side. Otherwise go for the inside of the next corner.
-      let side = Math.abs(car.d - ahead.d) > 12 ? Math.sign(car.d - ahead.d) : inside || Math.sign(car.d - ahead.d) || 1;
-      // The door's shut on that side: take the other one
-      if (Math.sign(ahead.d) === side && Math.abs(ahead.d) > tw * 0.18) side = -side;
-      // (round the outside of a corner only a little way off the line, less the nearer the corner is:
-      // a wide line in is a slow one)
-      spot = side * tw * (inside && side === -inside ? 0.06 + 0.16 * clamp((cornerIn - 8) / 50, 0, 1) : 0.28);
-    } else if (behind && behindGap < 70 && behind.fwd > car.fwd - 10) {
-      const inside = insideOfNextCorner(car.idx);
-      if (inside) spot = inside * tw * 0.2;
+      const alongside = Math.abs(car.d - ahead.d) > 12;
+      let at = car.attack;
+      const plan = (not) =>
+        pickWeighted(
+          {
+            dive: (0.25 + aggNow * (1 - 0.5 * P.straights)) * (not === "dive" ? 0.2 : 1),
+            around: (0.05 + 0.45 * aggNow * P.risk) * (not === "around" ? 0.2 : 1),
+            tow: (0.15 + P.tow * P.straights) * (not === "tow" ? 0.2 : 1),
+            dummy: (0.03 + 0.5 * P.feint * P.straights) * (not === "dummy" ? 0.2 : 1),
+            exit: (0.05 + 0.4 * patNow) * (not === "exit" ? 0.2 : 1)
+          },
+          rnd
+        );
+      if (!at || at.on !== ahead.id) at = car.attack = { on: ahead.id, plan: plan(null), age: 0, giveUp: 3 + rnd() * 5, side: 0, since: 0, d0: 0, switched: false, pullAt: 55 + (1 - P.tow) * 40 + rnd() * 25, fake: 0.2 + rnd() * 0.35 };
+      at.age += dt;
+      // Not working: try something else
+      if (at.age > at.giveUp && !alongside) {
+        at.plan = plan(at.plan);
+        at.age = 0;
+        at.giveUp = 3 + rnd() * 5;
+        at.side = 0;
+        at.switched = false;
+        at.pullAt = 55 + (1 - P.tow) * 40 + rnd() * 25;
+      }
+      if (cornerIn === 99) {
+        // A straight
+        const slip = at.plan === "tow" || at.plan === "dummy";
+        if (slip && !alongside && !at.side && aheadGap > at.pullAt) spot = ahead.d; // sit in the tow
+        else {
+          // (a straight fight: whichever side they're on; a pull-out from the tow: usually the side
+          // with more room, sometimes not, and they stick with it)
+          if (!at.side || !slip) {
+            const room = -Math.sign(ahead.d) || 1;
+            at.side = alongside ? Math.sign(car.d - ahead.d) : slip ? (rnd() < 0.7 ? room : -room) : Math.sign(car.d - ahead.d) || room;
+            at.since = 0;
+            at.d0 = ahead.d;
+          }
+          at.since += dt;
+          // They moved to cover it, or it was a dummy all along: switch (once)
+          const covered = (ahead.d - at.d0) * at.side > 10;
+          if (!at.switched && aheadGap > 35 && ((covered && rnd() < P.feint * dt * 8) || (at.plan === "dummy" && at.since > at.fake))) {
+            at.side = -at.side;
+            at.switched = true;
+          }
+          spot = at.side * tw * 0.28;
+        }
+      } else {
+        at.side = 0;
+        at.switched = false;
+        // A corner coming. Alongside: stay on that side. Hanging back for the exit: stay on the line.
+        let side = alongside ? Math.sign(car.d - ahead.d) : at.plan === "around" ? -inside || 1 : inside || Math.sign(car.d - ahead.d) || 1;
+        if (!alongside && (at.plan === "exit" || ((at.plan === "tow" || at.plan === "dummy") && aheadGap > 60))) side = 0;
+        // The door's shut on that side: go round the outside if they dare, otherwise wait
+        if (side && !alongside && Math.sign(ahead.d) === side && Math.abs(ahead.d) > tw * 0.18) side = aggNow * P.risk > 0.2 ? -side : 0;
+        // (round the outside only a little way off the line, less the nearer the corner is: a wide
+        // line in is a slow one; the brave hang it out further)
+        if (side) spot = side * tw * (inside && side === -inside ? (0.06 + 0.16 * clamp((cornerIn - 8) / 50, 0, 1)) * (0.85 + 0.3 * P.risk) : 0.28);
+        car.attackInside = spot != null && inside !== 0 && side === inside && cornerIn < 35;
+      }
+    } else {
+      car.attack = null;
+      if (behind && behindGap < 40 + 80 * P.defend && behind.fwd > car.fwd - 10) {
+        // Defend, with a plan for this fight: cover the inside (early or late), pull across once to
+        // break the tow on a straight, or just hold the line
+        let dp = car.defPlan;
+        if (!dp || dp.vs !== behind.id) {
+          dp = car.defPlan = {
+            vs: behind.id,
+            plan: pickWeighted({ cover: 0.4 + P.defend, tow: 0.05 + 0.25 * P.defend * P.risk, hold: 0.15 + 0.5 * (1 - P.defend) }, rnd),
+            at: 25 + rnd() * 45,
+            side: 0
+          };
+        }
+        const inside = insideOfNextCorner(car.idx);
+        if (dp.plan === "cover" && inside && cornerIn < dp.at) spot = inside * tw * (0.12 + 0.12 * P.defend);
+        else if (dp.plan === "tow" && (cornerIn === 99 || cornerIn > 25) && (dp.side || behindGap < 90)) {
+          if (!dp.side) dp.side = Math.sign(behind.d - car.d) || 1;
+          spot = dp.side * tw * 0.16;
+        }
+      } else car.defPlan = null;
     }
     // Never set up on the outside of the corner the car is in: hold the line until the exit
     if (spot != null && track.radii[car.idx] < 600 && Math.sign(spot) === -Math.sign(curv[car.idx])) spot = null;

@@ -183,7 +183,7 @@ const DEFAULT_CONTROLS = {
   ers: ["ShiftLeft", "ShiftRight"],
   restart: ["KeyR"]
 };
-const DEFAULT_SETTINGS = { steerSens: 100, brakeForce: 100, accelSens: 60, racingLine: true, playerRing: false, edgeShade: true, camRotate: false };
+const DEFAULT_SETTINGS = { steerSens: 100, brakeForce: 100, accelSens: 60, balance: 0, racingLine: true, playerRing: false, edgeShade: true, camRotate: false };
 const ACTION_LABELS = {
   accel: "THROTTLE",
   brake: "BRAKE / REVERSE",
@@ -277,6 +277,10 @@ function syncSettingsUI() {
   const as = $("input-accel-sens");
   if (as) as.value = settings.accelSens;
   if ($("val-accel-sens")) $("val-accel-sens").textContent = `${settings.accelSens}%`;
+  const bal = $("input-balance");
+  if (bal) bal.value = settings.balance ?? 0;
+  const b = settings.balance ?? 0;
+  if ($("val-balance")) $("val-balance").textContent = b === 0 ? "NEUTRAL" : `${b < 0 ? "UNDERSTEER" : "OVERSTEER"} ${Math.abs(b)}%`;
   if (bf) bf.value = settings.brakeForce;
   if ($("val-brake-force")) $("val-brake-force").textContent = `${settings.brakeForce}%`;
   if ($("btn-toggle-line")) $("btn-toggle-line").textContent = `RACING LINE: [${settings.racingLine ? "ON" : "OFF"}]`;
@@ -335,6 +339,11 @@ $("input-steer-sens")?.addEventListener("input", (e) => {
 });
 $("input-accel-sens")?.addEventListener("input", (e) => {
   settings.accelSens = Number(e.target.value);
+  syncSettingsUI();
+  saveSettings();
+});
+$("input-balance")?.addEventListener("input", (e) => {
+  settings.balance = Number(e.target.value);
   syncSettingsUI();
   saveSettings();
 });
@@ -503,6 +512,7 @@ function playerInput(dt = 1 / 120) {
     handbrake: keys.drift && !spaceFromGrid,
     drs: keys.drs,
     brakeMult: settings.brakeForce / 100,
+    balance: (settings.balance ?? 0) / 100,
     steerRate: 7 * Math.max(1, sens)
   };
 }
@@ -1224,7 +1234,7 @@ function showSetup(mode) {
   const lapOpts = [1, 3, 5, 10, 20];
   const title = { gp: "GRAND PRIX", duel: "DUEL", trial: "TIME TRIAL" }[mode];
   const blurb = {
-    gp: "A Grand Prix against up to 29 rivals (20 cars is a real F1 grid; pick anything from 3 to 30): pick one level for the whole field, or MIXED for everything from Noob to Impossible. Up to Medium the bots drive your exact car; from Hard up their cars are faster. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify over three laps from the line (your best clean lap sets your grid slot), or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
+    gp: "A Grand Prix against up to 29 rivals (20 cars is a real F1 grid; pick anything from 3 to 30): pick one level for the whole field, or MIXED for everything from Noob to Impossible. Up to Medium the bots drive your exact car; from Hard up their cars are faster. Every rival is dealt a racing style of their own each race, and their mood changes as it goes. Follow closely and you get a tow on the straights but dirty air (less grip) in the corners. Qualify over three laps from the line (your best clean lap sets your grid slot), or skip it for a random grid. Running wide only counts if you gain from it: five warnings, then 3 s penalties. Cutting a corner: one warning, then +2 s.",
     duel: "Head-to-head against one bot. Every level is a real racer; up to Medium it drives your exact car, and from Hard up its car is faster too (Hard +3%, Very Hard +6%, Impossible +10%).",
     trial: "Flying laps on an empty circuit. Your best clean lap becomes a ghost; running wide deletes the lap."
   }[mode];

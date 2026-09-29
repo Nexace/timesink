@@ -90,6 +90,15 @@
 
               <div class="slider-group">
                 <div class="slider-header">
+                  <span class="setting-label">CAR BALANCE:</span>
+                  <span class="slider-val" id="val-balance">NEUTRAL</span>
+                </div>
+                <input type="range" id="input-balance" min="-100" max="100" value="0" step="10" aria-label="Car balance, understeer to oversteer" />
+                <p class="slider-note">Left = understeer: stable and forgiving, but it pushes wide if you go in too fast. Right = oversteer: the car rotates into corners, but the rear steps out under braking and on the throttle, and a slide costs speed. Neutral is the all-rounder.</p>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-header">
                   <span class="setting-label">BRAKE PRESSURE (100% = FULL, SAME AS THE BOTS):</span>
                   <span class="slider-val" id="val-brake-force">100%</span>
                 </div>

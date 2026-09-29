@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { CIRCUITS } from "./circuits.js";
-import { buildTrack, createRace, stepRace, classify, project, aiInput, DIRTY_AIR, BRAKES, brakeEfficiency, DRS_GAP, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap, MIN_CARS, MAX_CARS, halfAt, STRAIGHT_WIDTH, V8, engineGear, engineRpm } from "./race.js";
+import { buildTrack, createRace, stepRace, classify, project, aiInput, DIRTY_AIR, BRAKES, brakeEfficiency, DRS_GAP, DIFFICULTY, DIFFICULTY_ORDER, TRACK_WIDTH, ERS, LIMITS, CUT_PENALTY, CAR, cornerSpeed, gripAt, makeField, qualifyingLap, MIN_CARS, MAX_CARS, halfAt, STRAIGHT_WIDTH, V8, engineGear, engineRpm, STYLES, makePersona, carLine, stepCar, makeCar } from "./race.js";
 
 const track = buildTrack({ key: "monza", name: "Monza", pts: CIRCUITS.monza.pts, lengthM: CIRCUITS.monza.lengthM, theme: "park" });
 
@@ -622,5 +622,95 @@ describe("Ghost Lap race simulation", () => {
     const imp = lapFor("impossible");
     assert.ok(imp < med * 0.96, `impossible ${imp} vs medium ${med}`);
   });
-});
 
+  it("driving styles: ten, dealt at random each race (duels too), every trait varied per driver", () => {
+    assert.equal(STYLES.length, 10);
+    const gp = makeField({ mode: "gp", difficulty: "hard", seed: 11, cars: 11 });
+    // a 10-rival field gets every style once
+    assert.equal(new Set(gp.map((f) => f.skill.style)).size, 10);
+    const duels = new Set();
+    for (let seed = 1; seed <= 40; seed++) duels.add(makeField({ mode: "duel", difficulty: "hard", seed })[0].skill.style);
+    assert.ok(duels.size >= 7, `duel styles seen: ${duels.size}`);
+    // the same style isn't the same driver twice
+    let r = 1;
+    const rand = () => ((r = (r * 16807) % 2147483647) / 2147483647);
+    const a = makePersona("aggressor", rand);
+    const b = makePersona("aggressor", rand);
+    assert.notEqual(a.agg, b.agg);
+    assert.notEqual(a.feint, b.feint);
+    // and the level's pace values are left exactly as set
+    const duel = makeField({ mode: "duel", difficulty: "hard", seed: 2 })[0].skill;
+    assert.equal(duel.corner, DIFFICULTY.hard.corner);
+    assert.equal(duel.brake, DIFFICULTY.hard.brake);
+  });
+
+  it("bots take their own lines through corners, and learn quicker ones as they go", () => {
+    const race = createRace({ track, mode: "trial", seed: 4 });
+    const car = race.cars[0];
+    car.isPlayer = false;
+    car.skill = { ...DIFFICULTY.hard, persona: { ...makePersona("wildcard", () => 0.5), explore: 1 } };
+    race.player = null;
+    for (let k = 0; k < 120 * 400 && car.lapTimes.length < 8; k++) stepRace(race, null, 1 / 120);
+    const c = track.cornerAt.findIndex((x) => x >= 0);
+    assert.notEqual(carLine(car, track, c + 30), track.line[c + 30]);
+    assert.ok(car.lines.adopted > 0, "adopted no new lines");
+  });
+
+  it("mistakes: the lower levels make them (off the road, cuts, penalties), the top ones hardly ever", () => {
+    const count = (difficulty) => {
+      let mistakes = 0;
+      let offs = 0;
+      for (const seed of [3, 8, 13]) {
+        const race = createRace({ track, mode: "demo", laps: 4, difficulty, seed });
+        const seen = new Set();
+        const was = new Map();
+        for (let k = 0; k < 120 * 400 && !race.cars.every((x) => x.finished); k++) {
+          stepRace(race, null, 1 / 120);
+          for (const x of race.cars) {
+            if (x.mistake && !seen.has(x.mistake)) seen.add(x.mistake);
+            // an incident: off the road, or a big moment
+            const bad = x.offTrack || x.cutGain > 0 || (x.oversteer || 0) > 0.35 || x.wallHit > 0;
+            if (bad && !was.get(x)) offs++;
+            was.set(x, bad);
+          }
+        }
+        mistakes += seen.size;
+        assert.ok(race.cars.every((x) => x.finished), `${difficulty}: a car never finished`);
+      }
+      return { mistakes, offs };
+    };
+    const noob = count("noob");
+    const imp = count("impossible");
+    assert.ok(noob.mistakes > imp.mistakes * 5, `noob ${noob.mistakes} vs impossible ${imp.mistakes}`);
+    assert.ok(noob.offs > imp.offs, `incidents: noob ${noob.offs} vs impossible ${imp.offs}`);
+  });
+
+  it("car balance: understeer plants the rear, oversteer loosens it; neither end is free speed", () => {
+    const corner = (balance, brake = 0) => {
+      const car = makeCar("p", { name: "P", code: "P", color: "#fff" }, track.grid[0], { isPlayer: true });
+      car.vx = Math.cos(car.heading) * 700;
+      car.vy = Math.sin(car.heading) * 700;
+      let over = 0;
+      for (let k = 0; k < 60; k++) {
+        stepCar(car, { throttle: brake ? 0 : 0.5, brake, steer: 1, balance }, track, 1 / 120);
+        over = Math.max(over, car.oversteer || 0);
+      }
+      return over;
+    };
+    assert.ok(corner(1, 0.8) > corner(0, 0.8), "oversteer setting should step out more on the brakes");
+    assert.ok(corner(-1, 0.8) <= corner(0, 0.8), "understeer setting should step out less");
+    const lap = (balance) => {
+      const race = createRace({ track, mode: "trial", seed: 3 });
+      const car = race.player;
+      for (let k = 0; k < 120 * 300 && car.lapTimes.length < 3; k++) {
+        const inp = aiInput(car, race, 1 / 120);
+        inp.balance = balance;
+        stepRace(race, inp, 1 / 120);
+      }
+      return Math.min(...car.lapTimes.slice(1).map((l) => l.time));
+    };
+    const neutral = lap(0);
+    assert.ok(lap(1) > neutral * 0.985, "full oversteer shouldn't be free speed");
+    assert.ok(lap(-1) > neutral, "full understeer costs a little pace");
+  });
+});

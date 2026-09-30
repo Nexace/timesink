@@ -1213,6 +1213,7 @@ export function stepCar(car, input, track, dt, mods = {}) {
   if (slideYaw) car.heading = wrapAngle(car.heading + slideYaw * dt);
   car.fwd = fwd;
   car.throttle = input.throttle;
+  car.rev = input.rev || 0; // revs held on the clutch (the engine's revving, the car isn't driving)
   car.brake = input.brake;
 
   // Re-project and keep the car inside walls / tyre barriers

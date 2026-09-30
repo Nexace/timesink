@@ -273,10 +273,10 @@ export function updateEngines(race, me, listener, dt) {
   engine.master.gain.setTargetAtTime(0.9 * getVolume() * ducked, ctx.currentTime, ducked < 1 ? 0.02 : 0.08);
 
   const rev = (c) => {
-    const thr = c.throttle ?? 0;
+    const thr = Math.max(c.throttle ?? 0, c.rev ?? 0);
     return { rpm: engineRpm(c.fwd, thr), throttle: thr, gear: engineGear(c.fwd) };
   };
-  engine.me.set({ ...rev(me), level: 0.095 + 0.07 * (me.throttle ?? 0) }, dt);
+  engine.me.set({ ...rev(me), level: 0.095 + 0.07 * Math.max(me.throttle ?? 0, me.rev ?? 0) }, dt);
 
   let best = null;
   let bestD = 1500;

@@ -450,7 +450,9 @@ let throttleLevel = 0;
 // the car can't move yet) builds revs; they carry into the launch, and a key still held at lights out
 // doesn't pull the handbrake or brake until it's let go
 let gridRev = 0;
-let launchRev = 0; // the revs held at lights out, used the moment the throttle goes down
+let launchPending = false; // lights are out, the throttle hasn't gone down yet: still on the clutch
+let launchRev = 0; // the revs the car launched on
+let launchT = 0; // launch phase: the clutch is dumped at those revs, no traction limiter, until up to speed
 let spaceFromGrid = false;
 let brakeFromGrid = false;
 // No rolling starts: throttle held on the grid is ignored, and if it's still held when the lights go
@@ -479,15 +481,20 @@ function playerInput(dt = 1 / 120) {
     // The car can't move yet; the throttle only revs the engine on the grid
     return { throttle: Math.max(keys.up ? 1 : 0, gridRev), ers: false, brake: 0, steer: 0, handbrake: false, drs: false, brakeMult: 1, steerRate: 7 };
   }
-  // Lights out: the car doesn't move until the throttle goes down; then the revs built on the grid
-  // carry straight into the launch
-  if (gridRev > 0) {
-    launchRev = gridRev;
-    gridRev = 0;
-  }
-  if (launchRev > 0 && keys.up && !gridLock) {
-    throttleLevel = Math.max(throttleLevel, launchRev);
-    launchRev = 0;
+  // Lights out: the car doesn't move until the throttle goes down. Until then it's still on the clutch:
+  // the revs hold while the key is held (and fall if it's let go); then they carry into the launch.
+  if (gridRev > 0 && !launchPending) launchPending = true;
+  if (launchPending) {
+    const revving = keys.drift || keys.down;
+    gridRev = revving ? Math.min(1, gridRev + 1.8 * dt) : Math.max(0, gridRev - 3 * dt);
+    if (keys.up && !gridLock) {
+      launchPending = false;
+      launchRev = gridRev;
+      gridRev = 0;
+      throttleLevel = Math.max(throttleLevel, launchRev);
+      launchT = launchRev > 0.05 ? 3 : 0;
+    } else if (gridRev <= 0) launchPending = false;
+    else return { throttle: 0, rev: gridRev, ers: false, brake: 0, steer, handbrake: false, drs: false, brakeMult: 1, steerRate: 7 };
   }
   if (spaceFromGrid && !keys.drift) spaceFromGrid = false;
   if (brakeFromGrid && !keys.down) brakeFromGrid = false;
@@ -503,7 +510,16 @@ function playerInput(dt = 1 / 120) {
   else throttleLevel = Math.max(0, throttleLevel - 9 * dt);
   const car = session?.race.player;
   const v = car ? Math.max(0, car.fwd) / CAR.top : 1;
-  const traction = Math.min(1, 0.25 + accel * 0.75 + v * 1.6);
+  let traction = Math.min(1, 0.25 + accel * 0.75 + v * 1.6);
+  // A launch on built revs: the throttle's at those revs from the off and the traction limiter stays
+  // out of it, until the car's up to speed (or the throttle's lifted)
+  if (launchT > 0) {
+    launchT = keys.up && v < 0.3 ? launchT - dt : 0;
+    if (launchT > 0) {
+      throttleLevel = Math.max(throttleLevel, launchRev);
+      traction = 1;
+    }
+  }
   return {
     throttle: throttleLevel * traction,
     ers: keys.ers,
@@ -664,7 +680,9 @@ function drawFx(fx, view) {
 function startRace(config) {
   throttleLevel = 0;
   gridRev = 0;
+  launchPending = false;
   launchRev = 0;
+  launchT = 0;
   spaceFromGrid = false;
   brakeFromGrid = false;
   gridLock = false;

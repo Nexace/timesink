@@ -455,11 +455,12 @@ let launchRev = 0; // the revs the car launched on
 let launchT = 0; // launch phase: the clutch is dumped at those revs, no traction limiter, until up to speed
 let spaceFromGrid = false;
 let brakeFromGrid = false;
-// No rolling starts: throttle held on the grid is ignored, and if it's still held when the lights go
-// out it stays dead until released and pressed again.
-let gridLock = false;
+// No rolling starts: throttle on the grid is ignored, and if it's still held when the lights go out
+// the car bogs down for a moment (no launch on built revs) before it drives away.
+let gridLock = false; // the throttle is held on the grid right now
+let bogT = 0;
 let gridWarned = false;
-let lockShown = false;
+const BOG_TIME = 0.5;
 function playerInput(dt = 1 / 120) {
   const sens = settings.steerSens / 100;
   const accel = Math.max(0.25, Math.min(1, (settings.accelSens ?? 60) / 100));
@@ -470,8 +471,8 @@ function playerInput(dt = 1 / 120) {
     gridRev = revving ? Math.min(1, gridRev + 1.8 * dt) : Math.max(0, gridRev - 3 * dt);
     spaceFromGrid = keys.drift;
     brakeFromGrid = keys.down;
+    gridLock = keys.up;
     if (keys.up) {
-      gridLock = true;
       if (!gridWarned) {
         gridWarned = true;
         sfx.deny();
@@ -481,13 +482,27 @@ function playerInput(dt = 1 / 120) {
     // The car can't move yet; the throttle only revs the engine on the grid
     return { throttle: Math.max(keys.up ? 1 : 0, gridRev), ers: false, brake: 0, steer: 0, handbrake: false, drs: false, brakeMult: 1, steerRate: 7 };
   }
+  // Held the throttle through lights out: bogged down, and the revs are gone
+  if (gridLock) {
+    gridLock = false;
+    bogT = BOG_TIME;
+    gridRev = 0;
+    launchPending = false;
+    sfx.deny();
+    banner("BOGGED DOWN", `JUMPED THE LIGHTS • WAIT FOR LIGHTS OUT, THEN ${keyLabel("accel")}`, "#ff4d5e", 1.6, 14);
+  }
+  if (bogT > 0) {
+    bogT = Math.max(0, bogT - dt);
+    throttleLevel = 0;
+    return { throttle: 0, ers: false, brake: 0, steer, handbrake: false, drs: false, brakeMult: 1, steerRate: 7 };
+  }
   // Lights out: the car doesn't move until the throttle goes down. Until then it's still on the clutch:
   // the revs hold while the key is held (and fall if it's let go); then they carry into the launch.
   if (gridRev > 0 && !launchPending) launchPending = true;
   if (launchPending) {
     const revving = keys.drift || keys.down;
     gridRev = revving ? Math.min(1, gridRev + 1.8 * dt) : Math.max(0, gridRev - 3 * dt);
-    if (keys.up && !gridLock) {
+    if (keys.up) {
       launchPending = false;
       launchRev = gridRev;
       gridRev = 0;
@@ -498,15 +513,7 @@ function playerInput(dt = 1 / 120) {
   }
   if (spaceFromGrid && !keys.drift) spaceFromGrid = false;
   if (brakeFromGrid && !keys.down) brakeFromGrid = false;
-  if (gridLock) {
-    if (keys.up) {
-      if (!lockShown) {
-        lockShown = true;
-        banner("THROTTLE LOCKED", `JUMPED THE LIGHTS • RELEASE ${keyLabel("accel")} AND GO AGAIN`, "#ff4d5e", 2, 14);
-      }
-    } else gridLock = false;
-  }
-  if (keys.up && !gridLock) throttleLevel = Math.min(1, throttleLevel + (0.6 + accel * 6) * dt);
+  if (keys.up) throttleLevel = Math.min(1, throttleLevel + (0.6 + accel * 6) * dt);
   else throttleLevel = Math.max(0, throttleLevel - 9 * dt);
   const car = session?.race.player;
   const v = car ? Math.max(0, car.fwd) / CAR.top : 1;
@@ -687,7 +694,7 @@ function startRace(config) {
   brakeFromGrid = false;
   gridLock = false;
   gridWarned = false;
-  lockShown = false;
+  bogT = 0;
   prefs.track = config.track;
   if (config.mode === "gp") prefs.gpLaps = config.laps;
   if (config.mode === "duel") prefs.duelLaps = config.laps;
